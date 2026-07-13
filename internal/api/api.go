@@ -16,6 +16,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
+	"github.com/windlass-dev/windlass/internal/update"
 )
 
 type API struct {
@@ -26,6 +27,7 @@ type API struct {
 	Proxy    *proxy.Service
 	Git      *git.Service
 	Backups  *backups.Service
+	Update   *update.Service
 	Agent    agent.Agent
 	Bus      *events.Bus
 	Logger   *slog.Logger
@@ -59,6 +61,8 @@ func (a *API) Routes(r chi.Router) {
 			r.Use(auth.RequireRole("admin"))
 			r.Get("/system/backups/s3", a.handleGetS3Config)
 			r.Put("/system/backups/s3", a.handleSetS3Config)
+			r.Get("/system/update", a.handleCheckUpdate)
+			r.Post("/system/update", a.handleApplyUpdate)
 		})
 	})
 }

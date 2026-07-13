@@ -1,0 +1,22 @@
+# Run the Windlass panel itself as a container.
+#
+#   docker compose -f docker-compose.install.yaml up -d
+#
+# Notes:
+# - The Docker socket mount gives the panel full control of the host's
+#   Docker — same trust level as the binary install.
+# - Self-update is disabled in container mode; update by pulling a newer
+#   image instead.
+# - Projects live in the named volume; mount a host path instead if you
+#   want to hand-edit compose files from the host.
+services:
+  windlass:
+    image: ghcr.io/windlass-dev/windlass:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - windlass_data:/var/lib/windlass
+volumes:
+  windlass_data:
