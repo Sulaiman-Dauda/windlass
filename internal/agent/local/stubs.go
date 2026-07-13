@@ -8,22 +8,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/agent"
 )
 
-// Proxy lands in M6, Exec in M8 (see docs/plan.md). The stubs keep the
-// Agent contract complete so services can be written and unit-tested
-// against the fake in the meantime.
-
-type proxyLocal struct{ l *Local }
-
-func (p proxyLocal) Available(ctx context.Context) (agent.ProxyInfo, error) {
-	available, version := caddyPing(ctx, p.l.cfg.CaddyAdmin)
-	return agent.ProxyInfo{Available: available, Version: version}, nil
-}
-func (p proxyLocal) ApplyRoutes(ctx context.Context, routes []agent.Route) error {
-	return errNotImplemented("proxy apply")
-}
-func (p proxyLocal) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {
-	return nil, errNotImplemented("proxy current")
-}
+// Exec lands in M8 (see docs/plan.md).
 
 type execLocal struct{ l *Local }
 

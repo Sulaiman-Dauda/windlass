@@ -53,6 +53,14 @@ func (d dockerLocal) ListContainers(ctx context.Context, filter agent.ContainerF
 			ComposeService: c.Labels[labelComposeService],
 			CreatedAt:      time.Unix(c.Created, 0).UTC(),
 		}
+		if c.NetworkSettings != nil {
+			for _, nw := range c.NetworkSettings.Networks {
+				if nw.IPAddress != "" {
+					ac.IPAddress = nw.IPAddress
+					break
+				}
+			}
+		}
 		// Health and restart count need an inspect; keep the list cheap and
 		// parse health from the human status when present.
 		if i := strings.Index(c.Status, "(healthy)"); i >= 0 {

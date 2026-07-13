@@ -21,6 +21,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/events"
 	"github.com/windlass-dev/windlass/internal/jobs"
 	"github.com/windlass-dev/windlass/internal/projects"
+	"github.com/windlass-dev/windlass/internal/proxy"
 	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/store"
 	"github.com/windlass-dev/windlass/internal/store/db"
@@ -31,6 +32,7 @@ type testEnv struct {
 	handler    http.Handler
 	queries    *db.Queries
 	agent      *fake.Fake
+	api        *api.API
 	setupToken string
 }
 
@@ -95,6 +97,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Audit:    audit.New(queries, logger),
 		Projects: projectSvc,
 		Deploy:   deploySvc,
+		Proxy:    proxy.New(queries, ag, bus, logger),
 		Agent:    ag,
 		Bus:      bus,
 		Logger:   logger,
@@ -103,7 +106,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return &testEnv{handler: h, queries: queries, agent: ag, setupToken: token}
+	return &testEnv{handler: h, queries: queries, agent: ag, api: a, setupToken: token}
 }
 
 // login creates the admin (if needed) and returns a session cookie.

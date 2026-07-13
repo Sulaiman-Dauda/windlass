@@ -50,6 +50,15 @@ type DeploymentEvent struct {
 	Message      string
 }
 
+type Domain struct {
+	ID            int64
+	ProjectID     int64
+	Hostname      string
+	Service       string
+	ContainerPort int64
+	CreatedAt     string
+}
+
 type EnvVar struct {
 	ID        int64
 	ProjectID int64

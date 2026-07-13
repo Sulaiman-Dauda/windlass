@@ -13,6 +13,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
 	"github.com/windlass-dev/windlass/internal/projects"
+	"github.com/windlass-dev/windlass/internal/proxy"
 )
 
 type API struct {
@@ -20,6 +21,7 @@ type API struct {
 	Audit    *audit.Log
 	Projects *projects.Service
 	Deploy   *deploy.Service
+	Proxy    *proxy.Service
 	Agent    agent.Agent
 	Bus      *events.Bus
 	Logger   *slog.Logger
@@ -43,6 +45,7 @@ func (a *API) Routes(r chi.Router) {
 		r.Use(auth.RequireAuth)
 		r.Get("/auth/me", a.handleMe)
 		r.Get("/events", a.handleGlobalEvents)
+		r.Get("/proxy/status", a.handleProxyStatus)
 		r.Route("/projects", a.projectRoutes)
 	})
 }

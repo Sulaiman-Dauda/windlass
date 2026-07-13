@@ -144,7 +144,10 @@ type Container struct {
 	RestartCount   int       `json:"restart_count"`
 	ComposeProject string    `json:"compose_project,omitempty"`
 	ComposeService string    `json:"compose_service,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
+	// IPAddress is the container's address on its first network, reachable
+	// from the host on standard bridge networking; used for proxy upstreams.
+	IPAddress string    `json:"ip_address,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type LogOpts struct {
