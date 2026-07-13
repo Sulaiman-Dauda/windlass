@@ -1,0 +1,146 @@
+openapi: 3.1.0
+info:
+  title: Windlass API
+  description: |
+    HTTP API of the Windlass Docker Compose control plane. All endpoints are
+    versioned under /api/v1. Authentication uses an HTTP-only session cookie
+    obtained from /auth/login or /auth/setup.
+  version: 0.1.0
+servers:
+  - url: /api/v1
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: windlass_session
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+    User:
+      type: object
+      required: [id, email, role]
+      properties:
+        id: { type: integer }
+        email: { type: string, format: email }
+        role: { type: string, enum: [admin, member, viewer] }
+    AuthStatus:
+      type: object
+      required: [needs_setup, authenticated]
+      properties:
+        needs_setup: { type: boolean }
+        authenticated: { type: boolean }
+        user: { $ref: "#/components/schemas/User" }
+    Health:
+      type: object
+      required: [status, version]
+      properties:
+        status: { type: string }
+        version: { type: string }
+
+paths:
+  /system/health:
+    get:
+      summary: Liveness and version
+      operationId: getHealth
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /auth/status:
+    get:
+      summary: Bootstrap and session state
+      description: Public. Drives the frontend's setup/login/app routing.
+      operationId: getAuthStatus
+      responses:
+        "200":
+          description: Current auth state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthStatus" }
+
+  /auth/setup:
+    post:
+      summary: First-run admin creation
+      description: |
+        Claims a fresh instance using the one-time setup token printed to the
+        server log at first start. Creates the admin account and signs the
+        caller in. Fails once any user exists.
+      operationId: setupAdmin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, email, password]
+              properties:
+                token: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 10 }
+      responses:
+        "204": { description: Admin created, session cookie set }
+        "403":
+          description: Invalid token or instance already claimed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/login:
+    post:
+      summary: Sign in with email and password
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "204": { description: Session cookie set }
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /auth/logout:
+    post:
+      summary: Sign out
+      operationId: logout
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Session revoked, cookie cleared }
+
+  /auth/me:
+    get:
+      summary: Current user
+      operationId: getMe
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: The authenticated user
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }

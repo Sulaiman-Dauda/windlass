@@ -22,6 +22,16 @@ type Box struct {
 
 // Load reads the key file at path, generating it if absent.
 func Load(path string) (*Box, error) {
+	key, err := LoadKey(path)
+	if err != nil {
+		return nil, err
+	}
+	return New(key)
+}
+
+// LoadKey reads a 32-byte key file, generating it atomically (0600) if
+// absent. Used for the encryption key and the session-signing key.
+func LoadKey(path string) ([]byte, error) {
 	key, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		key = make([]byte, keySize)
@@ -42,8 +52,10 @@ func Load(path string) (*Box, error) {
 	} else if err != nil {
 		return nil, err
 	}
-
-	return New(key)
+	if len(key) != keySize {
+		return nil, fmt.Errorf("key file %s: %d bytes, want %d", path, len(key), keySize)
+	}
+	return key, nil
 }
 
 func New(key []byte) (*Box, error) {

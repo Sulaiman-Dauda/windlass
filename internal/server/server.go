@@ -13,18 +13,20 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/windlass-dev/windlass/internal/api"
+	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/config"
 	"github.com/windlass-dev/windlass/web"
 )
 
-func New(cfg config.Config, logger *slog.Logger) (http.Handler, error) {
+func New(cfg config.Config, logger *slog.Logger, a *api.API) (http.Handler, error) {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RealIP)
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
+	r.Use(auth.Middleware(a.Auth))
 
-	r.Route("/api/v1", api.Routes)
+	r.Route("/api/v1", a.Routes)
 
 	dist, err := web.Dist()
 	if err != nil {

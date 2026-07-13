@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+Makefile text eol=lf
+*.sh text eol=lf
+*.go text eol=lf

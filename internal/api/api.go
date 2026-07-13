@@ -3,9 +3,31 @@
 package api
 
 import (
+	"log/slog"
+
 	"github.com/go-chi/chi/v5"
+
+	"github.com/windlass-dev/windlass/internal/audit"
+	"github.com/windlass-dev/windlass/internal/auth"
 )
 
-func Routes(r chi.Router) {
+type API struct {
+	Auth   *auth.Service
+	Audit  *audit.Log
+	Logger *slog.Logger
+}
+
+func (a *API) Routes(r chi.Router) {
+	// Public
 	r.Get("/system/health", handleHealth)
+	r.Get("/auth/status", a.handleAuthStatus)
+	r.Post("/auth/setup", a.handleSetup)
+	r.Post("/auth/login", a.handleLogin)
+	r.Post("/auth/logout", a.handleLogout)
+
+	// Authenticated
+	r.Group(func(r chi.Router) {
+		r.Use(auth.RequireAuth)
+		r.Get("/auth/me", a.handleMe)
+	})
 }

@@ -21,6 +21,9 @@ web/dist/
 Thumbs.db
 *.swp
 
+# Build caches
+web/tsconfig.tsbuildinfo
+
 # Test artifacts
 coverage.out
 web/coverage/
