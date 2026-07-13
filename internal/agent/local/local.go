@@ -96,9 +96,3 @@ func (l *Local) Ping(ctx context.Context) (agent.NodeInfo, error) {
 	}
 	return info, nil
 }
-
-// errNotImplemented marks surfaces that land in a later milestone; callers
-// treat it as "capability absent", never as a crash.
-func errNotImplemented(what string) error {
-	return fmt.Errorf("%s: not implemented yet", what)
-}

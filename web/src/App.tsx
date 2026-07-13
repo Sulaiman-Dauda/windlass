@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import Settings from "./pages/Settings";
+import Templates from "./pages/Templates";
 
 export default function App() {
   const status = useAuthStatus();
@@ -36,7 +37,7 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="projects" element={<Projects />} />
         <Route path="projects/:name/*" element={<ProjectDetail />} />
-        <Route path="templates" element={<Placeholder title="Templates" />} />
+        <Route path="templates" element={<Templates />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Placeholder title="Not found" />} />
       </Route>

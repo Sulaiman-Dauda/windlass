@@ -18,7 +18,9 @@ import {
 import DeploymentsTab from "../components/DeploymentsTab";
 import DomainsTab from "../components/DomainsTab";
 import GitTab from "../components/GitTab";
+import LogsTab from "../components/LogsTab";
 import OverviewTab from "../components/OverviewTab";
+import TerminalTab from "../components/TerminalTab";
 
 export default function ProjectDetail() {
   const { name = "" } = useParams();
@@ -40,6 +42,8 @@ export default function ProjectDetail() {
     { to: "git", label: "Git" },
     { to: "files", label: "Files" },
     { to: "env", label: "Environment" },
+    { to: "logs", label: "Logs" },
+    { to: "terminal", label: "Terminal" },
   ];
 
   return (
@@ -85,6 +89,8 @@ export default function ProjectDetail() {
           <Route path="git" element={<GitTab project={name} />} />
           <Route path="files" element={<FilesTab name={name} />} />
           <Route path="env" element={<EnvTab name={name} />} />
+          <Route path="logs" element={<LogsTab project={name} />} />
+          <Route path="terminal" element={<TerminalTab project={name} />} />
         </Routes>
       </div>
     </div>

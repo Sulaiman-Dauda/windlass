@@ -4,17 +4,9 @@ import (
 	"context"
 	"net/http"
 	"time"
-
-	"github.com/windlass-dev/windlass/internal/agent"
 )
 
-// Exec lands in M8 (see docs/plan.md).
-
 type execLocal struct{ l *Local }
-
-func (e execLocal) Start(ctx context.Context, req agent.ExecReq) (agent.ExecSession, error) {
-	return nil, errNotImplemented("exec")
-}
 
 // caddyPing reports whether the Caddy admin API answers at base.
 func caddyPing(ctx context.Context, base string) (bool, string) {

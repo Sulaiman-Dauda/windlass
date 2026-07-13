@@ -49,7 +49,9 @@ func (a *API) Routes(r chi.Router) {
 		r.Get("/auth/me", a.handleMe)
 		r.Get("/events", a.handleGlobalEvents)
 		r.Get("/proxy/status", a.handleProxyStatus)
+		r.Get("/system/metrics", a.handleSystemMetrics)
 		r.Route("/projects", a.projectRoutes)
 		r.Route("/git", a.gitRoutes)
+		r.Route("/templates", a.templateRoutes)
 	})
 }
