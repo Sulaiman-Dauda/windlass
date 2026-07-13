@@ -17,7 +17,9 @@ import (
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/config"
+	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
+	"github.com/windlass-dev/windlass/internal/jobs"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/store"
@@ -79,11 +81,22 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("secrets.New: %v", err)
 	}
 	ag := fake.New()
+	bus := events.NewBus()
+	projectSvc := projects.New(queries, ag, box, bus, logger)
+	runner := jobs.NewRunner(queries, logger)
+	deploySvc := deploy.New(queries, ag, projectSvc, runner, bus, logger)
+
+	runnerCtx, stopRunner := context.WithCancel(context.Background())
+	t.Cleanup(stopRunner)
+	go runner.Run(runnerCtx)
 
 	a := &api.API{
 		Auth:     authSvc,
 		Audit:    audit.New(queries, logger),
-		Projects: projects.New(queries, ag, box, events.NewBus(), logger),
+		Projects: projectSvc,
+		Deploy:   deploySvc,
+		Agent:    ag,
+		Bus:      bus,
 		Logger:   logger,
 	}
 	h, err := New(config.Config{Addr: ":0", DataDir: dir}, logger, a)

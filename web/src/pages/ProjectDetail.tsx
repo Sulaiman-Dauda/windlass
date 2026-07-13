@@ -15,6 +15,8 @@ import {
   useSaveProjectEnv,
   useSaveProjectFile,
 } from "../api/projects";
+import DeploymentsTab from "../components/DeploymentsTab";
+import OverviewTab from "../components/OverviewTab";
 
 export default function ProjectDetail() {
   const { name = "" } = useParams();
@@ -31,6 +33,7 @@ export default function ProjectDetail() {
 
   const tabs = [
     { to: "", label: "Overview", end: true },
+    { to: "deployments", label: "Deployments" },
     { to: "files", label: "Files" },
     { to: "env", label: "Environment" },
   ];
@@ -72,20 +75,13 @@ export default function ProjectDetail() {
 
       <div className="mt-6">
         <Routes>
-          <Route index element={<Overview />} />
+          <Route index element={<OverviewTab project={name} />} />
+          <Route path="deployments" element={<DeploymentsTab project={name} />} />
           <Route path="files" element={<FilesTab name={name} />} />
           <Route path="env" element={<EnvTab name={name} />} />
         </Routes>
       </div>
     </div>
-  );
-}
-
-function Overview() {
-  return (
-    <p className="text-sm text-zinc-500">
-      Service status and deployments arrive with the deploy pipeline milestone.
-    </p>
   );
 }
 

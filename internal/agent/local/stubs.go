@@ -8,36 +8,9 @@ import (
 	"github.com/windlass-dev/windlass/internal/agent"
 )
 
-// Compose lands in M5, Proxy in M6, Exec in M8 (see docs/plan.md). The
-// stubs keep the Agent contract complete so services can be written and
-// unit-tested against the fake in the meantime.
-
-type composeLocal struct{ l *Local }
-
-func (c composeLocal) Up(ctx context.Context, req agent.ComposeUpReq, out agent.LogSink) error {
-	return errNotImplemented("compose up")
-}
-func (c composeLocal) Down(ctx context.Context, project string, removeVolumes bool, out agent.LogSink) error {
-	return errNotImplemented("compose down")
-}
-func (c composeLocal) Stop(ctx context.Context, project string, out agent.LogSink) error {
-	return errNotImplemented("compose stop")
-}
-func (c composeLocal) Restart(ctx context.Context, project string, out agent.LogSink) error {
-	return errNotImplemented("compose restart")
-}
-func (c composeLocal) Pull(ctx context.Context, project string, out agent.LogSink) error {
-	return errNotImplemented("compose pull")
-}
-func (c composeLocal) Build(ctx context.Context, project string, out agent.LogSink) error {
-	return errNotImplemented("compose build")
-}
-func (c composeLocal) PS(ctx context.Context, project string) ([]agent.ServiceStatus, error) {
-	return nil, errNotImplemented("compose ps")
-}
-func (c composeLocal) Config(ctx context.Context, project string) (agent.ResolvedConfig, error) {
-	return agent.ResolvedConfig{}, errNotImplemented("compose config")
-}
+// Proxy lands in M6, Exec in M8 (see docs/plan.md). The stubs keep the
+// Agent contract complete so services can be written and unit-tested
+// against the fake in the meantime.
 
 type proxyLocal struct{ l *Local }
 

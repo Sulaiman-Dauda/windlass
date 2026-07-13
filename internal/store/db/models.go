@@ -19,11 +19,55 @@ type AuditLog struct {
 	Detail       sql.NullString
 }
 
+type Deployment struct {
+	ID          int64
+	ProjectID   int64
+	Number      int64
+	Status      string
+	TriggeredBy string
+	GitCommit   sql.NullString
+	Error       sql.NullString
+	RollbackOf  sql.NullInt64
+	StartedAt   sql.NullString
+	FinishedAt  sql.NullString
+	CreatedAt   string
+}
+
+type DeploymentArtifact struct {
+	ID           int64
+	DeploymentID int64
+	Service      string
+	ImageRef     string
+	ImageDigest  string
+}
+
+type DeploymentEvent struct {
+	ID           int64
+	DeploymentID int64
+	Seq          int64
+	Ts           string
+	Type         string
+	Message      string
+}
+
 type EnvVar struct {
 	ID        int64
 	ProjectID int64
 	Key       string
 	ValueEnc  []byte
+}
+
+type Job struct {
+	ID        int64
+	Type      string
+	Payload   string
+	Status    string
+	Step      string
+	Attempts  int64
+	RunAfter  string
+	LockedAt  sql.NullString
+	CreatedAt string
+	UpdatedAt string
 }
 
 type Project struct {
