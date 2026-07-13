@@ -14,6 +14,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
 	"github.com/windlass-dev/windlass/internal/git"
+	"github.com/windlass-dev/windlass/internal/plugins"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
 	"github.com/windlass-dev/windlass/internal/update"
@@ -28,6 +29,7 @@ type API struct {
 	Git      *git.Service
 	Backups  *backups.Service
 	Update   *update.Service
+	Plugins  *plugins.Service
 	Agent    agent.Agent
 	Bus      *events.Bus
 	Logger   *slog.Logger
@@ -41,6 +43,7 @@ func agentUpReq(project string) agent.ComposeUpReq {
 func (a *API) Routes(r chi.Router) {
 	// Public
 	r.Get("/system/health", handleHealth)
+	r.Get("/openapi.yaml", handleOpenAPI)
 	r.Get("/auth/status", a.handleAuthStatus)
 	r.Post("/auth/setup", a.handleSetup)
 	r.Post("/auth/login", a.handleLogin)
@@ -57,6 +60,7 @@ func (a *API) Routes(r chi.Router) {
 		r.Route("/projects", a.projectRoutes)
 		r.Route("/git", a.gitRoutes)
 		r.Route("/templates", a.templateRoutes)
+		r.Route("/plugins", a.pluginRoutes)
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireRole("admin"))
 			r.Get("/system/backups/s3", a.handleGetS3Config)

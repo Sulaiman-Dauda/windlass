@@ -144,3 +144,369 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+
+  /webhooks/{provider}/{project}:
+    post:
+      summary: Git push webhook (public, signature-verified)
+      operationId: webhook
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, enum: [github, gitlab] } }
+        - { name: project, in: path, required: true, schema: { type: string } }
+      responses:
+        "201": { description: Deployment triggered }
+        "200": { description: Ignored (branch mismatch or auto-deploy off) }
+        "202": { description: Skipped, a deployment is already running }
+        "403": { description: Signature verification failed }
+
+  /events:
+    get:
+      summary: Global platform event stream (SSE)
+      operationId: globalEvents
+      security: [{ session: [] }]
+      parameters:
+        - { name: topics, in: query, schema: { type: string }, description: Comma-separated topic filter }
+      responses:
+        "200":
+          description: text/event-stream of platform events
+
+  /proxy/status:
+    get:
+      summary: Caddy availability
+      operationId: proxyStatus
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "{available, version}" }
+
+  /system/metrics:
+    get:
+      summary: Host, node, and container metrics
+      operationId: systemMetrics
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "{host, node, containers}" }
+
+  /system/update:
+    get:
+      summary: Check for a panel update (admin)
+      operationId: checkUpdate
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "{version, current_version, update_available}" }
+    post:
+      summary: Apply the available update (admin)
+      operationId: applyUpdate
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Update applied; panel restarts }
+        "400": { description: Self-update unsupported in this install mode }
+
+  /system/backups/s3:
+    get:
+      summary: S3 backup destination status (admin; never returns secrets)
+      operationId: getS3Config
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "{configured, endpoint, bucket}" }
+    put:
+      summary: Configure the S3 backup destination (admin)
+      operationId: setS3Config
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Saved (credentials stored encrypted) }
+
+  /projects:
+    get:
+      summary: List projects
+      operationId: listProjects
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Array of projects }
+    post:
+      summary: Create a project (member)
+      operationId: createProject
+      security: [{ session: [] }]
+      responses:
+        "201": { description: Created with a starter compose.yaml on disk }
+        "409": { description: Name already exists }
+
+  /projects/{name}:
+    get:
+      summary: Get a project
+      operationId: getProject
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Project }
+        "404": { description: Not found }
+    delete:
+      summary: Delete a project — containers stopped, directory removed (member)
+      operationId: deleteProject
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Deleted }
+
+  /projects/{name}/files:
+    get:
+      summary: List project files
+      operationId: listProjectFiles
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Array of file infos }
+
+  /projects/{name}/files/{path}:
+    get:
+      summary: Read an editable file (yaml/env/conf/json/toml/txt/md)
+      operationId: readProjectFile
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "{path, content}" }
+    put:
+      summary: Write an editable file (member; 1MiB cap)
+      operationId: writeProjectFile
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Written atomically }
+
+  /projects/{name}/env:
+    get:
+      summary: Read env vars (decrypted)
+      operationId: getProjectEnv
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "Object of KEY: value" }
+    put:
+      summary: Replace env vars (member; stored AES-256-GCM encrypted)
+      operationId: setProjectEnv
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Saved }
+
+  /projects/{name}/git:
+    put:
+      summary: Configure git source (member); returns webhook secret once
+      operationId: configureProjectGit
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "{webhook_secret, webhook_url}" }
+
+  /projects/{name}/services:
+    get:
+      summary: Live service status (compose ps)
+      operationId: projectServices
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "{services, note?}" }
+
+  /projects/{name}/logs:
+    get:
+      summary: Container log stream (SSE)
+      operationId: projectLogs
+      security: [{ session: [] }]
+      parameters:
+        - { name: service, in: query, schema: { type: string } }
+        - { name: follow, in: query, schema: { type: boolean, default: true } }
+        - { name: tail, in: query, schema: { type: integer, default: 200 } }
+      responses:
+        "200": { description: text/event-stream of log lines }
+
+  /projects/{name}/terminal:
+    get:
+      summary: Interactive terminal (WebSocket; member)
+      description: |
+        JSON text frames in ({"type":"input","data":...} / {"type":"resize",...}),
+        raw binary terminal output frames out.
+      operationId: projectTerminal
+      security: [{ session: [] }]
+      responses:
+        "101": { description: Switching protocols }
+
+  /projects/{name}/actions/{action}:
+    post:
+      summary: start | stop | restart (member)
+      operationId: projectAction
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Done }
+        "502": { description: Compose command failed }
+
+  /projects/{name}/deployments:
+    get:
+      summary: List deployments
+      operationId: listDeployments
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Array of deployments, newest first }
+    post:
+      summary: Deploy (member)
+      operationId: createDeployment
+      security: [{ session: [] }]
+      responses:
+        "201": { description: Deployment queued }
+        "409": { description: A deployment is already running }
+
+  /projects/{name}/deployments/{number}:
+    get:
+      summary: Get a deployment
+      operationId: getDeployment
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Deployment }
+
+  /projects/{name}/deployments/{number}/events:
+    get:
+      summary: Deployment event stream (SSE, replay + live, Last-Event-ID)
+      operationId: deploymentEvents
+      security: [{ session: [] }]
+      responses:
+        "200": { description: text/event-stream; closes after terminal replay }
+
+  /projects/{name}/deployments/{number}/rollback:
+    post:
+      summary: Roll back to this deployment's recorded image digests (member)
+      operationId: rollback
+      security: [{ session: [] }]
+      responses:
+        "201": { description: Rollback deployment queued }
+
+  /projects/{name}/domains:
+    get:
+      summary: List domains with routing status
+      operationId: listDomains
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Array of domains }
+    post:
+      summary: Add a domain (member) — Caddy routes + automatic HTTPS
+      operationId: createDomain
+      security: [{ session: [] }]
+      responses:
+        "201": { description: Created }
+        "409": { description: Hostname already in use }
+
+  /projects/{name}/domains/{hostname}:
+    delete:
+      summary: Remove a domain (member)
+      operationId: deleteDomain
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Removed; routes re-synced }
+
+  /projects/{name}/backups:
+    get:
+      summary: List backups
+      operationId: listBackups
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Array of backups }
+    post:
+      summary: Back up now (member) — archive + best-effort DB dump
+      operationId: createBackup
+      security: [{ session: [] }]
+      responses:
+        "201": { description: Backup record }
+
+  /projects/{name}/backups/{id}/restore:
+    post:
+      summary: Restore a backup's files over the project directory (member)
+      operationId: restoreBackup
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Restored; deploy to apply }
+
+  /projects/{name}/backups/schedule:
+    get:
+      summary: Get the backup schedule
+      operationId: getBackupSchedule
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "{interval, destination, retention_count, enabled}" }
+    put:
+      summary: Set the backup schedule (member; hourly|daily|weekly)
+      operationId: setBackupSchedule
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Saved }
+
+  /git/connections:
+    get:
+      summary: List git connections (admin)
+      operationId: listGitConnections
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Array of connections (tokens never returned) }
+    post:
+      summary: Add a git connection (admin; token stored encrypted)
+      operationId: createGitConnection
+      security: [{ session: [] }]
+      responses:
+        "201": { description: Created }
+
+  /git/connections/{id}:
+    delete:
+      summary: Delete a git connection (admin)
+      operationId: deleteGitConnection
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Deleted }
+
+  /templates:
+    get:
+      summary: List one-click database templates
+      operationId: listTemplates
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Array of templates }
+
+  /templates/{key}:
+    post:
+      summary: Create + deploy a database project from a template (member)
+      operationId: createFromTemplate
+      security: [{ session: [] }]
+      responses:
+        "201": { description: "{project, deployment}; credentials in project env" }
+
+  /plugins:
+    get:
+      summary: List discovered plugins
+      operationId: listPlugins
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Array of plugins with enabled/running state }
+
+  /plugins/{name}/enable:
+    post:
+      summary: Enable and start a plugin (admin)
+      operationId: enablePlugin
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Running }
+
+  /plugins/{name}/disable:
+    post:
+      summary: Disable and stop a plugin (admin)
+      operationId: disablePlugin
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Stopped; zero residual footprint }
+
+  /plugins/{name}/proxy:
+    get:
+      summary: Reverse proxy to the plugin process (all methods)
+      operationId: pluginProxy
+      security: [{ session: [] }]
+      responses:
+        "503": { description: Plugin not running }
+
+  /plugins/{name}/proxy/{path}:
+    get:
+      summary: Reverse proxy to the plugin process (all methods, any subpath)
+      operationId: pluginProxyPath
+      security: [{ session: [] }]
+      responses:
+        "503": { description: Plugin not running }
+
+  /openapi.yaml:
+    get:
+      summary: This document
+      operationId: openapi
+      responses:
+        "200": { description: OpenAPI 3.1 spec (YAML) }

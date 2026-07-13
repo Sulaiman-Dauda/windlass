@@ -110,6 +110,12 @@ type Job struct {
 	UpdatedAt string
 }
 
+type Plugin struct {
+	Name      string
+	Enabled   int64
+	UpdatedAt string
+}
+
 type Project struct {
 	ID               int64
 	Name             string

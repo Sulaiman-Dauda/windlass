@@ -1,0 +1,7 @@
+{
+  "name": "hello",
+  "version": "0.1.0",
+  "description": "Minimal example plugin",
+  "command": "hello",
+  "ui": true
+}
