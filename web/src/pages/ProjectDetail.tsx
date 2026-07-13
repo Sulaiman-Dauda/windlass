@@ -17,6 +17,7 @@ import {
 } from "../api/projects";
 import DeploymentsTab from "../components/DeploymentsTab";
 import DomainsTab from "../components/DomainsTab";
+import GitTab from "../components/GitTab";
 import OverviewTab from "../components/OverviewTab";
 
 export default function ProjectDetail() {
@@ -36,6 +37,7 @@ export default function ProjectDetail() {
     { to: "", label: "Overview", end: true },
     { to: "deployments", label: "Deployments" },
     { to: "domains", label: "Domains" },
+    { to: "git", label: "Git" },
     { to: "files", label: "Files" },
     { to: "env", label: "Environment" },
   ];
@@ -80,6 +82,7 @@ export default function ProjectDetail() {
           <Route index element={<OverviewTab project={name} />} />
           <Route path="deployments" element={<DeploymentsTab project={name} />} />
           <Route path="domains" element={<DomainsTab project={name} />} />
+          <Route path="git" element={<GitTab project={name} />} />
           <Route path="files" element={<FilesTab name={name} />} />
           <Route path="env" element={<EnvTab name={name} />} />
         </Routes>

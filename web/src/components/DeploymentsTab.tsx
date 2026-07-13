@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api/client";
 import {
   TERMINAL_STATUSES,
   useCreateDeployment,
@@ -30,6 +32,17 @@ export default function DeploymentsTab({ project }: { project: string }) {
   const deployments = useDeployments(project);
   const create = useCreateDeployment(project);
   const [selected, setSelected] = useState<number | null>(null);
+  const qc = useQueryClient();
+  const rollback = useMutation({
+    mutationFn: (number: number) =>
+      api<Deployment>(`/projects/${project}/deployments/${number}/rollback`, {
+        method: "POST",
+      }),
+    onSuccess: (d) => {
+      setSelected(d.number);
+      qc.invalidateQueries({ queryKey: ["projects", project, "deployments"] });
+    },
+  });
 
   // Auto-select the newest deployment (e.g. right after clicking Deploy).
   useEffect(() => {
@@ -79,9 +92,27 @@ export default function DeploymentsTab({ project }: { project: string }) {
                 <span className="text-sm">#{d.number}</span>
                 <StatusBadge status={d.status} />
               </div>
-              <div className="mt-0.5 text-xs text-zinc-600">
-                {d.triggered_by}
-                {d.git_commit ? ` · ${d.git_commit.slice(0, 7)}` : ""}
+              <div className="mt-0.5 flex items-center justify-between text-xs text-zinc-600">
+                <span>
+                  {d.triggered_by}
+                  {d.git_commit ? ` · ${d.git_commit.slice(0, 7)}` : ""}
+                </span>
+                {d.status === "succeeded" &&
+                  deployments.data &&
+                  deployments.data[0].number !== d.number && (
+                    <span
+                      role="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`Roll back to deployment #${d.number}?`)) {
+                          rollback.mutate(d.number);
+                        }
+                      }}
+                      className="text-zinc-500 hover:text-zinc-200"
+                    >
+                      roll back
+                    </span>
+                  )}
               </div>
             </button>
           ))}

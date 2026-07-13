@@ -17,6 +17,7 @@ import (
 
 	"github.com/windlass-dev/windlass/internal/agent/local"
 	"github.com/windlass-dev/windlass/internal/events"
+	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/jobs"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/secrets"
@@ -52,8 +53,9 @@ func TestRealDeployEndToEnd(t *testing.T) {
 	}
 
 	proj := projects.New(q, ag, box, bus, logger)
+	gitSvc := git.New(q, box, logger)
 	runner := jobs.NewRunner(q, logger)
-	dep := New(q, ag, proj, runner, bus, logger)
+	dep := New(q, ag, proj, gitSvc, runner, bus, logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()

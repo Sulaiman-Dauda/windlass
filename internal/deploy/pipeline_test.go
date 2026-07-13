@@ -15,6 +15,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/agent/fake"
 	"github.com/windlass-dev/windlass/internal/events"
+	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/jobs"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/secrets"
@@ -47,8 +48,9 @@ func newEnv(t *testing.T) *env {
 	ag := fake.New()
 	bus := events.NewBus()
 	proj := projects.New(q, ag, box, bus, logger)
+	gitSvc := git.New(q, box, logger)
 	runner := jobs.NewRunner(q, logger)
-	dep := New(q, ag, proj, runner, bus, logger)
+	dep := New(q, ag, proj, gitSvc, runner, bus, logger)
 
 	p, err := proj.Create(context.Background(), projects.CreateReq{Name: "app"})
 	if err != nil {

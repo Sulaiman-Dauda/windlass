@@ -12,6 +12,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
+	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
 )
@@ -22,6 +23,7 @@ type API struct {
 	Projects *projects.Service
 	Deploy   *deploy.Service
 	Proxy    *proxy.Service
+	Git      *git.Service
 	Agent    agent.Agent
 	Bus      *events.Bus
 	Logger   *slog.Logger
@@ -39,6 +41,7 @@ func (a *API) Routes(r chi.Router) {
 	r.Post("/auth/setup", a.handleSetup)
 	r.Post("/auth/login", a.handleLogin)
 	r.Post("/auth/logout", a.handleLogout)
+	r.Post("/webhooks/{provider}/{project}", a.handleWebhook)
 
 	// Authenticated
 	r.Group(func(r chi.Router) {
@@ -47,5 +50,6 @@ func (a *API) Routes(r chi.Router) {
 		r.Get("/events", a.handleGlobalEvents)
 		r.Get("/proxy/status", a.handleProxyStatus)
 		r.Route("/projects", a.projectRoutes)
+		r.Route("/git", a.gitRoutes)
 	})
 }

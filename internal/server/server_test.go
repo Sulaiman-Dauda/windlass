@@ -19,6 +19,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/config"
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
+	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/jobs"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
@@ -85,8 +86,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	ag := fake.New()
 	bus := events.NewBus()
 	projectSvc := projects.New(queries, ag, box, bus, logger)
+	gitSvc := git.New(queries, box, logger)
 	runner := jobs.NewRunner(queries, logger)
-	deploySvc := deploy.New(queries, ag, projectSvc, runner, bus, logger)
+	deploySvc := deploy.New(queries, ag, projectSvc, gitSvc, runner, bus, logger)
 
 	runnerCtx, stopRunner := context.WithCancel(context.Background())
 	t.Cleanup(stopRunner)
@@ -98,6 +100,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Projects: projectSvc,
 		Deploy:   deploySvc,
 		Proxy:    proxy.New(queries, ag, bus, logger),
+		Git:      gitSvc,
 		Agent:    ag,
 		Bus:      bus,
 		Logger:   logger,

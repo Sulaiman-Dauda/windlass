@@ -13,7 +13,7 @@ import (
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (name, source, git_repo, git_branch, auto_deploy)
 VALUES (?, ?, ?, ?, ?)
-RETURNING id, name, source, git_repo, git_branch, auto_deploy, created_at
+RETURNING id, name, source, git_repo, git_branch, auto_deploy, created_at, git_connection_id, webhook_secret_enc
 `
 
 type CreateProjectParams struct {
@@ -41,6 +41,8 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.GitBranch,
 		&i.AutoDeploy,
 		&i.CreatedAt,
+		&i.GitConnectionID,
+		&i.WebhookSecretEnc,
 	)
 	return i, err
 }
@@ -55,7 +57,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id int64) error {
 }
 
 const getProjectByName = `-- name: GetProjectByName :one
-SELECT id, name, source, git_repo, git_branch, auto_deploy, created_at FROM projects WHERE name = ?
+SELECT id, name, source, git_repo, git_branch, auto_deploy, created_at, git_connection_id, webhook_secret_enc FROM projects WHERE name = ?
 `
 
 func (q *Queries) GetProjectByName(ctx context.Context, name string) (Project, error) {
@@ -69,12 +71,14 @@ func (q *Queries) GetProjectByName(ctx context.Context, name string) (Project, e
 		&i.GitBranch,
 		&i.AutoDeploy,
 		&i.CreatedAt,
+		&i.GitConnectionID,
+		&i.WebhookSecretEnc,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, name, source, git_repo, git_branch, auto_deploy, created_at FROM projects ORDER BY name
+SELECT id, name, source, git_repo, git_branch, auto_deploy, created_at, git_connection_id, webhook_secret_enc FROM projects ORDER BY name
 `
 
 func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
@@ -94,6 +98,8 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.GitBranch,
 			&i.AutoDeploy,
 			&i.CreatedAt,
+			&i.GitConnectionID,
+			&i.WebhookSecretEnc,
 		); err != nil {
 			return nil, err
 		}

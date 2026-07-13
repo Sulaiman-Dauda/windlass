@@ -44,6 +44,7 @@ func (a *API) projectRoutes(r chi.Router) {
 		r.Delete("/{name}", a.handleDeleteProject)
 		r.Put("/{name}/files/*", a.handleWriteProjectFile)
 		r.Put("/{name}/env", a.handleSetProjectEnv)
+		r.Put("/{name}/git", a.handleConfigureProjectGit)
 	})
 	r.Get("/{name}", a.handleGetProject)
 	r.Get("/{name}/files", a.handleListProjectFiles)

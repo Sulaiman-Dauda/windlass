@@ -66,6 +66,14 @@ type EnvVar struct {
 	ValueEnc  []byte
 }
 
+type GitConnection struct {
+	ID        int64
+	Provider  string
+	Name      string
+	TokenEnc  []byte
+	CreatedAt string
+}
+
 type Job struct {
 	ID        int64
 	Type      string
@@ -80,13 +88,15 @@ type Job struct {
 }
 
 type Project struct {
-	ID         int64
-	Name       string
-	Source     string
-	GitRepo    sql.NullString
-	GitBranch  sql.NullString
-	AutoDeploy int64
-	CreatedAt  string
+	ID               int64
+	Name             string
+	Source           string
+	GitRepo          sql.NullString
+	GitBranch        sql.NullString
+	AutoDeploy       int64
+	CreatedAt        string
+	GitConnectionID  sql.NullInt64
+	WebhookSecretEnc []byte
 }
 
 type Session struct {

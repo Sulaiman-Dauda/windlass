@@ -48,6 +48,7 @@ func (a *API) deploymentRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("member"))
 		r.Post("/", a.handleCreateDeployment)
+		r.Post("/{number}/rollback", a.handleRollback)
 	})
 }
 
