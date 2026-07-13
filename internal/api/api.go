@@ -9,12 +9,14 @@ import (
 
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
+	"github.com/windlass-dev/windlass/internal/projects"
 )
 
 type API struct {
-	Auth   *auth.Service
-	Audit  *audit.Log
-	Logger *slog.Logger
+	Auth     *auth.Service
+	Audit    *audit.Log
+	Projects *projects.Service
+	Logger   *slog.Logger
 }
 
 func (a *API) Routes(r chi.Router) {
@@ -29,5 +31,6 @@ func (a *API) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireAuth)
 		r.Get("/auth/me", a.handleMe)
+		r.Route("/projects", a.projectRoutes)
 	})
 }

@@ -12,10 +12,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/windlass-dev/windlass/internal/agent/fake"
 	"github.com/windlass-dev/windlass/internal/api"
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/config"
+	"github.com/windlass-dev/windlass/internal/events"
+	"github.com/windlass-dev/windlass/internal/projects"
+	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/store"
 	"github.com/windlass-dev/windlass/internal/store/db"
 	"github.com/windlass-dev/windlass/migrations"
@@ -24,6 +28,7 @@ import (
 type testEnv struct {
 	handler    http.Handler
 	queries    *db.Queries
+	agent      *fake.Fake
 	setupToken string
 }
 
@@ -69,12 +74,44 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatalf("auth.NewService: %v", err)
 	}
 
-	a := &api.API{Auth: authSvc, Audit: audit.New(queries, logger), Logger: logger}
+	box, err := secrets.New(bytes.Repeat([]byte{9}, 32))
+	if err != nil {
+		t.Fatalf("secrets.New: %v", err)
+	}
+	ag := fake.New()
+
+	a := &api.API{
+		Auth:     authSvc,
+		Audit:    audit.New(queries, logger),
+		Projects: projects.New(queries, ag, box, events.NewBus(), logger),
+		Logger:   logger,
+	}
 	h, err := New(config.Config{Addr: ":0", DataDir: dir}, logger, a)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return &testEnv{handler: h, queries: queries, setupToken: token}
+	return &testEnv{handler: h, queries: queries, agent: ag, setupToken: token}
+}
+
+// login creates the admin (if needed) and returns a session cookie.
+func (e *testEnv) login(t *testing.T) *http.Cookie {
+	t.Helper()
+	if e.setupToken != "" {
+		rec := e.do(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
+			"token": e.setupToken, "email": "admin@example.com", "password": "supersecret123",
+		})
+		if rec.Code == http.StatusNoContent {
+			e.setupToken = ""
+			return sessionCookie(t, rec)
+		}
+	}
+	rec := e.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
+		"email": "admin@example.com", "password": "supersecret123",
+	})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("login failed: %d", rec.Code)
+	}
+	return sessionCookie(t, rec)
 }
 
 func (e *testEnv) do(t *testing.T, method, path string, body any, cookies ...*http.Cookie) *httptest.ResponseRecorder {

@@ -13,8 +13,19 @@ package agent
 import (
 	"context"
 	"io/fs"
+	"regexp"
 	"time"
 )
+
+// projectNameRe constrains names to what is safe as a directory name AND a
+// compose project name.
+var projectNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
+
+// ValidProjectName reports whether name is acceptable for a project. Every
+// Agent implementation enforces this; services validate it up front too.
+func ValidProjectName(name string) bool {
+	return projectNameRe.MatchString(name)
+}
 
 type Agent interface {
 	Compose() ComposeAgent

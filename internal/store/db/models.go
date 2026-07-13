@@ -19,6 +19,23 @@ type AuditLog struct {
 	Detail       sql.NullString
 }
 
+type EnvVar struct {
+	ID        int64
+	ProjectID int64
+	Key       string
+	ValueEnc  []byte
+}
+
+type Project struct {
+	ID         int64
+	Name       string
+	Source     string
+	GitRepo    sql.NullString
+	GitBranch  sql.NullString
+	AutoDeploy int64
+	CreatedAt  string
+}
+
 type Session struct {
 	ID        string
 	UserID    int64

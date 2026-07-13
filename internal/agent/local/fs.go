@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 
@@ -15,12 +14,8 @@ import (
 
 type fsLocal struct{ l *Local }
 
-// projectNameRe constrains names to what is safe as a directory name AND a
-// compose project name.
-var projectNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
-
 func (f fsLocal) projectDir(project string) (string, error) {
-	if !projectNameRe.MatchString(project) {
+	if !agent.ValidProjectName(project) {
 		return "", fmt.Errorf("invalid project name %q", project)
 	}
 	return filepath.Join(f.l.cfg.ProjectsDir, project), nil

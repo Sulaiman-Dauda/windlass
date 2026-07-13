@@ -297,7 +297,11 @@ func (s fsFake) List(ctx context.Context, project, rel string) ([]agent.FileInfo
 }
 
 func (s fsFake) EnsureProject(ctx context.Context, project string) (string, error) {
-	if err := s.f.record(fmt.Sprintf("fs.ensure(%s)", project), nil); err != nil {
+	var invalid error
+	if !agent.ValidProjectName(project) {
+		invalid = fmt.Errorf("invalid project name %q", project)
+	}
+	if err := s.f.record(fmt.Sprintf("fs.ensure(%s)", project), invalid); err != nil {
 		return "", err
 	}
 	s.f.mu.Lock()
