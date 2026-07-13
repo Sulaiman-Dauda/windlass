@@ -25,11 +25,20 @@ var (
 	ErrSetupComplete      = errors.New("instance already set up")
 	ErrSetupToken         = errors.New("invalid setup token")
 	ErrNotAuthenticated   = errors.New("not authenticated")
+	ErrTOTPRequired       = errors.New("totp code required")
+	ErrTOTPInvalid        = errors.New("invalid totp code")
 )
+
+// SecretBox decrypts/encrypts stored secrets (TOTP seeds).
+type SecretBox interface {
+	Encrypt(plaintext []byte) ([]byte, error)
+	Decrypt(ciphertext []byte) ([]byte, error)
+}
 
 type Service struct {
 	q      *db.Queries
 	key    []byte // session-signing key
+	box    SecretBox
 	logger *slog.Logger
 	now    func() time.Time
 
@@ -38,8 +47,8 @@ type Service struct {
 	setupToken string
 }
 
-func NewService(ctx context.Context, q *db.Queries, key []byte, logger *slog.Logger) (*Service, error) {
-	s := &Service{q: q, key: key, logger: logger, now: time.Now}
+func NewService(ctx context.Context, q *db.Queries, key []byte, box SecretBox, logger *slog.Logger) (*Service, error) {
+	s := &Service{q: q, key: key, box: box, logger: logger, now: time.Now}
 
 	n, err := q.CountUsers(ctx)
 	if err != nil {
@@ -99,7 +108,7 @@ func (s *Service) Setup(ctx context.Context, token, email, password, ip, userAge
 	return cookie, user, err
 }
 
-func (s *Service) Login(ctx context.Context, email, password, ip, userAgent string) (string, db.User, error) {
+func (s *Service) Login(ctx context.Context, email, password, totpCode, ip, userAgent string) (string, db.User, error) {
 	user, err := s.q.GetUserByEmail(ctx, email)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Burn comparable time so absent accounts are indistinguishable.
@@ -116,8 +125,72 @@ func (s *Service) Login(ctx context.Context, email, password, ip, userAgent stri
 		return "", db.User{}, ErrInvalidCredentials
 	}
 
+	// Second factor, when enrolled. The password was already verified, so
+	// asking for the code leaks nothing an attacker doesn't have.
+	if user.TotpEnabled != 0 {
+		if totpCode == "" {
+			return "", db.User{}, ErrTOTPRequired
+		}
+		secret, err := s.box.Decrypt(user.TotpSecretEnc)
+		if err != nil {
+			return "", db.User{}, err
+		}
+		if !VerifyTOTP(string(secret), totpCode, s.now()) {
+			return "", db.User{}, ErrTOTPInvalid
+		}
+	}
+
 	cookie, err := s.startSession(ctx, user, ip, userAgent)
 	return cookie, user, err
+}
+
+// BeginTOTPEnrollment stores a new (disabled) secret and returns it with the
+// otpauth URL. VerifyTOTPEnrollment activates it.
+func (s *Service) BeginTOTPEnrollment(ctx context.Context, user db.User) (secret, otpauthURL string, err error) {
+	secret, err = GenerateTOTPSecret()
+	if err != nil {
+		return "", "", err
+	}
+	enc, err := s.box.Encrypt([]byte(secret))
+	if err != nil {
+		return "", "", err
+	}
+	if err := s.q.SetUserTOTP(ctx, db.SetUserTOTPParams{
+		TotpSecretEnc: enc, TotpEnabled: 0, ID: user.ID,
+	}); err != nil {
+		return "", "", err
+	}
+	return secret, TOTPAuthURL(secret, user.Email), nil
+}
+
+func (s *Service) VerifyTOTPEnrollment(ctx context.Context, user db.User, code string) error {
+	fresh, err := s.q.GetUserByID(ctx, user.ID)
+	if err != nil {
+		return err
+	}
+	if len(fresh.TotpSecretEnc) == 0 {
+		return errors.New("no enrollment in progress")
+	}
+	secret, err := s.box.Decrypt(fresh.TotpSecretEnc)
+	if err != nil {
+		return err
+	}
+	if !VerifyTOTP(string(secret), code, s.now()) {
+		return ErrTOTPInvalid
+	}
+	return s.q.SetUserTOTP(ctx, db.SetUserTOTPParams{
+		TotpSecretEnc: fresh.TotpSecretEnc, TotpEnabled: 1, ID: user.ID,
+	})
+}
+
+func (s *Service) DisableTOTP(ctx context.Context, user db.User) error {
+	return s.q.SetUserTOTP(ctx, db.SetUserTOTPParams{TotpSecretEnc: nil, TotpEnabled: 0, ID: user.ID})
+}
+
+// StartSessionFor creates a session directly (OAuth logins, where identity
+// was proven by the provider).
+func (s *Service) StartSessionFor(ctx context.Context, user db.User, ip, userAgent string) (string, error) {
+	return s.startSession(ctx, user, ip, userAgent)
 }
 
 func (s *Service) startSession(ctx context.Context, user db.User, ip, userAgent string) (string, error) {

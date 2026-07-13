@@ -23,3 +23,9 @@ UPDATE users SET password_hash = ? WHERE id = ?;
 
 -- name: DisableUser :exec
 UPDATE users SET disabled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?;
+
+-- name: DeleteUser :exec
+DELETE FROM users WHERE id = ?;
+
+-- name: SetUserTOTP :exec
+UPDATE users SET totp_secret_enc = ?, totp_enabled = ? WHERE id = ?;

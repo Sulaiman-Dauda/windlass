@@ -75,15 +75,14 @@ func newTestEnv(t *testing.T) *testEnv {
 		token:   &token,
 	})
 
-	key := bytes.Repeat([]byte{7}, 32)
-	authSvc, err := auth.NewService(context.Background(), queries, key, logger)
-	if err != nil {
-		t.Fatalf("auth.NewService: %v", err)
-	}
-
 	box, err := secrets.New(bytes.Repeat([]byte{9}, 32))
 	if err != nil {
 		t.Fatalf("secrets.New: %v", err)
+	}
+	key := bytes.Repeat([]byte{7}, 32)
+	authSvc, err := auth.NewService(context.Background(), queries, key, box, logger)
+	if err != nil {
+		t.Fatalf("auth.NewService: %v", err)
 	}
 	ag := fake.New()
 	bus := events.NewBus()
@@ -107,6 +106,8 @@ func newTestEnv(t *testing.T) *testEnv {
 		Plugins:  plugins.New(queries, dir, logger),
 		Agent:    ag,
 		Bus:      bus,
+		Queries:  queries,
+		Box:      box,
 		Logger:   logger,
 	}
 	h, err := New(config.Config{Addr: ":0", DataDir: dir}, logger, a)

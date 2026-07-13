@@ -82,6 +82,7 @@ func (a *API) handleSetup(w http.ResponseWriter, r *http.Request) {
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	TOTPCode string `json:"totp_code,omitempty"`
 }
 
 func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -91,13 +92,20 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cookie, user, err := a.Auth.Login(r.Context(), strings.TrimSpace(req.Email), req.Password, remoteIP(r), r.UserAgent())
-	if errors.Is(err, auth.ErrInvalidCredentials) {
+	cookie, user, err := a.Auth.Login(r.Context(), strings.TrimSpace(req.Email), req.Password, strings.TrimSpace(req.TOTPCode), remoteIP(r), r.UserAgent())
+	switch {
+	case errors.Is(err, auth.ErrTOTPRequired):
+		writeError(w, http.StatusUnauthorized, "totp_required", "enter your authenticator code")
+		return
+	case errors.Is(err, auth.ErrTOTPInvalid):
+		a.Audit.Write(r.Context(), 0, "auth.totp_failed", "user", req.Email, remoteIP(r), nil)
+		writeError(w, http.StatusUnauthorized, "totp_invalid", "invalid authenticator code")
+		return
+	case errors.Is(err, auth.ErrInvalidCredentials):
 		a.Audit.Write(r.Context(), 0, "auth.login_failed", "user", req.Email, remoteIP(r), nil)
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
 		return
-	}
-	if err != nil {
+	case err != nil:
 		a.Logger.Error("login", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal", "login failed")
 		return
@@ -123,7 +131,51 @@ func (a *API) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleMe(w http.ResponseWriter, r *http.Request) {
 	user, _ := auth.UserFrom(r.Context())
-	writeJSON(w, http.StatusOK, toUserDTO(user))
+	dto := toUserDTO(user)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": dto.ID, "email": dto.Email, "role": dto.Role,
+		"totp_enabled": user.TotpEnabled != 0,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// TOTP enrollment (self-service)
+
+func (a *API) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.UserFrom(r.Context())
+	secret, url, err := a.Auth.BeginTOTPEnrollment(r.Context(), user)
+	if err != nil {
+		a.internalError(w, "totp setup", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"secret": secret, "otpauth_url": url})
+}
+
+func (a *API) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	user, _ := auth.UserFrom(r.Context())
+	if err := a.Auth.VerifyTOTPEnrollment(r.Context(), user, strings.TrimSpace(req.Code)); err != nil {
+		writeError(w, http.StatusBadRequest, "totp_invalid", err.Error())
+		return
+	}
+	a.Audit.Write(r.Context(), user.ID, "auth.totp_enabled", "user", user.Email, remoteIP(r), nil)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.UserFrom(r.Context())
+	if err := a.Auth.DisableTOTP(r.Context(), user); err != nil {
+		a.internalError(w, "totp disable", err)
+		return
+	}
+	a.Audit.Write(r.Context(), user.ID, "auth.totp_disabled", "user", user.Email, remoteIP(r), nil)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---------------------------------------------------------------------------

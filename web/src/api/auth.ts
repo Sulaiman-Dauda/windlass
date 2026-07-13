@@ -24,7 +24,7 @@ export function useAuthStatus() {
 export function useLogin() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { email: string; password: string }) =>
+    mutationFn: (body: { email: string; password: string; totp_code?: string }) =>
       api("/auth/login", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["auth"] }),
   });

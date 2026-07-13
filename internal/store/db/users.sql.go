@@ -51,6 +51,15 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const deleteUser = `-- name: DeleteUser :exec
+DELETE FROM users WHERE id = ?
+`
+
+func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteUser, id)
+	return err
+}
+
 const disableUser = `-- name: DisableUser :exec
 UPDATE users SET disabled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?
 `
@@ -140,6 +149,21 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setUserTOTP = `-- name: SetUserTOTP :exec
+UPDATE users SET totp_secret_enc = ?, totp_enabled = ? WHERE id = ?
+`
+
+type SetUserTOTPParams struct {
+	TotpSecretEnc []byte
+	TotpEnabled   int64
+	ID            int64
+}
+
+func (q *Queries) SetUserTOTP(ctx context.Context, arg SetUserTOTPParams) error {
+	_, err := q.db.ExecContext(ctx, setUserTOTP, arg.TotpSecretEnc, arg.TotpEnabled, arg.ID)
+	return err
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :exec

@@ -1,10 +1,22 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api, ApiError } from "../api/client";
 import { useLogin } from "../api/auth";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [totp, setTotp] = useState("");
   const login = useLogin();
+
+  const providers = useQuery<Record<string, boolean>>({
+    queryKey: ["auth", "oauth-providers"],
+    queryFn: () => api("/auth/oauth/providers"),
+  });
+
+  const needsTotp =
+    login.error instanceof ApiError &&
+    (login.error.code === "totp_required" || login.error.code === "totp_invalid");
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 px-4">
@@ -12,7 +24,7 @@ export default function Login() {
         className="w-full max-w-sm space-y-5"
         onSubmit={(e) => {
           e.preventDefault();
-          login.mutate({ email, password });
+          login.mutate({ email, password, totp_code: totp || undefined });
         }}
       >
         <div className="text-center">
@@ -46,10 +58,26 @@ export default function Login() {
           />
         </label>
 
-        {login.isError && (
-          <p className="text-sm text-red-400">
-            {login.error instanceof Error ? login.error.message : "Login failed"}
-          </p>
+        {needsTotp && (
+          <label className="block">
+            <span className="mb-1 block text-sm text-zinc-400">
+              Authenticator code
+            </span>
+            <input
+              autoFocus
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              required
+              value={totp}
+              onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
+              className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-center font-mono text-lg tracking-widest text-zinc-100 outline-none focus:border-zinc-600"
+            />
+          </label>
+        )}
+
+        {login.isError && login.error instanceof ApiError && login.error.code !== "totp_required" && (
+          <p className="text-sm text-red-400">{login.error.message}</p>
         )}
 
         <button
@@ -59,6 +87,27 @@ export default function Login() {
         >
           {login.isPending ? "Signing in…" : "Sign in"}
         </button>
+
+        {(providers.data?.github || providers.data?.google) && (
+          <div className="space-y-2 border-t border-zinc-900 pt-4">
+            {providers.data?.github && (
+              <a
+                href="/api/v1/auth/oauth/github/start"
+                className="block w-full rounded-md border border-zinc-700 py-2 text-center text-sm text-zinc-200 hover:bg-zinc-900"
+              >
+                Continue with GitHub
+              </a>
+            )}
+            {providers.data?.google && (
+              <a
+                href="/api/v1/auth/oauth/google/start"
+                className="block w-full rounded-md border border-zinc-700 py-2 text-center text-sm text-zinc-200 hover:bg-zinc-900"
+              >
+                Continue with Google
+              </a>
+            )}
+          </div>
+        )}
       </form>
     </div>
   );

@@ -145,6 +145,89 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /auth/totp/setup:
+    post:
+      summary: Begin TOTP enrollment; returns secret + otpauth URL
+      operationId: totpSetup
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "{secret, otpauth_url}" }
+
+  /auth/totp/verify:
+    post:
+      summary: Confirm enrollment with a code; activates TOTP
+      operationId: totpVerify
+      security: [{ session: [] }]
+      responses:
+        "204": { description: TOTP enabled }
+
+  /auth/totp/disable:
+    post:
+      summary: Disable TOTP for the current user
+      operationId: totpDisable
+      security: [{ session: [] }]
+      responses:
+        "204": { description: TOTP disabled }
+
+  /auth/oauth/providers:
+    get:
+      summary: Which OAuth providers are configured (public)
+      operationId: oauthProviders
+      responses:
+        "200": { description: "{github: bool, google: bool}" }
+
+  /auth/oauth/{provider}/start:
+    get:
+      summary: Begin OAuth sign-in (redirects to the provider)
+      operationId: oauthStart
+      responses:
+        "302": { description: Redirect to provider }
+
+  /auth/oauth/{provider}/callback:
+    get:
+      summary: OAuth callback — signs in EXISTING users by verified email
+      operationId: oauthCallback
+      responses:
+        "302": { description: Redirect to the app (or /?oauth_error=...) }
+
+  /users:
+    get:
+      summary: List users (admin)
+      operationId: listUsers
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Array of users }
+    post:
+      summary: Create a user (admin); omit password for OAuth-only accounts
+      operationId: createUser
+      security: [{ session: [] }]
+      responses:
+        "201": { description: Created }
+
+  /users/{id}/role:
+    put:
+      summary: Change a user's role (admin; self-demotion refused)
+      operationId: setUserRole
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Updated }
+
+  /users/{id}:
+    delete:
+      summary: Delete a user (admin; self-deletion refused)
+      operationId: deleteUser
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Deleted }
+
+  /system/oauth/{provider}:
+    put:
+      summary: Configure an OAuth provider's client credentials (admin)
+      operationId: setOAuthConfig
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Saved encrypted }
+
   /webhooks/{provider}/{project}:
     post:
       summary: Git push webhook (public, signature-verified)

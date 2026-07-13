@@ -15,13 +15,16 @@ import {
   useSaveProjectEnv,
   useSaveProjectFile,
 } from "../api/projects";
+import { lazy, Suspense } from "react";
 import BackupsTab from "../components/BackupsTab";
 import DeploymentsTab from "../components/DeploymentsTab";
 import DomainsTab from "../components/DomainsTab";
 import GitTab from "../components/GitTab";
 import LogsTab from "../components/LogsTab";
 import OverviewTab from "../components/OverviewTab";
-import TerminalTab from "../components/TerminalTab";
+
+// xterm is heavy; load it only when the Terminal tab opens.
+const TerminalTab = lazy(() => import("../components/TerminalTab"));
 
 export default function ProjectDetail() {
   const { name = "" } = useParams();
@@ -92,7 +95,14 @@ export default function ProjectDetail() {
           <Route path="files" element={<FilesTab name={name} />} />
           <Route path="env" element={<EnvTab name={name} />} />
           <Route path="logs" element={<LogsTab project={name} />} />
-          <Route path="terminal" element={<TerminalTab project={name} />} />
+          <Route
+            path="terminal"
+            element={
+              <Suspense fallback={<p className="text-sm text-zinc-600">Loading terminal…</p>}>
+                <TerminalTab project={name} />
+              </Suspense>
+            }
+          />
           <Route path="backups" element={<BackupsTab project={name} />} />
         </Routes>
       </div>
