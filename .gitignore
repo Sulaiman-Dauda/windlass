@@ -1,0 +1,28 @@
+# Binaries
+/bin/
+/dist/
+windlass
+windlass.exe
+*.exe
+
+# Frontend
+web/node_modules/
+web/dist/
+!web/dist-placeholder/
+
+# Data
+/data/
+*.db
+*.db-wal
+*.db-shm
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# Test artifacts
+coverage.out
+web/coverage/
+playwright-report/
+test-results/

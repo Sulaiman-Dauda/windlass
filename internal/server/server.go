@@ -1,0 +1,76 @@
+// Package server wires the chi router: API routes, middleware, and the
+// embedded single-page frontend.
+package server
+
+import (
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/windlass-dev/windlass/internal/api"
+	"github.com/windlass-dev/windlass/internal/config"
+	"github.com/windlass-dev/windlass/web"
+)
+
+func New(cfg config.Config, logger *slog.Logger) (http.Handler, error) {
+	r := chi.NewRouter()
+
+	r.Use(middleware.RealIP)
+	r.Use(requestLogger(logger))
+	r.Use(middleware.Recoverer)
+
+	r.Route("/api/v1", api.Routes)
+
+	dist, err := web.Dist()
+	if err != nil {
+		return nil, err
+	}
+	r.NotFound(spaHandler(dist))
+
+	return r, nil
+}
+
+// spaHandler serves static assets from the embedded frontend build and falls
+// back to index.html for client-side routes.
+func spaHandler(dist fs.FS) http.HandlerFunc {
+	fileServer := http.FileServerFS(dist)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if path != "" {
+			if _, err := fs.Stat(dist, path); err == nil {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		// Client-side route: serve the SPA entrypoint.
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	}
+}
+
+func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			next.ServeHTTP(ww, r)
+			logger.Debug("http",
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", ww.Status(),
+				"bytes", ww.BytesWritten(),
+				"duration", time.Since(start),
+				"remote", r.RemoteAddr,
+			)
+		})
+	}
+}
