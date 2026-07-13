@@ -15,6 +15,7 @@ import {
   useSaveProjectEnv,
   useSaveProjectFile,
 } from "../api/projects";
+import BackupsTab from "../components/BackupsTab";
 import DeploymentsTab from "../components/DeploymentsTab";
 import DomainsTab from "../components/DomainsTab";
 import GitTab from "../components/GitTab";
@@ -44,6 +45,7 @@ export default function ProjectDetail() {
     { to: "env", label: "Environment" },
     { to: "logs", label: "Logs" },
     { to: "terminal", label: "Terminal" },
+    { to: "backups", label: "Backups" },
   ];
 
   return (
@@ -91,6 +93,7 @@ export default function ProjectDetail() {
           <Route path="env" element={<EnvTab name={name} />} />
           <Route path="logs" element={<LogsTab project={name} />} />
           <Route path="terminal" element={<TerminalTab project={name} />} />
+          <Route path="backups" element={<BackupsTab project={name} />} />
         </Routes>
       </div>
     </div>

@@ -49,6 +49,9 @@ type Fake struct {
 	// GitCommit is returned by Host().GitSync.
 	GitCommit string
 
+	// Archives maps archive paths to project-file snapshots.
+	Archives map[string]map[string][]byte
+
 	Metrics agent.HostMetrics
 }
 
@@ -66,6 +69,7 @@ func New() *Fake {
 		Resolved:       map[string]agent.ResolvedConfig{},
 		ProxyAvailable: true,
 		GitCommit:      "0000000000000000000000000000000000000000",
+		Archives:       map[string]map[string][]byte{},
 	}
 }
 
@@ -310,6 +314,59 @@ func (s fsFake) EnsureProject(ctx context.Context, project string) (string, erro
 		s.f.Files[project] = map[string][]byte{}
 	}
 	return "/fake/projects/" + project, nil
+}
+
+func (s fsFake) ArchiveProject(ctx context.Context, project string) (agent.ArchiveInfo, error) {
+	if err := s.f.record(fmt.Sprintf("fs.archive(%s)", project), nil); err != nil {
+		return agent.ArchiveInfo{}, err
+	}
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	files, ok := s.f.Files[project]
+	if !ok {
+		return agent.ArchiveInfo{}, fs.ErrNotExist
+	}
+	snapshot := map[string][]byte{}
+	var size int64
+	for name, data := range files {
+		snapshot[name] = append([]byte(nil), data...)
+		size += int64(len(data))
+	}
+	path := fmt.Sprintf("/fake/backups/%s-%d.tar.gz", project, len(s.f.Archives))
+	s.f.Archives[path] = snapshot
+	return agent.ArchiveInfo{Path: path, Size: size}, nil
+}
+
+func (s fsFake) BackupsDir(ctx context.Context) (string, error) {
+	return "/fake/backups", s.f.record("fs.backupsdir", nil)
+}
+
+func (s fsFake) RemoveArchive(ctx context.Context, archivePath string) error {
+	if err := s.f.record(fmt.Sprintf("fs.rmarchive(%s)", archivePath), nil); err != nil {
+		return err
+	}
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	delete(s.f.Archives, archivePath)
+	return nil
+}
+
+func (s fsFake) RestoreProject(ctx context.Context, project, archivePath string) error {
+	if err := s.f.record(fmt.Sprintf("fs.restore(%s)", project), nil); err != nil {
+		return err
+	}
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	snapshot, ok := s.f.Archives[archivePath]
+	if !ok {
+		return fs.ErrNotExist
+	}
+	restored := map[string][]byte{}
+	for name, data := range snapshot {
+		restored[name] = append([]byte(nil), data...)
+	}
+	s.f.Files[project] = restored
+	return nil
 }
 
 func (s fsFake) RemoveProject(ctx context.Context, project string) error {

@@ -55,6 +55,7 @@ func (a *API) projectRoutes(r chi.Router) {
 	r.With(auth.RequireRole("member")).Get("/{name}/terminal", a.handleTerminal)
 	r.Route("/{name}/deployments", a.deploymentRoutes)
 	r.Route("/{name}/domains", a.domainRoutes)
+	r.Route("/{name}/backups", a.backupRoutes)
 	r.With(auth.RequireRole("member")).Post("/{name}/actions/{action}", a.handleProjectAction)
 }
 

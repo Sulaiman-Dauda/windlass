@@ -16,6 +16,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/api"
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
+	"github.com/windlass-dev/windlass/internal/backups"
 	"github.com/windlass-dev/windlass/internal/config"
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
@@ -101,6 +102,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Deploy:   deploySvc,
 		Proxy:    proxy.New(queries, ag, bus, logger),
 		Git:      gitSvc,
+		Backups:  backups.New(queries, ag, projectSvc, box, bus, logger),
 		Agent:    ag,
 		Bus:      bus,
 		Logger:   logger,

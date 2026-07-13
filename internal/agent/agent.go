@@ -214,6 +214,22 @@ type FSAgent interface {
 	// absolute path on the node.
 	EnsureProject(ctx context.Context, project string) (string, error)
 	RemoveProject(ctx context.Context, project string) error
+	// ArchiveProject writes a tar.gz of the project directory into the
+	// node's backups dir and returns its absolute path and size.
+	ArchiveProject(ctx context.Context, project string) (ArchiveInfo, error)
+	// RestoreProject replaces the project directory contents with the
+	// archive's (which must have been produced by ArchiveProject).
+	RestoreProject(ctx context.Context, project, archivePath string) error
+	// BackupsDir returns the node's backups directory, creating it if
+	// needed. Remote-destination restores download into it.
+	BackupsDir(ctx context.Context) (string, error)
+	// RemoveArchive deletes an archive file inside the backups dir.
+	RemoveArchive(ctx context.Context, archivePath string) error
+}
+
+type ArchiveInfo struct {
+	Path string `json:"path"`
+	Size int64  `json:"size"`
 }
 
 type FileInfo struct {

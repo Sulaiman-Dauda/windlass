@@ -10,6 +10,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
+	"github.com/windlass-dev/windlass/internal/backups"
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
 	"github.com/windlass-dev/windlass/internal/git"
@@ -24,6 +25,7 @@ type API struct {
 	Deploy   *deploy.Service
 	Proxy    *proxy.Service
 	Git      *git.Service
+	Backups  *backups.Service
 	Agent    agent.Agent
 	Bus      *events.Bus
 	Logger   *slog.Logger
@@ -53,5 +55,10 @@ func (a *API) Routes(r chi.Router) {
 		r.Route("/projects", a.projectRoutes)
 		r.Route("/git", a.gitRoutes)
 		r.Route("/templates", a.templateRoutes)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireRole("admin"))
+			r.Get("/system/backups/s3", a.handleGetS3Config)
+			r.Put("/system/backups/s3", a.handleSetS3Config)
+		})
 	})
 }

@@ -19,6 +19,29 @@ type AuditLog struct {
 	Detail       sql.NullString
 }
 
+type Backup struct {
+	ID          int64
+	ProjectID   int64
+	Kind        string
+	Destination string
+	Path        string
+	Size        int64
+	Status      string
+	Error       sql.NullString
+	CreatedAt   string
+	FinishedAt  sql.NullString
+}
+
+type BackupSchedule struct {
+	ID             int64
+	ProjectID      int64
+	Interval       string
+	Destination    string
+	RetentionCount int64
+	Enabled        int64
+	LastRunAt      sql.NullString
+}
+
 type Deployment struct {
 	ID          int64
 	ProjectID   int64
