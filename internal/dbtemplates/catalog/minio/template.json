@@ -1,0 +1,11 @@
+{
+  "key": "minio",
+  "name": "MinIO",
+  "description": "S3-compatible object storage; web console served over HTTPS on your domain, S3 API on 127.0.0.1:9000",
+  "default_port": 0,
+  "route": { "service": "minio", "container_port": 9001 },
+  "env": [
+    { "name": "MINIO_ROOT_USER", "value": "windlass" },
+    { "name": "MINIO_ROOT_PASSWORD", "secret": "main" }
+  ]
+}

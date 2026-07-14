@@ -1,0 +1,21 @@
+# Pinned to a release that still ships the embedded web console; later MinIO
+# community images removed it. The S3 API is published on loopback so other
+# projects can reach it; the console is routed to your domain over HTTPS.
+services:
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:9000:9000"
+    expose:
+      - "9001"
+    volumes:
+      - minio_data:/data
+    # The minio image (UBI-micro) has no shell or curl/wget, so a CMD-SHELL
+    # healthcheck can't run; readiness is covered by restart-on-failure.
+volumes:
+  minio_data:

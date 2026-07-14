@@ -131,10 +131,14 @@ func TestTier1TemplatesLoad(t *testing.T) {
 	for _, tmpl := range List() {
 		keys[tmpl.Key] = true
 	}
-	for _, want := range []string{"pocketbase", "n8n", "meilisearch", "gitea"} {
+	for _, want := range []string{"pocketbase", "n8n", "meilisearch", "gitea", "minio"} {
 		if !keys[want] {
 			t.Errorf("List() missing %q", want)
 		}
+	}
+	// MinIO routes its console; the S3 API is published on loopback in compose.
+	if mo, _ := Get("minio"); mo.Route == nil || mo.Route.ContainerPort != 9001 {
+		t.Errorf("minio route wrong: %+v", mo.Route)
 	}
 	// Meilisearch is a loopback backing service (no route); n8n is an app.
 	if m, _ := Get("meilisearch"); m.Route != nil {
