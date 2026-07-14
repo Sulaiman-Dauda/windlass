@@ -1,0 +1,10 @@
+{
+  "key": "mongodb",
+  "name": "MongoDB 8",
+  "description": "Document database, published on 127.0.0.1:27017",
+  "default_port": 27017,
+  "env": [
+    { "name": "MONGO_USER", "value": "windlass" },
+    { "name": "MONGO_PASSWORD", "secret": "main" }
+  ]
+}

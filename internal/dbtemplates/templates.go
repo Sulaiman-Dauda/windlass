@@ -1,157 +1,198 @@
 // Package dbtemplates provides one-click database projects. A template is
 // nothing proprietary: it generates an ordinary compose project plus
 // encrypted env vars — exactly what a user would write by hand (principle 4).
+//
+// The catalog lives in embedded data files under catalog/<key>/ rather than in
+// Go code, so adding a template is dropping in a folder — no code change, and
+// no growth in the compiled hot path. Only the small per-template metadata is
+// parsed (once, lazily); each compose body is read from the embedded FS on
+// demand at render time and released, so the idle memory profile stays flat
+// regardless of how large the catalog grows.
 package dbtemplates
 
 import (
+	"bytes"
 	"crypto/rand"
+	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io/fs"
+	"path"
+	"sort"
+	"sync"
+	"text/template"
 )
 
+//go:embed all:catalog
+var catalogFS embed.FS
+
+// Template is the public, listable metadata for a one-click project.
 type Template struct {
 	Key         string `json:"key"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	// DefaultPort is the host port the database publishes on 127.0.0.1.
+	// DefaultPort is the host port a database publishes on 127.0.0.1. Zero for
+	// app templates, which are reached through a routed domain instead.
 	DefaultPort int `json:"default_port"`
+	// Route, when set, marks this as an app template: the named service serves
+	// HTTP on ContainerPort and must be attached to a domain at create time.
+	Route *RouteSpec `json:"route,omitempty"`
 }
 
-var All = []Template{
-	{Key: "postgres", Name: "PostgreSQL 17", Description: "Relational database, published on 127.0.0.1:5432", DefaultPort: 5432},
-	{Key: "redis", Name: "Redis 7", Description: "In-memory data store, published on 127.0.0.1:6379", DefaultPort: 6379},
-	{Key: "mysql", Name: "MySQL 8.4", Description: "Relational database, published on 127.0.0.1:3306", DefaultPort: 3306},
-	{Key: "mongodb", Name: "MongoDB 8", Description: "Document database, published on 127.0.0.1:27017", DefaultPort: 27017},
+// RouteSpec names the service and container port an app template exposes so the
+// caller can attach a Caddy-fronted domain to it.
+type RouteSpec struct {
+	Service       string `json:"service"`
+	ContainerPort int64  `json:"container_port"`
+}
+
+// envVar declares how one environment value is produced when a template is
+// instantiated. Exactly one of value/secret/from is meaningful per entry.
+type envVar struct {
+	Name   string `json:"name"`
+	Value  string `json:"value,omitempty"`  // static literal
+	Secret string `json:"secret,omitempty"` // named slot; entries sharing a name share one generated secret
+	From   string `json:"from,omitempty"`   // dynamic source: "project", "domain", or "url"
+}
+
+// manifest is the on-disk template.json: public metadata plus the env recipe.
+type manifest struct {
+	Template
+	Env []envVar `json:"env"`
+}
+
+var (
+	loadOnce  sync.Once
+	loaded    map[string]manifest // key -> metadata + env recipe (no compose body held)
+	loadOrder []string            // stable display order
+	loadErr   error
+)
+
+func load() (map[string]manifest, []string, error) {
+	loadOnce.Do(func() {
+		entries, err := fs.ReadDir(catalogFS, "catalog")
+		if err != nil {
+			loadErr = err
+			return
+		}
+		loaded = make(map[string]manifest, len(entries))
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			key := e.Name()
+			data, err := catalogFS.ReadFile(path.Join("catalog", key, "template.json"))
+			if err != nil {
+				loadErr = fmt.Errorf("template %q: %w", key, err)
+				return
+			}
+			var m manifest
+			if err := json.Unmarshal(data, &m); err != nil {
+				loadErr = fmt.Errorf("template %q: %w", key, err)
+				return
+			}
+			if m.Key != key {
+				loadErr = fmt.Errorf("template %q: key mismatch (manifest says %q)", key, m.Key)
+				return
+			}
+			loaded[key] = m
+			loadOrder = append(loadOrder, key)
+		}
+		sort.Strings(loadOrder)
+	})
+	return loaded, loadOrder, loadErr
+}
+
+// List returns the catalog metadata in stable order. Compose bodies are not
+// read here — only the small per-template metadata.
+func List() []Template {
+	m, order, err := load()
+	if err != nil {
+		return nil
+	}
+	out := make([]Template, 0, len(order))
+	for _, key := range order {
+		out = append(out, m[key].Template)
+	}
+	return out
 }
 
 func Get(key string) (Template, bool) {
-	for _, t := range All {
-		if t.Key == key {
-			return t, true
-		}
+	m, _, err := load()
+	if err != nil {
+		return Template{}, false
 	}
-	return Template{}, false
+	t, ok := m[key]
+	return t.Template, ok
 }
 
 // Render returns the compose file and env vars for a template instance.
-// Credentials are generated fresh per instance and stored encrypted.
-func Render(key, project string, hostPort int) (compose string, env map[string]string, err error) {
-	t, ok := Get(key)
+// Credentials are generated fresh per instance and stored encrypted. domain is
+// the hostname the instance will be served on; it may be empty for database
+// templates but is required by any template whose env references it.
+func Render(key, project, domain string, hostPort int) (compose string, env map[string]string, err error) {
+	all, _, err := load()
+	if err != nil {
+		return "", nil, err
+	}
+	m, ok := all[key]
 	if !ok {
 		return "", nil, fmt.Errorf("unknown template %q", key)
 	}
 	if hostPort <= 0 {
-		hostPort = t.DefaultPort
+		hostPort = m.DefaultPort
 	}
-	password, err := randomSecret()
+
+	// Read the compose body on demand; it is not cached between renders.
+	raw, err := catalogFS.ReadFile(path.Join("catalog", key, "compose.yaml"))
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("template %q: %w", key, err)
+	}
+	tmpl, err := template.New(key).Option("missingkey=error").Parse(string(raw))
+	if err != nil {
+		return "", nil, fmt.Errorf("template %q: %w", key, err)
+	}
+	var buf bytes.Buffer
+	buf.WriteString("# Generated by Windlass from the " + m.Name + " template.\n")
+	buf.WriteString("# This is a plain compose project — edit it like any other.\n")
+	if err := tmpl.Execute(&buf, map[string]any{"HostPort": hostPort}); err != nil {
+		return "", nil, fmt.Errorf("template %q: %w", key, err)
 	}
 
-	header := "# Generated by Windlass from the " + t.Name + " template.\n" +
-		"# This is a plain compose project — edit it like any other.\n"
-
-	switch key {
-	case "postgres":
-		return header + fmt.Sprintf(`services:
-  postgres:
-    image: postgres:17-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "127.0.0.1:%d:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-volumes:
-  postgres_data:
-`, hostPort), map[string]string{
-				"POSTGRES_USER":     "windlass",
-				"POSTGRES_PASSWORD": password,
-				"POSTGRES_DB":       project,
-			}, nil
-
-	case "redis":
-		return header + fmt.Sprintf(`services:
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
-    ports:
-      - "127.0.0.1:%d:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-volumes:
-  redis_data:
-`, hostPort), map[string]string{
-				"REDIS_PASSWORD": password,
-			}, nil
-
-	case "mysql":
-		return header + fmt.Sprintf(`services:
-  mysql:
-    image: mysql:8.4
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-    ports:
-      - "127.0.0.1:%d:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-volumes:
-  mysql_data:
-`, hostPort), map[string]string{
-				"MYSQL_ROOT_PASSWORD": password,
-				"MYSQL_USER":          "windlass",
-				"MYSQL_PASSWORD":      password,
-				"MYSQL_DATABASE":      project,
-			}, nil
-
-	case "mongodb":
-		return header + fmt.Sprintf(`services:
-  mongodb:
-    image: mongo:8
-    restart: unless-stopped
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
-    ports:
-      - "127.0.0.1:%d:27017"
-    volumes:
-      - mongo_data:/data/db
-    healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand({ping:1}).ok' | grep 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-volumes:
-  mongo_data:
-`, hostPort), map[string]string{
-				"MONGO_USER":     "windlass",
-				"MONGO_PASSWORD": password,
-			}, nil
+	// Build env: static values, shared named secrets, and dynamic sources.
+	secrets := map[string]string{}
+	env = make(map[string]string, len(m.Env))
+	for _, e := range m.Env {
+		switch {
+		case e.Secret != "":
+			s, ok := secrets[e.Secret]
+			if !ok {
+				if s, err = randomSecret(); err != nil {
+					return "", nil, err
+				}
+				secrets[e.Secret] = s
+			}
+			env[e.Name] = s
+		case e.From == "project":
+			env[e.Name] = project
+		case e.From == "domain":
+			if domain == "" {
+				return "", nil, fmt.Errorf("template %q: env %q needs a domain", key, e.Name)
+			}
+			env[e.Name] = domain
+		case e.From == "url":
+			if domain == "" {
+				return "", nil, fmt.Errorf("template %q: env %q needs a domain", key, e.Name)
+			}
+			env[e.Name] = "https://" + domain
+		case e.From != "":
+			return "", nil, fmt.Errorf("template %q: unknown env source %q", key, e.From)
+		default:
+			env[e.Name] = e.Value
+		}
 	}
-	return "", nil, fmt.Errorf("unknown template %q", key)
+	return buf.String(), env, nil
 }
 
 func randomSecret() (string, error) {

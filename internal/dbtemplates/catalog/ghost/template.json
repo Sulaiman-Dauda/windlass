@@ -1,0 +1,12 @@
+{
+  "key": "ghost",
+  "name": "Ghost",
+  "description": "Publishing platform / blog with a MySQL backend, served over HTTPS on your domain",
+  "default_port": 0,
+  "route": { "service": "ghost", "container_port": 2368 },
+  "env": [
+    { "name": "GHOST_URL", "from": "url" },
+    { "name": "DB_ROOT_PASSWORD", "secret": "dbroot" },
+    { "name": "DB_PASSWORD", "secret": "dbuser" }
+  ]
+}

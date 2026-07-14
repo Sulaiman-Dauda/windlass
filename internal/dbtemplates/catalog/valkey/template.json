@@ -1,0 +1,9 @@
+{
+  "key": "valkey",
+  "name": "Valkey 8",
+  "description": "Redis-compatible in-memory store, published on 127.0.0.1:6380",
+  "default_port": 6380,
+  "env": [
+    { "name": "VALKEY_PASSWORD", "secret": "main" }
+  ]
+}

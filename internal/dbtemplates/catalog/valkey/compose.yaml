@@ -1,0 +1,16 @@
+services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--requirepass", "${VALKEY_PASSWORD}"]
+    ports:
+      - "127.0.0.1:{{.HostPort}}:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a ${VALKEY_PASSWORD} ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+volumes:
+  valkey_data:

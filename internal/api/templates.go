@@ -11,6 +11,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/dbtemplates"
 	"github.com/windlass-dev/windlass/internal/projects"
+	"github.com/windlass-dev/windlass/internal/proxy"
 )
 
 func (a *API) templateRoutes(r chi.Router) {
@@ -19,16 +20,18 @@ func (a *API) templateRoutes(r chi.Router) {
 }
 
 func (a *API) handleListTemplates(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, dbtemplates.All)
+	writeJSON(w, http.StatusOK, dbtemplates.List())
 }
 
 type createTemplateRequest struct {
 	Name     string `json:"name"`
 	HostPort int    `json:"host_port,omitempty"`
+	Domain   string `json:"domain,omitempty"`
 }
 
 // handleCreateFromTemplate renders the template into a normal project with
-// generated credentials and immediately deploys it.
+// generated credentials and immediately deploys it. App templates (those with a
+// route) are also attached to the requested domain so they come up on HTTPS.
 func (a *API) handleCreateFromTemplate(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 
@@ -41,8 +44,19 @@ func (a *API) handleCreateFromTemplate(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" {
 		req.Name = key
 	}
+	req.Domain = strings.ToLower(strings.TrimSpace(req.Domain))
 
-	compose, env, err := dbtemplates.Render(key, req.Name, req.HostPort)
+	tmpl, ok := dbtemplates.Get(key)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_request", "unknown template")
+		return
+	}
+	if tmpl.Route != nil && req.Domain == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "this template requires a domain")
+		return
+	}
+
+	compose, env, err := dbtemplates.Render(key, req.Name, req.Domain, req.HostPort)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -62,6 +76,20 @@ func (a *API) handleCreateFromTemplate(w http.ResponseWriter, r *http.Request) {
 	if err := a.Projects.SetEnv(r.Context(), p.Name, env); err != nil {
 		a.internalError(w, "template env", err)
 		return
+	}
+
+	// App templates get their domain attached before deploy; the deployment's
+	// completion event then drives the Caddy sync that brings the route live.
+	if tmpl.Route != nil {
+		_, err := a.Proxy.Add(r.Context(), p.ID, req.Domain, tmpl.Route.Service, tmpl.Route.ContainerPort)
+		if errors.Is(err, proxy.ErrConflict) {
+			writeError(w, http.StatusConflict, "conflict", "that domain is already in use")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
 	}
 
 	d, err := a.Deploy.Deploy(r.Context(), p.Name, "manual")

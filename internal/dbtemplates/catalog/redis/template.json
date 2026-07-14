@@ -1,0 +1,9 @@
+{
+  "key": "redis",
+  "name": "Redis 7",
+  "description": "In-memory data store, published on 127.0.0.1:6379",
+  "default_port": 6379,
+  "env": [
+    { "name": "REDIS_PASSWORD", "secret": "main" }
+  ]
+}

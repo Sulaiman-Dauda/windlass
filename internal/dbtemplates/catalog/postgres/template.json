@@ -1,0 +1,11 @@
+{
+  "key": "postgres",
+  "name": "PostgreSQL 17",
+  "description": "Relational database, published on 127.0.0.1:5432",
+  "default_port": 5432,
+  "env": [
+    { "name": "POSTGRES_USER", "value": "windlass" },
+    { "name": "POSTGRES_PASSWORD", "secret": "main" },
+    { "name": "POSTGRES_DB", "from": "project" }
+  ]
+}

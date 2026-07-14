@@ -58,6 +58,38 @@ func TestTemplateCreatesAndDeploys(t *testing.T) {
 	}
 }
 
+func TestAppTemplateAttachesDomainAndDeploys(t *testing.T) {
+	e := newTestEnv(t)
+	cookie := e.login(t)
+
+	// The deploy verify step and the domain's port check both read this.
+	e.agent.Statuses["status"] = []agent.ServiceStatus{{Service: "uptime-kuma", State: "running", Health: "healthy"}}
+	e.agent.Resolved["status"] = agent.ResolvedConfig{Services: map[string]agent.ResolvedService{
+		"uptime-kuma": {Image: "louislam/uptime-kuma:1", ContainerPorts: []int{3001}},
+	}}
+
+	// An app template without a domain is rejected.
+	rec := e.do(t, http.MethodPost, "/api/v1/templates/uptime-kuma",
+		map[string]any{"name": "status"}, cookie)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing domain = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+
+	// With a domain it creates, attaches the route, and deploys.
+	rec = e.do(t, http.MethodPost, "/api/v1/templates/uptime-kuma",
+		map[string]any{"name": "status", "domain": "status.example.com"}, cookie)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create app template = %d: %s", rec.Code, rec.Body.String())
+	}
+	waitForStatus(t, e, cookie, "status", "1", "succeeded")
+
+	// The domain is now attached to the project.
+	rec = e.do(t, http.MethodGet, "/api/v1/projects/status/domains", nil, cookie)
+	if !strings.Contains(rec.Body.String(), "status.example.com") {
+		t.Errorf("domain not attached: %s", rec.Body.String())
+	}
+}
+
 func TestContainerLogsSSE(t *testing.T) {
 	e := newTestEnv(t)
 	cookie := e.login(t)

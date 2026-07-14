@@ -1,0 +1,18 @@
+services:
+  mongodb:
+    image: mongo:8
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    ports:
+      - "127.0.0.1:{{.HostPort}}:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand({ping:1}).ok' | grep 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+volumes:
+  mongo_data:

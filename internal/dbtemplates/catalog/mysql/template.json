@@ -1,0 +1,12 @@
+{
+  "key": "mysql",
+  "name": "MySQL 8.4",
+  "description": "Relational database, published on 127.0.0.1:3306",
+  "default_port": 3306,
+  "env": [
+    { "name": "MYSQL_ROOT_PASSWORD", "secret": "main" },
+    { "name": "MYSQL_USER", "value": "windlass" },
+    { "name": "MYSQL_PASSWORD", "secret": "main" },
+    { "name": "MYSQL_DATABASE", "from": "project" }
+  ]
+}

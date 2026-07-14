@@ -1,0 +1,44 @@
+services:
+  ghost:
+    image: ghost:5-alpine
+    restart: unless-stopped
+    depends_on:
+      ghost-db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      url: ${GHOST_URL}
+      database__client: mysql
+      database__connection__host: ghost-db
+      database__connection__user: ghost
+      database__connection__password: ${DB_PASSWORD}
+      database__connection__database: ghost
+    expose:
+      - "2368"
+    volumes:
+      - ghost_content:/var/lib/ghost/content
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "node -e \"require('http').get('http://127.0.0.1:2368',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))\""
+      interval: 10s
+      timeout: 5s
+      retries: 18
+  ghost-db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_USER: ghost
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ghost
+    volumes:
+      - ghost_db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${DB_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  ghost_content:
+  ghost_db:
