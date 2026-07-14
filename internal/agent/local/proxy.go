@@ -18,8 +18,9 @@ import (
 // It is addressed only via targeted /id/ operations — never POST /load —
 // so hand-written Caddy configuration is never touched (plan risk #2).
 const (
-	routesID     = "windlass_routes"
-	panelRouteID = "windlass_panel_route"
+	routesID        = "windlass_routes"
+	panelRouteID    = "windlass_panel_route"
+	httpsRedirectID = "windlass_https_redirect"
 )
 
 type proxyLocal struct{ l *Local }
@@ -42,13 +43,16 @@ type caddyRoute struct {
 }
 
 type caddyMatch struct {
-	Host []string `json:"host,omitempty"`
+	Host     []string `json:"host,omitempty"`
+	Protocol string   `json:"protocol,omitempty"`
 }
 
 type caddyHandle struct {
-	Handler   string          `json:"handler"`
-	Routes    []caddyRoute    `json:"routes,omitempty"`    // subroute
-	Upstreams []caddyUpstream `json:"upstreams,omitempty"` // reverse_proxy
+	Handler    string              `json:"handler"`
+	Routes     []caddyRoute        `json:"routes,omitempty"`      // subroute
+	Upstreams  []caddyUpstream     `json:"upstreams,omitempty"`   // reverse_proxy
+	StatusCode int                 `json:"status_code,omitempty"` // static_response
+	Headers    map[string][]string `json:"headers,omitempty"`     // static_response
 }
 
 type caddyUpstream struct {
@@ -58,7 +62,38 @@ type caddyUpstream struct {
 // buildRoutesObject renders the full Windlass-owned route subtree. Pure so
 // it can be golden-tested without Caddy.
 func buildRoutesObject(routes []agent.Route) caddyRoute {
-	inner := make([]caddyRoute, 0, len(routes))
+	inner := make([]caddyRoute, 0, len(routes)+1)
+
+	// Redirect plaintext HTTP to HTTPS for the TLS-enabled Windlass domains,
+	// ahead of the reverse-proxy routes. It sits inside the subroute (not as a
+	// sibling of windlass_routes) so ordering is deterministic on both the
+	// create and graft-onto-existing-server paths, and is scoped by host so a
+	// shared server (e.g. an administrator Caddyfile) keeps serving its own
+	// HTTP sites. ACME is not special-cased: issuance/renewal uses TLS-ALPN-01
+	// on :443, and any HTTP-01 fallback is answered by Caddy's own challenge
+	// handler, which it orders ahead of application routes.
+	var httpsHosts []string
+	for _, r := range routes {
+		if r.TLS && r.Hostname != "" {
+			httpsHosts = append(httpsHosts, r.Hostname)
+		}
+	}
+	if len(httpsHosts) > 0 {
+		inner = append(inner, caddyRoute{
+			ID: httpsRedirectID,
+			Match: []caddyMatch{{
+				Protocol: "http",
+				Host:     httpsHosts,
+			}},
+			Handle: []caddyHandle{{
+				Handler:    "static_response",
+				StatusCode: 308,
+				Headers:    map[string][]string{"Location": {"https://{http.request.host}{http.request.uri}"}},
+			}},
+			Terminal: true,
+		})
+	}
+
 	for _, r := range routes {
 		inner = append(inner, caddyRoute{
 			ID:    r.ID,
@@ -301,9 +336,11 @@ func (p proxyLocal) install(ctx context.Context, obj caddyRoute) error {
 		// host matchers live inside the windlass_routes subroute, which Caddy's
 		// automatic-HTTPS host discovery does not traverse, so Caddy never
 		// attaches a TLS connection policy on its own. Without an explicit empty
-		// policy (match any SNI, serve the managed cert obtained via ensureTLS)
-		// the :443 listener stays plaintext and application HTTPS fails even
-		// though the certificate was issued.
+		// policy (match any SNI, serve the managed cert added by ensureTLS) the
+		// :443 listener stays plaintext and application HTTPS fails even though
+		// the certificate was issued. The HTTP->HTTPS redirect lives inside the
+		// windlass_routes subroute (buildRoutesObject) so it applies on both
+		// this create path and the graft-onto-existing-server path.
 		server := map[string]any{
 			"listen":                  []string{":80", ":443"},
 			"routes":                  []caddyRoute{obj},

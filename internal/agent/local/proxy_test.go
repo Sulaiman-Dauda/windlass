@@ -71,6 +71,30 @@ func TestBuildRoutesObjectGolden(t *testing.T) {
       "handler": "subroute",
       "routes": [
         {
+          "@id": "windlass_https_redirect",
+          "match": [
+            {
+              "host": [
+                "crm.example.com",
+                "api.example.com"
+              ],
+              "protocol": "http"
+            }
+          ],
+          "handle": [
+            {
+              "handler": "static_response",
+              "status_code": 308,
+              "headers": {
+                "Location": [
+                  "https://{http.request.host}{http.request.uri}"
+                ]
+              }
+            }
+          ],
+          "terminal": true
+        },
+        {
           "@id": "windlass_route_crm.example.com",
           "match": [
             {
@@ -173,6 +197,46 @@ func TestInstallCreatesServerWithTLSPolicy(t *testing.T) {
 	}
 	if !has443 {
 		t.Fatalf("created server must listen on :443, got %v", listen)
+	}
+}
+
+// The subroute must begin with an HTTP->HTTPS redirect, scoped to the TLS
+// hostnames and excluding ACME HTTP-01 challenges, ahead of the proxy routes.
+func TestBuildRoutesObjectRedirectsHTTP(t *testing.T) {
+	obj := buildRoutesObject([]agent.Route{
+		{ID: "windlass_route_app.example.com", Hostname: "app.example.com", Upstream: "10.0.0.2:3001", TLS: true},
+	})
+	inner := obj.Handle[0].Routes
+	if len(inner) != 2 {
+		t.Fatalf("subroute should hold redirect + 1 proxy route, got %d", len(inner))
+	}
+	red := inner[0]
+	if red.ID != httpsRedirectID {
+		t.Fatalf("first subroute child must be the redirect, got %q", red.ID)
+	}
+	if red.Match[0].Protocol != "http" {
+		t.Fatalf("redirect must match protocol http, got %q", red.Match[0].Protocol)
+	}
+	if len(red.Match[0].Host) != 1 || red.Match[0].Host[0] != "app.example.com" {
+		t.Fatalf("redirect must be scoped to the TLS host, got %v", red.Match[0].Host)
+	}
+	if red.Handle[0].Handler != "static_response" || red.Handle[0].StatusCode != 308 {
+		t.Fatalf("redirect must be static_response/308, got %s/%d", red.Handle[0].Handler, red.Handle[0].StatusCode)
+	}
+	if inner[1].ID != "windlass_route_app.example.com" {
+		t.Fatalf("proxy route must follow the redirect, got %q", inner[1].ID)
+	}
+}
+
+// A non-TLS route (or none) must not synthesise a redirect.
+func TestBuildRoutesObjectNoRedirectWithoutTLS(t *testing.T) {
+	obj := buildRoutesObject([]agent.Route{
+		{ID: "windlass_route_plain.example.com", Hostname: "plain.example.com", Upstream: "10.0.0.2:80", TLS: false},
+	})
+	for _, r := range obj.Handle[0].Routes {
+		if r.ID == httpsRedirectID {
+			t.Fatal("no redirect should be created for non-TLS routes")
+		}
 	}
 }
 
