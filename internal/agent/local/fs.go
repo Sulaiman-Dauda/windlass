@@ -38,6 +38,15 @@ func (f fsLocal) DiscoverProjects(ctx context.Context) ([]string, error) {
 	return projects, nil
 }
 
+// hasDriveLetter reports whether p begins with a Windows drive letter such as
+// "C:". filepath.VolumeName and filepath.IsAbs only detect these on Windows,
+// so on other hosts a value like `C:\config` cleans to `C:/config` and would
+// otherwise be joined into the project directory instead of rejected.
+func hasDriveLetter(p string) bool {
+	return len(p) >= 2 && p[1] == ':' &&
+		((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z'))
+}
+
 func (f fsLocal) projectDir(project string) (string, error) {
 	if !agent.ValidProjectName(project) {
 		return "", fmt.Errorf("invalid project name %q", project)
@@ -54,7 +63,10 @@ func (f fsLocal) resolve(project, rel string) (string, error) {
 	}
 	clean := filepath.Clean(filepath.FromSlash(strings.ReplaceAll(rel, "\\", "/")))
 	// Reject absolute paths, Windows rooted/drive paths, and any traversal.
-	if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" ||
+	// filepath.IsAbs/VolumeName do not recognise a Windows drive letter on
+	// non-Windows hosts, so `C:\...` would otherwise be treated as a relative
+	// path; hasDriveLetter catches it explicitly.
+	if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || hasDriveLetter(clean) ||
 		strings.HasPrefix(clean, string(filepath.Separator)) ||
 		clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid path %q", rel)
