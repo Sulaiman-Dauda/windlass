@@ -42,7 +42,8 @@ type Fake struct {
 	ComposeLog []string
 
 	// Routes last applied via Proxy().ApplyRoutes.
-	Routes []agent.Route
+	Routes      []agent.Route
+	PanelDomain string
 	// ProxyAvailable controls Proxy().Available.
 	ProxyAvailable bool
 
@@ -52,7 +53,10 @@ type Fake struct {
 	// Archives maps archive paths to project-file snapshots.
 	Archives map[string]map[string][]byte
 
-	Metrics agent.HostMetrics
+	Metrics       agent.HostMetrics
+	HTTPResponses map[string]agent.HTTPCheckResult
+	ImageUsage    agent.ImageDiskUsage
+	PruneResult   agent.ImagePruneResult
 }
 
 var _ agent.Agent = (*Fake)(nil)
@@ -70,6 +74,7 @@ func New() *Fake {
 		ProxyAvailable: true,
 		GitCommit:      "0000000000000000000000000000000000000000",
 		Archives:       map[string]map[string][]byte{},
+		HTTPResponses:  map[string]agent.HTTPCheckResult{},
 	}
 }
 
@@ -207,6 +212,14 @@ func (d dockerFake) ImageDigest(ctx context.Context, ref string) (string, error)
 	return "sha256:" + strings.Repeat("0", 64), nil
 }
 
+func (d dockerFake) ImageDiskUsage(ctx context.Context) (agent.ImageDiskUsage, error) {
+	return d.f.ImageUsage, d.f.record("docker.diskusage", nil)
+}
+
+func (d dockerFake) PruneImages(ctx context.Context, req agent.ImagePruneReq) (agent.ImagePruneResult, error) {
+	return d.f.PruneResult, d.f.record("docker.prune", nil)
+}
+
 func (d dockerFake) Events(ctx context.Context, out func(agent.DockerEvent)) error {
 	if err := d.f.record("docker.events", nil); err != nil {
 		return err
@@ -247,9 +260,41 @@ func (p proxyFake) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {
 	return append([]agent.Route(nil), p.f.Routes...), nil
 }
 
+func (p proxyFake) ApplyPanelDomain(ctx context.Context, hostname string) error {
+	if err := p.f.record("proxy.panel("+hostname+")", nil); err != nil {
+		return err
+	}
+	p.f.mu.Lock()
+	defer p.f.mu.Unlock()
+	p.f.PanelDomain = hostname
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 
 type fsFake struct{ f *Fake }
+
+func (s fsFake) DiscoverProjects(ctx context.Context) ([]string, error) {
+	if err := s.f.record("fs.discover", nil); err != nil {
+		return nil, err
+	}
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	var out []string
+	for name, files := range s.f.Files {
+		if !agent.ValidProjectName(name) {
+			continue
+		}
+		if _, ok := files["compose.yaml"]; !ok {
+			if _, ok = files["compose.yml"]; !ok {
+				continue
+			}
+		}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out, nil
+}
 
 // validRel rejects absolute and traversal paths, mirroring agent/local.
 func validRel(rel string) error {
@@ -435,6 +480,17 @@ func (h hostFake) Metrics(ctx context.Context) (agent.HostMetrics, error) {
 		return agent.HostMetrics{}, err
 	}
 	return h.f.Metrics, nil
+}
+
+func (h hostFake) HTTPCheck(ctx context.Context, req agent.HTTPCheckReq) (agent.HTTPCheckResult, error) {
+	if err := h.f.record("host.httpcheck("+req.URL+")", nil); err != nil {
+		return agent.HTTPCheckResult{}, err
+	}
+	response, ok := h.f.HTTPResponses[req.URL]
+	if !ok {
+		return agent.HTTPCheckResult{StatusCode: 200}, nil
+	}
+	return response, nil
 }
 
 func (h hostFake) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.LogSink) (agent.GitSyncResult, error) {

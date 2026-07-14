@@ -8,20 +8,23 @@ import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import Settings from "./pages/Settings";
 import Templates from "./pages/Templates";
+import RouteErrorBoundary from "./components/RouteErrorBoundary";
+import { Page } from "./ui/Page";
+import { Spinner } from "./ui/Spinner";
 
 export default function App() {
   const status = useAuthStatus();
 
   if (status.isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-sm text-zinc-600">
-        Loading…
+      <div className="flex min-h-screen items-center justify-center gap-3 bg-canvas text-sm text-fg3">
+        <Spinner /> Loading…
       </div>
     );
   }
   if (status.isError) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-sm text-red-400">
+      <div className="flex min-h-screen items-center justify-center bg-canvas text-sm text-err">
         Server unreachable
       </div>
     );
@@ -36,7 +39,14 @@ export default function App() {
       <Route element={<Layout user={auth.user} />}>
         <Route index element={<Dashboard />} />
         <Route path="projects" element={<Projects />} />
-        <Route path="projects/:name/*" element={<ProjectDetail />} />
+        <Route
+          path="projects/:name/*"
+          element={
+            <RouteErrorBoundary>
+              <ProjectDetail />
+            </RouteErrorBoundary>
+          }
+        />
         <Route path="templates" element={<Templates />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Placeholder title="Not found" />} />
@@ -47,9 +57,8 @@ export default function App() {
 
 function Placeholder({ title }: { title: string }) {
   return (
-    <div>
-      <h1 className="text-xl font-semibold">{title}</h1>
-      <p className="mt-2 text-sm text-zinc-500">Coming in a later milestone.</p>
-    </div>
+    <Page title={title}>
+      <p className="text-sm text-fg2">Coming in a later milestone.</p>
+    </Page>
   );
 }

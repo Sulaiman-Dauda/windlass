@@ -156,3 +156,50 @@ func TestSystemMetrics(t *testing.T) {
 		}
 	}
 }
+
+func TestDockerImageLifecycle(t *testing.T) {
+	e := newTestEnv(t)
+	cookie := e.login(t)
+	e.agent.ImageUsage = agent.ImageDiskUsage{TotalCount: 12, ActiveCount: 3,
+		TotalBytes: 2 << 30, ReclaimableBytes: 1 << 30}
+	e.agent.PruneResult = agent.ImagePruneResult{Deleted: 4, ReclaimedBytes: 512 << 20}
+
+	rec := e.do(t, http.MethodGet, "/api/v1/system/docker/images", nil, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"reclaimable_bytes":1073741824`) {
+		t.Fatalf("image usage = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = e.do(t, http.MethodPost, "/api/v1/system/docker/images/prune", map[string]int{
+		"retention_days": 7, "keep_deployments": 5,
+	}, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"deleted":4`) {
+		t.Fatalf("image prune = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPanelDomainSettings(t *testing.T) {
+	e := newTestEnv(t)
+	cookie := e.login(t)
+	rec := e.do(t, http.MethodGet, "/api/v1/system/panel-domain", nil, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"configured":false`) {
+		t.Fatalf("initial panel domain = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = e.do(t, http.MethodPut, "/api/v1/system/panel-domain", map[string]string{
+		"hostname": "not a hostname",
+	}, cookie)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid hostname = %d", rec.Code)
+	}
+	rec = e.do(t, http.MethodPut, "/api/v1/system/panel-domain", map[string]string{
+		"hostname": "Windlass.Example.COM",
+	}, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"url":"https://windlass.example.com"`) {
+		t.Fatalf("set panel domain = %d: %s", rec.Code, rec.Body.String())
+	}
+	if e.agent.PanelDomain != "windlass.example.com" {
+		t.Fatalf("agent panel domain = %q", e.agent.PanelDomain)
+	}
+	rec = e.do(t, http.MethodPut, "/api/v1/system/panel-domain", map[string]string{"hostname": ""}, cookie)
+	if rec.Code != http.StatusOK || e.agent.PanelDomain != "" {
+		t.Fatalf("remove panel domain = %d, agent=%q", rec.Code, e.agent.PanelDomain)
+	}
+}

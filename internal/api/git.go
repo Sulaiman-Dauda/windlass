@@ -1,10 +1,13 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +22,88 @@ func (a *API) gitRoutes(r chi.Router) {
 	r.Get("/connections", a.handleListGitConnections)
 	r.Post("/connections", a.handleCreateGitConnection)
 	r.Delete("/connections/{id}", a.handleDeleteGitConnection)
+	r.Get("/connections/github/connect", a.handleGitConnectStart)
+}
+
+// ---------------------------------------------------------------------------
+// One-click GitHub connect
+//
+// Reuses the instance's GitHub OAuth app (the one configured for sign-in) but
+// asks for the repo scope, so admins authorize in the browser instead of
+// creating a personal access token. The callback lives under the sign-in
+// callback path because GitHub OAuth apps accept redirect URIs only at or
+// below the single registered callback URL.
+
+// gitConnectRedirectURI must match between the authorize redirect and the
+// code exchange.
+func (a *API) gitConnectRedirectURI(r *http.Request) string {
+	return a.oauthRedirectURI(r, "github") + "/git"
+}
+
+func (a *API) handleGitConnectStart(w http.ResponseWriter, r *http.Request) {
+	cfg, err := a.oauthConfig(r.Context(), "github")
+	if err != nil || !cfg.Configured() {
+		writeError(w, http.StatusBadRequest, "not_configured",
+			"configure a GitHub OAuth app in Settings first")
+		return
+	}
+
+	buf := make([]byte, 16)
+	rand.Read(buf)
+	state := hex.EncodeToString(buf)
+	http.SetCookie(w, &http.Cookie{
+		Name: oauthStateCookie, Value: state, Path: "/api/v1/auth/oauth",
+		MaxAge: 600, HttpOnly: true, Secure: isTLS(r), SameSite: http.SameSiteLaxMode,
+	})
+
+	target, err := auth.OAuthAuthorizeURL("github", cfg, a.gitConnectRedirectURI(r), state, "repo")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+func (a *API) handleGitConnectCallback(w http.ResponseWriter, r *http.Request) {
+	// The browser lands here from GitHub, so errors redirect back to
+	// Settings instead of rendering JSON.
+	fail := func(code string) {
+		http.Redirect(w, r, "/settings?git_error="+code, http.StatusFound)
+	}
+
+	cfg, err := a.oauthConfig(r.Context(), "github")
+	if err != nil || !cfg.Configured() {
+		fail("not_configured")
+		return
+	}
+	stateCookie, err := r.Cookie(oauthStateCookie)
+	if err != nil || stateCookie.Value == "" || r.URL.Query().Get("state") != stateCookie.Value {
+		fail("state_mismatch")
+		return
+	}
+
+	token, err := auth.OAuthAccessToken(r.Context(), "github", cfg, a.gitConnectRedirectURI(r), r.URL.Query().Get("code"))
+	if err != nil {
+		a.Logger.Warn("github connect", "error", err)
+		fail("exchange_failed")
+		return
+	}
+	login, err := auth.GitHubLogin(r.Context(), token)
+	if err != nil {
+		a.Logger.Warn("github connect", "error", err)
+		fail("profile_failed")
+		return
+	}
+
+	conn, err := a.Git.UpsertConnection(r.Context(), "github", "github-"+login, token)
+	if err != nil {
+		a.internalError(w, "save github connection", err)
+		return
+	}
+	user, _ := auth.UserFrom(r.Context())
+	a.Audit.Write(r.Context(), user.ID, "git.connection_create", "git_connection", conn.Name, remoteIP(r),
+		map[string]string{"via": "oauth"})
+	http.Redirect(w, r, "/settings?git_connected="+url.QueryEscape(conn.Name), http.StatusFound)
 }
 
 func (a *API) handleListGitConnections(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +170,14 @@ func (a *API) handleConfigureProjectGit(w http.ResponseWriter, r *http.Request) 
 	secret, err := a.Git.Configure(r.Context(), p, cfg)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	branch := cfg.Branch
+	if branch == "" {
+		branch = "main"
+	}
+	if err := a.Projects.SetGitMetadata(r.Context(), p.Name, cfg.Repo, branch, cfg.AutoDeploy); err != nil {
+		writeError(w, http.StatusInternalServerError, "manifest_write_failed", err.Error())
 		return
 	}
 

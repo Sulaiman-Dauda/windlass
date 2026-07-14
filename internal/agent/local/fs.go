@@ -7,12 +7,36 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 )
 
 type fsLocal struct{ l *Local }
+
+func (f fsLocal) DiscoverProjects(ctx context.Context) ([]string, error) {
+	entries, err := os.ReadDir(f.l.cfg.ProjectsDir)
+	if err != nil {
+		return nil, err
+	}
+	projects := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || !agent.ValidProjectName(entry.Name()) {
+			continue
+		}
+		dir := filepath.Join(f.l.cfg.ProjectsDir, entry.Name())
+		if _, err := os.Stat(filepath.Join(dir, "compose.yaml")); err == nil {
+			projects = append(projects, entry.Name())
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(dir, "compose.yml")); err == nil {
+			projects = append(projects, entry.Name())
+		}
+	}
+	sort.Strings(projects)
+	return projects, nil
+}
 
 func (f fsLocal) projectDir(project string) (string, error) {
 	if !agent.ValidProjectName(project) {

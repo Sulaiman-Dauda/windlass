@@ -1,57 +1,60 @@
 # Windlass plugin SDK
 
-A Windlass plugin is an external process — any language, any runtime. When
-disabled it is simply not running: zero RAM, zero attack surface.
+A plugin is an optional external process installed under
+`$WINDLASS_DATA/plugins/<name>`. Disabled plugins do not run.
 
-## Contract
+## Manifest and process contract
 
-1. Install: a directory under `/var/lib/windlass/plugins/<name>/` containing:
-   - `plugin.json` — the manifest
-   - the executable named by `command`
-2. When enabled, Windlass starts the executable with the environment variable
-   `WINDLASS_PLUGIN_ADDR` (e.g. `127.0.0.1:49213`). The plugin must serve
-   HTTP on exactly that address.
-3. All requests to `/api/v1/plugins/<name>/proxy/*` on the panel are
-   forwarded to the plugin with the prefix stripped. Requests are already
-   authenticated by the panel (any signed-in user; add your own checks if
-   you need role granularity).
-4. When disabled or at panel shutdown, the process receives SIGKILL via
-   context cancellation — hold no state that can't be lost, or handle
-   SIGTERM yourself and persist under your plugin directory.
-
-## Manifest
+`plugin.json` and the executable named by `command` must be in the plugin directory:
 
 ```json
 {
-  "name": "hello",             // must equal the directory name
+  "name": "hello",
   "version": "0.1.0",
-  "description": "What it does",
-  "command": "hello",          // executable, relative to the plugin dir
-  "ui": true                   // serves a web UI at /
+  "description": "Example plugin",
+  "command": "hello",
+  "ui": true
 }
 ```
 
-## Example
+- `name` must equal the directory name.
+- `command` must be a relative path inside the plugin directory.
+- When enabled, Windlass chooses a loopback address and provides it in
+  `WINDLASS_PLUGIN_ADDR`. The process must serve HTTP on exactly that address.
+- Requests under `/api/v1/plugins/<name>/proxy/*` are authenticated by Windlass, forwarded to
+  the plugin, and have that prefix stripped.
+- Current plugin proxy authorization requires a signed-in user. A plugin needing finer roles
+  must implement additional authorization.
+- Disabling a plugin or stopping Windlass terminates the process. Persist required state under
+  the plugin directory; do not depend on in-memory state surviving.
 
-`example/` contains a complete Go plugin (~40 lines). Build and install:
+The `ui` field describes a plugin that serves HTML at its root. Windlass currently exposes the
+proxy API but does not automatically add a navigation item or dedicated Settings screen.
+
+## Build and install the example
 
 ```sh
-cd example
+cd plugins-sdk/example
 CGO_ENABLED=0 GOOS=linux go build -o hello .
 sudo mkdir -p /var/lib/windlass/plugins/hello
 sudo cp hello plugin.json /var/lib/windlass/plugins/hello/
 ```
 
-Enable it in the panel (Settings → Plugins, admin only), then:
+Enable it through the admin API:
 
 ```sh
-curl -b <session> http://localhost:8080/api/v1/plugins/hello/proxy/
+curl -X POST -b <session-cookie-file> \
+  https://windlass.example.com/api/v1/plugins/hello/enable
+
+curl -b <session-cookie-file> \
+  https://windlass.example.com/api/v1/plugins/hello/proxy/
 ```
 
-## Principles for plugin authors
+Disable it with `POST /api/v1/plugins/hello/disable`.
 
-- Your plugin must never require the panel to stay working: it can talk to
-  Docker or the filesystem itself if the operator grants it, but Windlass
-  gives it nothing beyond the HTTP contract above.
-- Persist only under your own plugin directory.
-- Log to stdout/stderr; the operator sees it in the panel's journal.
+## Security and resource guidance
+
+Windlass does not grant plugins Docker, Caddy, project-filesystem, or secret access. A plugin
+has only its process permissions and the HTTP contract above unless the server operator grants
+more. Log to stdout/stderr, keep dependencies minimal, validate all plugin input, and never
+assume the panel process will stay running.

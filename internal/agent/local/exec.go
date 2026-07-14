@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 )
@@ -22,24 +20,24 @@ func (e execLocal) Start(ctx context.Context, req agent.ExecReq) (agent.ExecSess
 	if len(cmd) == 0 {
 		cmd = []string{"/bin/sh"}
 	}
-	exec, err := cli.ContainerExecCreate(ctx, req.ContainerID, container.ExecOptions{
+	exec, err := cli.ExecCreate(ctx, req.ContainerID, client.ExecCreateOptions{
 		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
-		Tty:          req.TTY,
+		TTY:          req.TTY,
 		Cmd:          cmd,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("exec create: %w", err)
 	}
 
-	attach, err := cli.ContainerExecAttach(ctx, exec.ID, container.ExecAttachOptions{Tty: req.TTY})
+	attach, err := cli.ExecAttach(ctx, exec.ID, client.ExecAttachOptions{TTY: req.TTY})
 	if err != nil {
 		return nil, fmt.Errorf("exec attach: %w", err)
 	}
 
 	if req.TTY && req.Cols > 0 {
-		_ = cli.ContainerExecResize(ctx, exec.ID, container.ResizeOptions{
+		_, _ = cli.ExecResize(ctx, exec.ID, client.ExecResizeOptions{
 			Width: uint(req.Cols), Height: uint(req.Rows),
 		})
 	}
@@ -47,7 +45,7 @@ func (e execLocal) Start(ctx context.Context, req agent.ExecReq) (agent.ExecSess
 	s := &execSession{
 		cli:    cli,
 		execID: exec.ID,
-		attach: attach,
+		attach: attach.HijackedResponse,
 		out:    make(chan []byte, 32),
 		done:   make(chan struct{}),
 	}
@@ -58,7 +56,7 @@ func (e execLocal) Start(ctx context.Context, req agent.ExecReq) (agent.ExecSess
 type execSession struct {
 	cli    *client.Client
 	execID string
-	attach types.HijackedResponse
+	attach client.HijackedResponse
 
 	out  chan []byte
 	done chan struct{}
@@ -91,16 +89,17 @@ func (s *execSession) Write(p []byte) error {
 }
 
 func (s *execSession) Resize(cols, rows uint16) error {
-	return s.cli.ContainerExecResize(context.Background(), s.execID, container.ResizeOptions{
+	_, err := s.cli.ExecResize(context.Background(), s.execID, client.ExecResizeOptions{
 		Width: uint(cols), Height: uint(rows),
 	})
+	return err
 }
 
 func (s *execSession) Output() <-chan []byte { return s.out }
 
 func (s *execSession) Wait() (int, error) {
 	<-s.done
-	inspect, err := s.cli.ContainerExecInspect(context.Background(), s.execID)
+	inspect, err := s.cli.ExecInspect(context.Background(), s.execID, client.ExecInspectOptions{})
 	if err != nil {
 		return -1, err
 	}

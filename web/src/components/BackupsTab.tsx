@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { Button } from "../ui/Button";
+import { Card } from "../ui/Card";
+import { Field, Input, Select } from "../ui/Field";
+import { Icon } from "../ui/Icon";
 
 interface Backup {
   id: number;
@@ -45,27 +49,29 @@ export default function BackupsTab({ project }: { project: string }) {
 
   return (
     <div className="max-w-3xl">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-zinc-500">
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-sm leading-relaxed text-fg2">
           Backups archive the project directory (compose, env, configs — plus
           a database dump for template databases). Restore replaces the
           directory; deploy afterwards to apply it.
         </p>
-        <button
+        <Button
+          variant="primary"
           onClick={() => create.mutate()}
           disabled={create.isPending}
-          className="ml-4 shrink-0 rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
+          className="shrink-0"
         >
+          <Icon name="download" size={15} />
           {create.isPending ? "Backing up…" : "Back up now"}
-        </button>
+        </Button>
       </div>
       {(create.isError || restore.isError) && (
-        <p className="mt-2 text-sm text-red-400">
+        <p className="mt-2 text-sm text-err">
           {((create.error ?? restore.error) as Error)?.message ?? "Operation failed"}
         </p>
       )}
       {restore.isSuccess && (
-        <p className="mt-2 text-sm text-emerald-400">
+        <p className="mt-2 text-sm text-ok">
           Restored. Deploy the project to apply the restored files.
         </p>
       )}
@@ -74,29 +80,29 @@ export default function BackupsTab({ project }: { project: string }) {
         {backups.data?.map((b) => (
           <div
             key={b.id}
-            className="flex items-center justify-between rounded-md border border-zinc-900 bg-zinc-900/40 px-4 py-2.5 text-sm"
+            className="flex items-center justify-between rounded-[10px] border border-hairline bg-surface2 px-4 py-3 text-sm"
           >
             <div>
-              <span className="font-mono text-xs text-zinc-500">#{b.id}</span>
-              <span className="ml-3">{new Date(b.created_at).toLocaleString()}</span>
-              <span className="ml-3 text-xs text-zinc-500">
+              <span className="font-mono text-xs text-fg3">#{b.id}</span>
+              <span className="ml-3 text-fg">{new Date(b.created_at).toLocaleString()}</span>
+              <span className="ml-3 text-xs text-fg3">
                 {b.kind} · {b.destination} · {fmtSize(b.size)}
               </span>
             </div>
             <div className="flex items-center gap-3">
               {b.status === "done" ? (
-                <button
+                <Button
+                  size="sm"
                   onClick={() => {
                     if (confirm(`Restore backup #${b.id}? Current project files are replaced.`)) {
                       restore.mutate(b.id);
                     }
                   }}
-                  className="text-xs text-zinc-400 hover:text-zinc-100"
                 >
                   Restore
-                </button>
+                </Button>
               ) : (
-                <span className="text-xs text-red-400" title={b.error}>
+                <span className="text-xs text-err" title={b.error}>
                   {b.status}
                 </span>
               )}
@@ -104,7 +110,7 @@ export default function BackupsTab({ project }: { project: string }) {
           </div>
         ))}
         {backups.data?.length === 0 && (
-          <p className="text-sm text-zinc-600">No backups yet.</p>
+          <p className="text-sm text-fg3">No backups yet.</p>
         )}
       </div>
 
@@ -141,63 +147,57 @@ function ScheduleEditor({ project }: { project: string }) {
     setDraft({ ...current, ...patch });
 
   return (
-    <div className="mt-8 rounded-md border border-zinc-900 p-4">
-      <h3 className="text-sm font-medium">Scheduled backups</h3>
+    <Card className="mt-8 p-4">
+      <h3 className="text-sm font-semibold text-fg">Scheduled backups</h3>
       <div className="mt-3 flex flex-wrap items-end gap-3">
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2.5 py-2.5 text-sm text-fg">
           <input
             type="checkbox"
             checked={current.enabled}
             onChange={(e) => update({ enabled: e.target.checked })}
+            className="h-[18px] w-[18px] flex-none rounded-[6px] accent-[var(--color-accent-fill)]"
           />
           Enabled
         </label>
-        <label>
-          <span className="mb-1 block text-xs text-zinc-500">Interval</span>
-          <select
+        <Field label="Interval">
+          <Select
             value={current.interval}
             onChange={(e) => update({ interval: e.target.value })}
-            className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 outline-none"
           >
             <option value="hourly">Hourly</option>
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
-          </select>
-        </label>
-        <label>
-          <span className="mb-1 block text-xs text-zinc-500">Destination</span>
-          <select
+          </Select>
+        </Field>
+        <Field label="Destination">
+          <Select
             value={current.destination}
             onChange={(e) => update({ destination: e.target.value })}
-            className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 outline-none"
           >
             <option value="local">Local</option>
             <option value="s3">S3</option>
-          </select>
-        </label>
-        <label>
-          <span className="mb-1 block text-xs text-zinc-500">Keep last</span>
-          <input
+          </Select>
+        </Field>
+        <Field label="Keep last" className="w-24">
+          <Input
             type="number"
             min={1}
             value={current.retention_count}
             onChange={(e) => update({ retention_count: parseInt(e.target.value, 10) || 7 })}
-            className="w-20 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 outline-none"
           />
-        </label>
-        <button
+        </Field>
+        <Button
           onClick={() => save.mutate(current)}
           disabled={save.isPending || draft === null}
-          className="rounded-md border border-zinc-700 px-3 py-1 text-sm hover:bg-zinc-900 disabled:opacity-50"
         >
           Save
-        </button>
+        </Button>
       </div>
       {save.isError && (
-        <p className="mt-2 text-sm text-red-400">
+        <p className="mt-2 text-sm text-err">
           {save.error instanceof Error ? save.error.message : "Save failed"}
         </p>
       )}
-    </div>
+    </Card>
   );
 }

@@ -12,10 +12,10 @@ export interface Project {
 }
 
 export interface ProjectFile {
-  Name: string;
-  Size: number;
-  IsDir: boolean;
-  ModTime: string;
+  name: string;
+  size: number;
+  is_dir: boolean;
+  mod_time: string;
 }
 
 export function useProjects() {
@@ -41,11 +41,22 @@ export function useCreateProject() {
   });
 }
 
+export function useScanProjects() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<{ count: number }>("/projects/scan", { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+  });
+}
+
 export function useDeleteProject() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) =>
-      api(`/projects/${name}`, { method: "DELETE" }),
+    mutationFn: ({ name, password }: { name: string; password?: string }) =>
+      api(`/projects/${name}`, {
+        method: "DELETE",
+        body: JSON.stringify(password ? { password } : {}),
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   });
 }

@@ -100,7 +100,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		Audit:    audit.New(queries, logger),
 		Projects: projectSvc,
 		Deploy:   deploySvc,
-		Proxy:    proxy.New(queries, ag, bus, logger),
+		Proxy:    proxy.New(queries, ag, projectSvc, bus, logger),
 		Git:      gitSvc,
 		Backups:  backups.New(queries, ag, projectSvc, box, bus, logger),
 		Plugins:  plugins.New(queries, dir, logger),
@@ -176,6 +176,15 @@ func TestHealth(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"status":"ok"`) {
 		t.Errorf("body = %s", rec.Body.String())
+	}
+	for name, want := range map[string]string{
+		"Content-Security-Policy": "default-src 'self'",
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":         "DENY",
+	} {
+		if got := rec.Header().Get(name); !strings.Contains(got, want) {
+			t.Errorf("%s = %q, want to contain %q", name, got, want)
+		}
 	}
 }
 

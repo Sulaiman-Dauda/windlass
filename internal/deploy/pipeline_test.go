@@ -188,6 +188,50 @@ func TestDeployVerifyUnhealthy(t *testing.T) {
 	}
 }
 
+func TestDeployApplicationHealthCheck(t *testing.T) {
+	e := newEnv(t)
+	e.agent.Resolved["app"] = agent.ResolvedConfig{
+		Services: map[string]agent.ResolvedService{"web": {Image: "nginx:alpine"}},
+		HealthChecks: []agent.ApplicationHealthCheck{{
+			Service: "web", URL: "https://app.example.com/health",
+			ExpectedStatus: 200, Contains: "ready", StabilitySeconds: 0,
+		}},
+	}
+	e.agent.HTTPResponses["https://app.example.com/health"] = agent.HTTPCheckResult{
+		StatusCode: 200, Body: `{"status":"ready"}`,
+	}
+
+	d, _ := e.deploy.Deploy(context.Background(), "app", "manual")
+	final := e.runUntilFinished(t, d.ID)
+	if final.Status != "succeeded" {
+		t.Fatalf("status = %s, error = %s", final.Status, final.Error.String)
+	}
+	if calls := strings.Join(e.agent.Calls, " | "); !strings.Contains(calls, "host.httpcheck(https://app.example.com/health)") {
+		t.Fatalf("application health check was not executed: %s", calls)
+	}
+}
+
+func TestDeployApplicationHealthCheckFailure(t *testing.T) {
+	e := newEnv(t)
+	oldTimeout, oldPoll := VerifyTimeout, verifyPollInterval
+	VerifyTimeout, verifyPollInterval = 80*time.Millisecond, 5*time.Millisecond
+	t.Cleanup(func() { VerifyTimeout, verifyPollInterval = oldTimeout, oldPoll })
+	e.agent.Resolved["app"] = agent.ResolvedConfig{
+		Services: map[string]agent.ResolvedService{"web": {Image: "nginx:alpine"}},
+		HealthChecks: []agent.ApplicationHealthCheck{{
+			Service: "web", URL: "https://app.example.com/health",
+			ExpectedStatus: 200,
+		}},
+	}
+	e.agent.HTTPResponses["https://app.example.com/health"] = agent.HTTPCheckResult{StatusCode: 503}
+
+	d, _ := e.deploy.Deploy(context.Background(), "app", "manual")
+	final := e.runUntilFinished(t, d.ID)
+	if final.Status != "failed" || !strings.Contains(final.Error.String, "returned HTTP 503") {
+		t.Fatalf("status = %s, error = %s", final.Status, final.Error.String)
+	}
+}
+
 // TestResumeAfterCrash simulates a process that died after checkpointing the
 // "applying" step: the job row is 'running' with step=applying. On restart
 // the runner reclaims it and the pipeline resumes at applying — without

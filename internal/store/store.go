@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"os"
 
 	_ "modernc.org/sqlite" // pure-Go driver: CGO-free cross-compilation
 )
@@ -15,6 +16,20 @@ import (
 // a metadata store with light write traffic, and one writer sidesteps
 // SQLITE_BUSY entirely.
 func Open(path string) (*sql.DB, error) {
+	// SQLite otherwise creates the database using the process umask, which is
+	// commonly 0644. The database contains user identities, audit data, and
+	// encrypted application secrets, so ensure it is private before opening it.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("create sqlite: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return nil, fmt.Errorf("close sqlite: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return nil, fmt.Errorf("secure sqlite: %w", err)
+	}
+
 	dsn := fmt.Sprintf("file:%s?%s", url.PathEscape(path), url.Values{
 		"_pragma": []string{
 			"journal_mode(WAL)",

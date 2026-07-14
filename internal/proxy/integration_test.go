@@ -9,10 +9,13 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,18 +26,19 @@ import (
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/agent/local"
 	"github.com/windlass-dev/windlass/internal/events"
+	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/store"
 	"github.com/windlass-dev/windlass/internal/store/db"
-	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/migrations"
 )
 
-// userCaddyConfig simulates an admin's hand-written config: one server on
-// :18080 with a marker route Windlass must not touch.
+// userCaddyConfig simulates hand-written HTTP config plus a TLS server using
+// Caddy's local CA. Windlass must add only its owned route and certificate.
 const userCaddyConfig = `{
   "admin": {"listen": "127.0.0.1:12019"},
   "apps": {
+    "tls": {"automation": {"policies": [{"issuers": [{"module": "internal"}]}]}},
     "http": {
       "servers": {
         "usersrv": {
@@ -47,6 +51,12 @@ const userCaddyConfig = `{
               "terminal": true
             }
           ]
+        },
+        "tlssrv": {
+          "listen": [":18443"],
+          "automatic_https": {"disable_redirects": true},
+          "routes": [],
+          "tls_connection_policies": [{}]
         }
       }
     }
@@ -68,8 +78,11 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 	defer cancel()
 
 	caddy := exec.CommandContext(ctx, "caddy", "run", "--config", cfgPath)
+	caddy.Env = append(os.Environ(), "XDG_DATA_HOME="+filepath.Join(dir, "data"),
+		"XDG_CONFIG_HOME="+filepath.Join(dir, "config"))
 	caddy.Stdout = io.Discard
-	caddy.Stderr = io.Discard
+	var caddyStderr bytes.Buffer
+	caddy.Stderr = &caddyStderr
 	if err := caddy.Start(); err != nil {
 		t.Fatalf("start caddy: %v", err)
 	}
@@ -82,8 +95,8 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 			resp.Body.Close()
 			break
 		}
-		if i > 50 {
-			t.Fatal("caddy admin did not come up")
+		if i > 150 {
+			t.Fatalf("caddy admin did not come up: %s", caddyStderr.String())
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -99,9 +112,14 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 	}
 	q := db.New(sqlDB)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	panelBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "windlass panel route")
+	}))
+	defer panelBackend.Close()
 	ag, err := local.New(local.Config{
-		ProjectsDir: filepath.Join(dir, "projects"),
-		CaddyAdmin:  admin,
+		ProjectsDir:   filepath.Join(dir, "projects"),
+		CaddyAdmin:    admin,
+		PanelUpstream: strings.TrimPrefix(panelBackend.URL, "http://"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +127,7 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 	box, _ := secrets.New(bytes.Repeat([]byte{1}, 32))
 	bus := events.NewBus()
 	proj := projects.New(q, ag, box, bus, logger)
-	svc := New(q, ag, bus, logger)
+	svc := New(q, ag, proj, bus, logger)
 
 	// Deploy a real nginx container via plain compose (pipeline covered
 	// elsewhere; here we exercise routing).
@@ -133,12 +151,32 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 		t.Fatalf("sync: %v", err)
 	}
 
-	// Traffic for the Windlass domain reaches nginx through Caddy.
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:18080/", nil)
+	// Trust Caddy's generated local root and prove the full TLS handshake plus
+	// reverse proxy path, rather than merely accepting an insecure certificate.
+	rootPath := filepath.Join(dir, "data", "caddy", "pki", "authorities", "local", "root.crt")
+	var rootPEM []byte
+	for i := 0; i < 50; i++ {
+		rootPEM, err = os.ReadFile(rootPath)
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("read caddy local root: %v", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(rootPEM) {
+		t.Fatal("parse caddy local root")
+	}
+	httpsClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		RootCAs: roots, ServerName: "it.example.com", MinVersion: tls.VersionTLS12,
+	}}}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://127.0.0.1:18443/", nil)
 	req.Host = "it.example.com"
 	var body string
 	for i := 0; i < 20; i++ { // container may still be booting
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := httpsClient.Do(req)
 		if err == nil {
 			b, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
@@ -150,7 +188,34 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	if !strings.Contains(body, "nginx") {
-		t.Fatalf("windlass domain did not route to nginx; body: %.200s", body)
+		t.Fatalf("windlass HTTPS domain did not route to nginx; body: %.200s", body)
+	}
+
+	// The Settings-managed panel hostname is a separate owned route and also
+	// receives a trusted certificate without touching application/user routes.
+	if err := svc.SetPanelDomain(ctx, "panel.example.com"); err != nil {
+		t.Fatalf("set panel domain: %v", err)
+	}
+	panelClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		RootCAs: roots, ServerName: "panel.example.com", MinVersion: tls.VersionTLS12,
+	}}}
+	panelReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://127.0.0.1:18443/", nil)
+	panelReq.Host = "panel.example.com"
+	panelBody := ""
+	for i := 0; i < 20; i++ {
+		panelResp, panelErr := panelClient.Do(panelReq)
+		if panelErr == nil {
+			data, _ := io.ReadAll(panelResp.Body)
+			panelResp.Body.Close()
+			panelBody = string(data)
+			if panelResp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if panelBody != "windlass panel route" {
+		t.Fatalf("panel HTTPS route body = %q", panelBody)
 	}
 
 	// The user's own route still works — Windlass didn't clobber it.
@@ -173,6 +238,29 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 	current, err := ag.Proxy().CurrentRoutes(ctx)
 	if err != nil || len(current) != 1 || current[0].Hostname != "it.example.com" {
 		t.Fatalf("current routes = %+v, %v", current, err)
+	}
+
+	// A brand-new SQLite file rebuilds its application index from the same
+	// stacks directory while the already-running Compose app remains healthy.
+	rebuiltDB, err := store.Open(filepath.Join(dir, "rebuilt.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rebuiltDB.Close()
+	if err := store.Migrate(rebuiltDB, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	rebuiltProjects := projects.New(db.New(rebuiltDB), ag, box, bus, logger)
+	if err := rebuiltProjects.Reconcile(ctx); err != nil {
+		t.Fatalf("rebuild index: %v", err)
+	}
+	listed, err := rebuiltProjects.List(ctx)
+	if err != nil || len(listed) != 1 || listed[0].Name != name {
+		t.Fatalf("rebuilt project index = %+v, %v", listed, err)
+	}
+	statuses, err := ag.Compose().PS(ctx, name)
+	if err != nil || len(statuses) == 0 || statuses[0].State != "running" {
+		t.Fatalf("running app did not survive database rebuild: %+v, %v", statuses, err)
 	}
 
 	fmt.Println("caddy integration ok")

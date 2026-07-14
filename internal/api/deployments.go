@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/projects"
@@ -171,6 +172,20 @@ func (a *API) handleProjectServices(w http.ResponseWriter, r *http.Request) {
 		// beats a 500 (graceful degradation).
 		writeJSON(w, http.StatusOK, map[string]any{"services": []any{}, "note": err.Error()})
 		return
+	}
+	// A successful compose ps with no containers may be represented by a nil
+	// Go slice. Encode it as [] rather than null so API clients can always
+	// treat services as a collection.
+	if statuses == nil {
+		statuses = []agent.ServiceStatus{}
+	}
+	if config, configErr := a.Agent.Compose().Config(r.Context(), name); configErr == nil {
+		for i := range statuses {
+			if service, ok := config.Services[statuses[i].Service]; ok {
+				statuses[i].MemoryLimit = service.MemoryLimit
+				statuses[i].CPULimit = service.CPULimit
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": statuses})
 }

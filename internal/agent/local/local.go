@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/client"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 )
@@ -24,6 +24,8 @@ type Config struct {
 	ProjectsDir string
 	// CaddyAdmin is the Caddy admin API base URL.
 	CaddyAdmin string
+	// PanelUpstream is Caddy's dial target for the Windlass UI/API.
+	PanelUpstream string
 	// DockerBin is the docker CLI used for compose operations.
 	DockerBin string
 }
@@ -44,6 +46,9 @@ func New(cfg Config) (*Local, error) {
 	if cfg.CaddyAdmin == "" {
 		cfg.CaddyAdmin = "http://127.0.0.1:2019"
 	}
+	if cfg.PanelUpstream == "" {
+		cfg.PanelUpstream = "127.0.0.1:8080"
+	}
 	if cfg.DockerBin == "" {
 		cfg.DockerBin = "docker"
 	}
@@ -60,7 +65,7 @@ func (l *Local) docker() (*client.Client, error) {
 	if l.cli != nil {
 		return l.cli, nil
 	}
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("connect docker: %w", err)
 	}
@@ -82,7 +87,7 @@ func (l *Local) Ping(ctx context.Context) (agent.NodeInfo, error) {
 	}
 
 	if cli, err := l.docker(); err == nil {
-		if v, err := cli.ServerVersion(ctx); err == nil {
+		if v, err := cli.ServerVersion(ctx, client.ServerVersionOptions{}); err == nil {
 			info.DockerVersion = v.Version
 		}
 	}

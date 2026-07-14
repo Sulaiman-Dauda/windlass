@@ -51,24 +51,28 @@ var oauthProviders = map[string]oauthEndpoints{
 var ErrUnknownProvider = errors.New("unknown oauth provider")
 
 // OAuthAuthorizeURL builds the provider redirect for the start of the flow.
-func OAuthAuthorizeURL(provider string, cfg OAuthProviderConfig, redirectURI, state string) (string, error) {
+// An empty scope uses the provider's sign-in default; callers needing broader
+// access (e.g. the repo scope for git connections) pass their own.
+func OAuthAuthorizeURL(provider string, cfg OAuthProviderConfig, redirectURI, state, scope string) (string, error) {
 	ep, ok := oauthProviders[provider]
 	if !ok {
 		return "", ErrUnknownProvider
+	}
+	if scope == "" {
+		scope = ep.scope
 	}
 	q := url.Values{
 		"client_id":     {cfg.ClientID},
 		"redirect_uri":  {redirectURI},
 		"state":         {state},
-		"scope":         {ep.scope},
+		"scope":         {scope},
 		"response_type": {"code"},
 	}
 	return ep.authURL + "?" + q.Encode(), nil
 }
 
-// OAuthEmail exchanges the authorization code and returns the account's
-// verified email address.
-func OAuthEmail(ctx context.Context, provider string, cfg OAuthProviderConfig, redirectURI, code string) (string, error) {
+// OAuthAccessToken exchanges an authorization code for an access token.
+func OAuthAccessToken(ctx context.Context, provider string, cfg OAuthProviderConfig, redirectURI, code string) (string, error) {
 	ep, ok := oauthProviders[provider]
 	if !ok {
 		return "", ErrUnknownProvider
@@ -76,7 +80,6 @@ func OAuthEmail(ctx context.Context, provider string, cfg OAuthProviderConfig, r
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	// Token exchange.
 	form := url.Values{
 		"client_id":     {cfg.ClientID},
 		"client_secret": {cfg.ClientSecret},
@@ -101,15 +104,47 @@ func OAuthEmail(ctx context.Context, provider string, cfg OAuthProviderConfig, r
 	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil || tok.AccessToken == "" {
 		return "", errors.New("oauth token exchange failed")
 	}
+	return tok.AccessToken, nil
+}
 
-	// Profile fetch.
+// OAuthEmail exchanges the authorization code and returns the account's
+// verified email address.
+func OAuthEmail(ctx context.Context, provider string, cfg OAuthProviderConfig, redirectURI, code string) (string, error) {
+	token, err := OAuthAccessToken(ctx, provider, cfg, redirectURI, code)
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
 	switch provider {
 	case "github":
-		return githubEmail(ctx, tok.AccessToken)
+		return githubEmail(ctx, token)
 	case "google":
-		return googleEmail(ctx, tok.AccessToken)
+		return googleEmail(ctx, token)
 	}
 	return "", ErrUnknownProvider
+}
+
+// GitHubLogin returns the username of the account the token belongs to.
+func GitHubLogin(ctx context.Context, token string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var user struct {
+		Login string `json:"login"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil || user.Login == "" {
+		return "", errors.New("could not read GitHub profile")
+	}
+	return user.Login, nil
 }
 
 func githubEmail(ctx context.Context, token string) (string, error) {

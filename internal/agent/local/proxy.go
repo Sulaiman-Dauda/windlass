@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/windlass-dev/windlass/internal/agent"
@@ -16,7 +17,10 @@ import (
 // "@id": "windlass_routes" whose subroute holds one route per domain.
 // It is addressed only via targeted /id/ operations — never POST /load —
 // so hand-written Caddy configuration is never touched (plan risk #2).
-const routesID = "windlass_routes"
+const (
+	routesID     = "windlass_routes"
+	panelRouteID = "windlass_panel_route"
+)
 
 type proxyLocal struct{ l *Local }
 
@@ -102,11 +106,141 @@ func (p proxyLocal) ApplyRoutes(ctx context.Context, routes []agent.Route) error
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
-		return nil
+		return p.ensureTLS(ctx, routes)
 	}
 
 	// First run: install the object into a server.
-	return p.install(ctx, obj)
+	if err := p.install(ctx, obj); err != nil {
+		return err
+	}
+	return p.ensureTLS(ctx, routes)
+}
+
+// ApplyPanelDomain owns exactly one additional Caddy route for the Windlass
+// UI/API. It uses the same targeted @id operations as application routes and
+// never loads or replaces the administrator's Caddy configuration.
+func (p proxyLocal) ApplyPanelDomain(ctx context.Context, hostname string) error {
+	if hostname == "" {
+		resp, err := p.do(ctx, http.MethodDelete, "/id/"+panelRouteID, nil)
+		if err != nil {
+			return fmt.Errorf("remove panel domain: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode < 300 {
+			return nil
+		}
+		msg, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("remove panel domain: %s: %s", resp.Status, msg)
+	}
+
+	obj := caddyRoute{
+		ID:    panelRouteID,
+		Match: []caddyMatch{{Host: []string{hostname}}},
+		Handle: []caddyHandle{{Handler: "reverse_proxy",
+			Upstreams: []caddyUpstream{{Dial: p.l.cfg.PanelUpstream}}}},
+		Terminal: true,
+	}
+	resp, err := p.do(ctx, http.MethodPatch, "/id/"+panelRouteID, obj)
+	if err != nil {
+		return fmt.Errorf("configure panel domain: %w", err)
+	}
+	status := resp.StatusCode
+	resp.Body.Close()
+	if status != http.StatusOK {
+		if err := p.install(ctx, obj); err != nil {
+			return err
+		}
+	}
+	return p.ensureTLS(ctx, []agent.Route{{Hostname: hostname, TLS: true}})
+}
+
+// ensureTLS adds routed hostnames to Caddy's certificate automation list.
+// Host matchers added through the JSON API are not automatically included in
+// certificate management, unlike hostnames loaded through a Caddyfile. Merge
+// with the existing list so user-owned certificate automation is preserved.
+// Stale names are deliberately retained: removing a Windlass domain must not
+// risk deleting an identically named entry owned by the server administrator.
+func (p proxyLocal) ensureTLS(ctx context.Context, routes []agent.Route) error {
+	if len(routes) == 0 {
+		return nil
+	}
+
+	const path = "/config/apps/tls/certificates/automate"
+	var names []string
+	method := http.MethodPut
+	resp, err := p.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return fmt.Errorf("read caddy TLS automation: %w", err)
+	}
+	if resp.StatusCode == http.StatusOK {
+		method = http.MethodPatch
+		if err := json.NewDecoder(resp.Body).Decode(&names); err != nil {
+			resp.Body.Close()
+			return fmt.Errorf("decode caddy TLS automation: %w", err)
+		}
+	} else if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusBadRequest {
+		resp.Body.Close()
+		// Caddy reports 400 "invalid traversal path" when an intermediate
+		// config object has never existed. Create only missing parents; never
+		// replace user-owned TLS configuration.
+		for _, parent := range []string{"/config/apps", "/config/apps/tls", "/config/apps/tls/certificates"} {
+			current, parentErr := p.do(ctx, http.MethodGet, parent, nil)
+			if parentErr != nil {
+				return parentErr
+			}
+			exists := current.StatusCode == http.StatusOK
+			current.Body.Close()
+			if exists {
+				continue
+			}
+			created, parentErr := p.do(ctx, http.MethodPut, parent, map[string]any{})
+			if parentErr != nil {
+				return parentErr
+			}
+			if created.StatusCode >= 300 {
+				msg, _ := io.ReadAll(created.Body)
+				created.Body.Close()
+				return fmt.Errorf("create caddy config parent %s: %s: %s", parent, created.Status, msg)
+			}
+			created.Body.Close()
+		}
+		method = http.MethodPut
+	} else {
+		msg, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return fmt.Errorf("read caddy TLS automation: %s: %s", resp.Status, msg)
+	}
+	if resp.Body != http.NoBody {
+		resp.Body.Close()
+	}
+
+	seen := make(map[string]bool, len(names)+len(routes))
+	for _, name := range names {
+		seen[name] = true
+	}
+	changed := false
+	for _, route := range routes {
+		if !route.TLS || route.Hostname == "" || seen[route.Hostname] {
+			continue
+		}
+		names = append(names, route.Hostname)
+		seen[route.Hostname] = true
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+
+	resp, err = p.do(ctx, method, path, names)
+	if err != nil {
+		return fmt.Errorf("enable caddy TLS automation: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("enable caddy TLS automation: %s: %s", resp.Status, msg)
+	}
+	return nil
 }
 
 // install places the Windlass route object at the front of a suitable HTTP
@@ -119,7 +253,8 @@ func (p proxyLocal) install(ctx context.Context, obj caddyRoute) error {
 	defer resp.Body.Close()
 
 	servers := map[string]struct {
-		Listen []string `json:"listen"`
+		Listen                []string          `json:"listen"`
+		TLSConnectionPolicies []json.RawMessage `json:"tls_connection_policies"`
 	}{}
 	if resp.StatusCode == http.StatusOK {
 		if err := json.NewDecoder(resp.Body).Decode(&servers); err != nil {
@@ -127,9 +262,18 @@ func (p proxyLocal) install(ctx context.Context, obj caddyRoute) error {
 		}
 	}
 
-	// Prefer a server already listening on :443 or :80.
+	// Prefer the standard server, then any TLS-enabled server (including a
+	// non-standard port used in tests/self-hosted setups), then the first
+	// existing server. Never create a parallel server when a suitable one
+	// already exists.
 	target := ""
-	for name, srv := range servers {
+	names := make([]string, 0, len(servers))
+	for name := range servers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		srv := servers[name]
 		for _, l := range srv.Listen {
 			if l == ":443" || l == ":80" {
 				target = name
@@ -140,6 +284,17 @@ func (p proxyLocal) install(ctx context.Context, obj caddyRoute) error {
 			break
 		}
 	}
+	if target == "" {
+		for _, name := range names {
+			if len(servers[name].TLSConnectionPolicies) > 0 {
+				target = name
+				break
+			}
+		}
+	}
+	if target == "" && len(names) > 0 {
+		target = names[0]
+	}
 
 	if target == "" {
 		// No usable server: create one that Caddy will run auto-HTTPS on.
@@ -148,7 +303,10 @@ func (p proxyLocal) install(ctx context.Context, obj caddyRoute) error {
 			"routes": []caddyRoute{obj},
 		}
 		// Parent objects may not exist on a fresh Caddy; build the path.
-		for _, step := range []struct{ path string; body any }{
+		for _, step := range []struct {
+			path string
+			body any
+		}{
 			{"/config/apps", map[string]any{}},
 			{"/config/apps/http", map[string]any{}},
 			{"/config/apps/http/servers", map[string]any{}},

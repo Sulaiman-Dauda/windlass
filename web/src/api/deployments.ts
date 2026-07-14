@@ -21,6 +21,8 @@ export interface ServiceStatus {
   health: string;
   exit_code: number;
   image: string;
+  memory_limit?: number;
+  cpu_limit?: number;
 }
 
 export const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled"];
@@ -51,7 +53,13 @@ export function useCreateDeployment(project: string) {
 export function useServices(project: string) {
   return useQuery<{ services: ServiceStatus[]; note?: string }>({
     queryKey: ["projects", project, "services"],
-    queryFn: () => api(`/projects/${project}/services`),
+    queryFn: async () => {
+      const result = await api<{
+        services: ServiceStatus[] | null;
+        note?: string;
+      }>(`/projects/${project}/services`);
+      return { ...result, services: result.services ?? [] };
+    },
     refetchInterval: 5000,
   });
 }

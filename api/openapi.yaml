@@ -33,6 +33,10 @@ components:
         id: { type: integer }
         email: { type: string, format: email }
         role: { type: string, enum: [admin, member, viewer] }
+        totp_enabled: { type: boolean }
+        has_password:
+          type: boolean
+          description: False for OAuth-only accounts; such users skip password re-entry on destructive actions.
     AuthStatus:
       type: object
       required: [needs_setup, authenticated]
@@ -190,6 +194,14 @@ paths:
       responses:
         "302": { description: Redirect to the app (or /?oauth_error=...) }
 
+  /auth/oauth/github/callback/git:
+    get:
+      summary: GitHub callback for the repo-scope connect flow (admin); stores the token as a git connection
+      operationId: gitConnectCallback
+      security: [{ session: [] }]
+      responses:
+        "302": { description: Redirect to /settings?git_connected=... (or ?git_error=...) }
+
   /users:
     get:
       summary: List users (admin)
@@ -283,6 +295,47 @@ paths:
         "200": { description: Update applied; panel restarts }
         "400": { description: Self-update unsupported in this install mode }
 
+  /system/docker/images:
+    get:
+      summary: Docker image disk usage (admin)
+      operationId: imageDiskUsage
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Image counts and reclaimable bytes }
+
+  /system/docker/images/prune:
+    post:
+      summary: Remove old unused images while protecting recent deployments (admin)
+      operationId: pruneImages
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Deleted image count and reclaimed bytes }
+
+  /system/panel-domain:
+    get:
+      summary: Get the Settings-managed panel hostname (admin)
+      operationId: getPanelDomain
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Hostname, HTTPS URL, and Caddy availability }
+    put:
+      summary: Configure or remove the panel hostname in Caddy (admin)
+      description: Set hostname to an empty string to remove only the Windlass-owned panel route.
+      operationId: setPanelDomain
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hostname]
+              properties:
+                hostname: { type: string, example: windlass.example.com }
+      responses:
+        "200": { description: Desired hostname stored and applied }
+        "400": { description: Invalid hostname }
+
   /system/backups/s3:
     get:
       summary: S3 backup destination status (admin; never returns secrets)
@@ -321,11 +374,33 @@ paths:
         "200": { description: Project }
         "404": { description: Not found }
     delete:
-      summary: Delete a project — containers stopped, directory removed (member)
+      summary: Delete a project — containers stopped, directory removed (member; requires password re-entry unless the account is OAuth-only)
       operationId: deleteProject
       security: [{ session: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  description: The caller's account password. Required when the account has one.
       responses:
         "204": { description: Deleted }
+        "403":
+          description: Password missing (password_required) or wrong (invalid_password)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /projects/scan:
+    post:
+      summary: Scan the stacks directory and rebuild the project index (member)
+      operationId: scanProjects
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Number of filesystem projects indexed }
 
   /projects/{name}/files:
     get:
@@ -530,6 +605,19 @@ paths:
       security: [{ session: [] }]
       responses:
         "204": { description: Deleted }
+
+  /git/connections/github/connect:
+    get:
+      summary: Begin one-click GitHub connect using the instance's OAuth app with repo scope (admin)
+      operationId: gitConnectStart
+      security: [{ session: [] }]
+      responses:
+        "302": { description: Redirect to GitHub authorize }
+        "400":
+          description: GitHub OAuth app not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /templates:
     get:

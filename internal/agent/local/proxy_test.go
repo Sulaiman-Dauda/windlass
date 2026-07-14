@@ -1,11 +1,54 @@
 package local
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 )
+
+func TestEnsureTLSMergesWithoutClobberingUserNames(t *testing.T) {
+	t.Parallel()
+
+	names := []string{"user.example.com"}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/config/apps/tls/certificates/automate" {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			json.NewEncoder(w).Encode(names)
+		case http.MethodPatch:
+			body, _ := io.ReadAll(r.Body)
+			if err := json.Unmarshal(body, &names); err != nil {
+				t.Fatalf("decode PUT: %v", err)
+			}
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer srv.Close()
+
+	p := proxyLocal{l: &Local{cfg: Config{CaddyAdmin: srv.URL}}}
+	err := p.ensureTLS(context.Background(), []agent.Route{
+		{Hostname: "app.example.com", TLS: true},
+		{Hostname: "user.example.com", TLS: true},
+		{Hostname: "plain.example.com", TLS: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"user.example.com", "app.example.com"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("automation names = %v, want %v", names, want)
+	}
+}
 
 // Golden test: the exact JSON shape Windlass writes into Caddy. If this
 // changes, zero-downtime PATCH semantics and route ownership must be

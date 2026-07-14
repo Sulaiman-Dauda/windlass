@@ -8,10 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 )
@@ -29,17 +28,17 @@ func (d dockerLocal) ListContainers(ctx context.Context, filter agent.ContainerF
 		return nil, err
 	}
 
-	opts := container.ListOptions{All: true}
+	opts := client.ContainerListOptions{All: true}
 	if filter.ComposeProject != "" {
-		opts.Filters = filters.NewArgs(filters.Arg("label", labelComposeProject+"="+filter.ComposeProject))
+		opts.Filters = make(client.Filters).Add("label", labelComposeProject+"="+filter.ComposeProject)
 	}
-	list, err := cli.ContainerList(ctx, opts)
+	result, err := cli.ContainerList(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]agent.Container, 0, len(list))
-	for _, c := range list {
+	out := make([]agent.Container, 0, len(result.Items))
+	for _, c := range result.Items {
 		name := ""
 		if len(c.Names) > 0 {
 			name = strings.TrimPrefix(c.Names[0], "/")
@@ -48,15 +47,15 @@ func (d dockerLocal) ListContainers(ctx context.Context, filter agent.ContainerF
 			ID:             c.ID,
 			Name:           name,
 			Image:          c.Image,
-			State:          c.State,
+			State:          string(c.State),
 			ComposeProject: c.Labels[labelComposeProject],
 			ComposeService: c.Labels[labelComposeService],
 			CreatedAt:      time.Unix(c.Created, 0).UTC(),
 		}
 		if c.NetworkSettings != nil {
 			for _, nw := range c.NetworkSettings.Networks {
-				if nw.IPAddress != "" {
-					ac.IPAddress = nw.IPAddress
+				if nw.IPAddress.IsValid() {
+					ac.IPAddress = nw.IPAddress.String()
 					break
 				}
 			}
@@ -81,7 +80,7 @@ func (d dockerLocal) Logs(ctx context.Context, containerID string, opts agent.Lo
 		return err
 	}
 
-	inspect, err := cli.ContainerInspect(ctx, containerID)
+	inspectResult, err := cli.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
 	if err != nil {
 		return err
 	}
@@ -90,7 +89,7 @@ func (d dockerLocal) Logs(ctx context.Context, containerID string, opts agent.Lo
 	if opts.Tail > 0 {
 		tail = fmt.Sprintf("%d", opts.Tail)
 	}
-	rc, err := cli.ContainerLogs(ctx, containerID, container.LogsOptions{
+	rc, err := cli.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     opts.Follow,
@@ -106,7 +105,7 @@ func (d dockerLocal) Logs(ctx context.Context, containerID string, opts agent.Lo
 		out(agent.LogLine{Stream: stream, Text: text, Time: time.Now().UTC()})
 	}
 
-	if inspect.Config != nil && inspect.Config.Tty {
+	if inspectResult.Container.Config != nil && inspectResult.Container.Config.Tty {
 		// TTY containers produce a raw stream.
 		sc := bufio.NewScanner(rc)
 		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -163,7 +162,9 @@ func (d dockerLocal) Stats(ctx context.Context, containerIDs []string) ([]agent.
 
 	out := make([]agent.ContainerStats, 0, len(containerIDs))
 	for _, id := range containerIDs {
-		resp, err := cli.ContainerStatsOneShot(ctx, id)
+		resp, err := cli.ContainerStats(ctx, id, client.ContainerStatsOptions{
+			Stream: false, IncludePreviousSample: true,
+		})
 		if err != nil {
 			continue // container may have exited between list and stats
 		}
@@ -203,7 +204,8 @@ func (d dockerLocal) ImageTag(ctx context.Context, source, target string) error 
 	if err != nil {
 		return err
 	}
-	return cli.ImageTag(ctx, source, target)
+	_, err = cli.ImageTag(ctx, client.ImageTagOptions{Source: source, Target: target})
+	return err
 }
 
 func (d dockerLocal) ImageDigest(ctx context.Context, ref string) (string, error) {
@@ -211,7 +213,7 @@ func (d dockerLocal) ImageDigest(ctx context.Context, ref string) (string, error
 	if err != nil {
 		return "", err
 	}
-	inspect, _, err := cli.ImageInspectWithRaw(ctx, ref)
+	inspect, err := cli.ImageInspect(ctx, ref)
 	if err != nil {
 		return "", err
 	}
@@ -224,21 +226,72 @@ func (d dockerLocal) ImageDigest(ctx context.Context, ref string) (string, error
 	return inspect.ID, nil
 }
 
+func (d dockerLocal) ImageDiskUsage(ctx context.Context) (agent.ImageDiskUsage, error) {
+	cli, err := d.l.docker()
+	if err != nil {
+		return agent.ImageDiskUsage{}, err
+	}
+	usage, err := cli.DiskUsage(ctx, client.DiskUsageOptions{})
+	if err != nil {
+		return agent.ImageDiskUsage{}, err
+	}
+	return agent.ImageDiskUsage{TotalCount: usage.Images.TotalCount,
+		ActiveCount: usage.Images.ActiveCount, TotalBytes: usage.Images.TotalSize,
+		ReclaimableBytes: usage.Images.Reclaimable}, nil
+}
+
+func (d dockerLocal) PruneImages(ctx context.Context, req agent.ImagePruneReq) (agent.ImagePruneResult, error) {
+	cli, err := d.l.docker()
+	if err != nil {
+		return agent.ImagePruneResult{}, err
+	}
+	usage, err := cli.DiskUsage(ctx, client.DiskUsageOptions{})
+	if err != nil {
+		return agent.ImagePruneResult{}, err
+	}
+	protected := make(map[string]bool, len(req.ProtectedDigests))
+	for _, digest := range req.ProtectedDigests {
+		protected[digest] = true
+	}
+	cutoff := time.Now().Add(-time.Duration(req.OlderThanSeconds) * time.Second).Unix()
+	var result agent.ImagePruneResult
+	for _, image := range usage.Images.Items {
+		if image.Containers != 0 || (req.OlderThanSeconds > 0 && image.Created > cutoff) {
+			continue
+		}
+		keep := protected[image.ID]
+		for _, digest := range image.RepoDigests {
+			if protected[digest] || protected[strings.TrimPrefix(digest[strings.LastIndex(digest, "@")+1:], "@")] {
+				keep = true
+			}
+		}
+		if keep {
+			continue
+		}
+		if _, err := cli.ImageRemove(ctx, image.ID, client.ImageRemoveOptions{PruneChildren: true}); err != nil {
+			continue // raced with a deployment or another tag; leave it safely
+		}
+		result.Deleted++
+		result.ReclaimedBytes += image.Size
+	}
+	return result, nil
+}
+
 func (d dockerLocal) Events(ctx context.Context, out func(agent.DockerEvent)) error {
 	cli, err := d.l.docker()
 	if err != nil {
 		return err
 	}
-	msgs, errs := cli.Events(ctx, events.ListOptions{
-		Filters: filters.NewArgs(filters.Arg("type", "container")),
+	result := cli.Events(ctx, client.EventsListOptions{
+		Filters: make(client.Filters).Add("type", "container"),
 	})
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-errs:
+		case err := <-result.Err:
 			return err
-		case m := <-msgs:
+		case m := <-result.Messages:
 			out(agent.DockerEvent{
 				Type:   string(m.Type),
 				Action: string(m.Action),

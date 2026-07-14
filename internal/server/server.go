@@ -22,6 +22,7 @@ func New(cfg config.Config, logger *slog.Logger, a *api.API) (http.Handler, erro
 	r := chi.NewRouter()
 
 	r.Use(middleware.RealIP)
+	r.Use(securityHeaders)
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
 	r.Use(auth.Middleware(a.Auth))
@@ -35,6 +36,21 @@ func New(cfg config.Config, logger *slog.Logger, a *api.API) (http.Handler, erro
 	r.NotFound(spaHandler(dist))
 
 	return r, nil
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self' data:; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'")
+		h.Set("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // spaHandler serves static assets from the embedded frontend build and falls

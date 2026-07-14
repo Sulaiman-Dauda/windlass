@@ -66,6 +66,29 @@ func (s *Service) CreateConnection(ctx context.Context, provider, name, token st
 	return Connection{ID: row.ID, Provider: row.Provider, Name: row.Name}, nil
 }
 
+// UpsertConnection stores a token under a stable name, refreshing the token
+// when the connection already exists. Used by the OAuth connect flow, where
+// reconnecting the same GitHub account should not fail or duplicate.
+func (s *Service) UpsertConnection(ctx context.Context, provider, name, token string) (Connection, error) {
+	if provider != "github" && provider != "gitlab" {
+		return Connection{}, fmt.Errorf("unsupported provider %q", provider)
+	}
+	if name == "" || token == "" {
+		return Connection{}, errors.New("name and token are required")
+	}
+	enc, err := s.box.Encrypt([]byte(token))
+	if err != nil {
+		return Connection{}, err
+	}
+	row, err := s.q.UpsertGitConnection(ctx, db.CreateGitConnectionParams{
+		Provider: provider, Name: name, TokenEnc: enc,
+	})
+	if err != nil {
+		return Connection{}, err
+	}
+	return Connection{ID: row.ID, Provider: row.Provider, Name: row.Name}, nil
+}
+
 func (s *Service) ListConnections(ctx context.Context) ([]Connection, error) {
 	rows, err := s.q.ListGitConnections(ctx)
 	if err != nil {

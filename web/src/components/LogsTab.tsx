@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useServices } from "../api/deployments";
+import { Select } from "../ui/Field";
 
 interface LogLine {
   stream: string;
@@ -14,24 +15,24 @@ export default function LogsTab({ project }: { project: string }) {
 
   return (
     <div>
-      <div className="mb-3 flex items-center gap-2">
-        <span className="text-xs text-zinc-500">Service</span>
-        <select
+      <label className="mb-3 flex items-center gap-2.5">
+        <span className="text-xs font-semibold text-fg2">Service</span>
+        <Select
           value={active ?? ""}
           onChange={(e) => setService(e.target.value)}
-          className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 outline-none"
+          className="w-auto min-w-[10rem]"
         >
           {names.map((n) => (
             <option key={n} value={n}>
               {n}
             </option>
           ))}
-        </select>
-      </div>
+        </Select>
+      </label>
       {active ? (
         <LogStream key={`${project}/${active}`} project={project} service={active} />
       ) : (
-        <p className="text-sm text-zinc-600">No services yet.</p>
+        <p className="text-sm text-fg3">No services yet.</p>
       )}
     </div>
   );
@@ -70,14 +71,14 @@ function LogStream({ project, service }: { project: string; service: string }) {
   return (
     <div
       ref={pane}
-      className="h-96 overflow-auto rounded-md border border-zinc-900 bg-black p-3 font-mono text-xs leading-5"
+      className="max-h-[26rem] overflow-auto rounded-[13px] border border-hairline bg-term p-4 font-mono text-xs leading-relaxed"
     >
       {lines.map((l, i) => (
-        <div key={i} className={l.stream === "stderr" ? "text-amber-300" : "text-zinc-300"}>
+        <div key={i} className={l.stream === "stderr" ? "text-warn" : "text-fg2"}>
           {l.text}
         </div>
       ))}
-      {lines.length === 0 && <span className="text-zinc-600">Waiting for logs…</span>}
+      {lines.length === 0 && <span className="text-fg3">Waiting for logs…</span>}
     </div>
   );
 }

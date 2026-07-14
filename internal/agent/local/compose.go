@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/windlass-dev/windlass/internal/agent"
@@ -143,9 +144,35 @@ func (c composeLocal) PS(ctx context.Context, project string) ([]agent.ServiceSt
 // Windlass needs.
 type composeConfig struct {
 	Services map[string]struct {
-		Image string          `json:"image"`
-		Build json.RawMessage `json:"build"`
+		Image  string          `json:"image"`
+		Build  json.RawMessage `json:"build"`
+		Expose []string        `json:"expose"`
+		Ports  []struct {
+			Target int `json:"target"`
+		} `json:"ports"`
+		Labels   map[string]string `json:"labels"`
+		MemLimit int64             `json:"mem_limit"`
+		CPUs     numberValue       `json:"cpus"`
 	} `json:"services"`
+}
+
+// Compose versions have emitted resource numbers as both JSON numbers and
+// strings. Accept both so a valid compose file never fails panel parsing.
+type numberValue float64
+
+func (n *numberValue) UnmarshalJSON(data []byte) error {
+	var value float64
+	if len(data) > 0 && data[0] == '"' {
+		parsed, err := strconv.ParseFloat(strings.Trim(string(data), `"`), 64)
+		if err != nil {
+			return err
+		}
+		value = parsed
+	} else if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*n = numberValue(value)
+	return nil
 }
 
 func (c composeLocal) Config(ctx context.Context, project string) (agent.ResolvedConfig, error) {
@@ -168,9 +195,30 @@ func (c composeLocal) Config(ctx context.Context, project string) (agent.Resolve
 	}
 	resolved := agent.ResolvedConfig{Services: map[string]agent.ResolvedService{}}
 	for name, svc := range cfg.Services {
+		ports := make([]int, 0, len(svc.Expose)+len(svc.Ports))
+		for _, exposed := range svc.Expose {
+			if port, err := strconv.Atoi(strings.SplitN(exposed, "/", 2)[0]); err == nil {
+				ports = append(ports, port)
+			}
+		}
+		for _, published := range svc.Ports {
+			ports = append(ports, published.Target)
+		}
 		resolved.Services[name] = agent.ResolvedService{
-			Image: svc.Image,
+			Image: svc.Image, ContainerPorts: ports, MemoryLimit: svc.MemLimit, CPULimit: float64(svc.CPUs),
 			Build: len(svc.Build) > 0 && string(svc.Build) != "null",
+		}
+		if rawURL := strings.TrimSpace(svc.Labels["windlass.health.url"]); rawURL != "" {
+			check := agent.ApplicationHealthCheck{Service: name, URL: rawURL,
+				ExpectedStatus: 200, StabilitySeconds: 10}
+			if value, err := strconv.Atoi(svc.Labels["windlass.health.status"]); err == nil && value > 0 {
+				check.ExpectedStatus = value
+			}
+			if value, err := strconv.Atoi(svc.Labels["windlass.health.stability_seconds"]); err == nil && value >= 0 {
+				check.StabilitySeconds = value
+			}
+			check.Contains = svc.Labels["windlass.health.contains"]
+			resolved.HealthChecks = append(resolved.HealthChecks, check)
 		}
 	}
 	return resolved, nil

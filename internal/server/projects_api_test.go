@@ -90,8 +90,18 @@ func TestProjectLifecycleAPI(t *testing.T) {
 		t.Fatalf("write binary = %d, want 400", rec.Code)
 	}
 
-	// Delete removes metadata and directory.
+	// Delete requires the account password, then removes metadata and directory.
 	rec = e.do(t, http.MethodDelete, "/api/v1/projects/crm", nil, cookie)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("delete without password = %d, want 403", rec.Code)
+	}
+	rec = e.do(t, http.MethodDelete, "/api/v1/projects/crm",
+		map[string]string{"password": "wrong-password"}, cookie)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("delete with wrong password = %d, want 403", rec.Code)
+	}
+	rec = e.do(t, http.MethodDelete, "/api/v1/projects/crm",
+		map[string]string{"password": "supersecret123"}, cookie)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d", rec.Code)
 	}

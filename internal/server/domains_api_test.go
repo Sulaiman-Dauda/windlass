@@ -13,6 +13,9 @@ func TestDomainCRUD(t *testing.T) {
 	e := newTestEnv(t)
 	cookie := e.login(t)
 	e.prepareDeployableProject(t, cookie, "app")
+	e.agent.Resolved["app"] = agent.ResolvedConfig{Services: map[string]agent.ResolvedService{
+		"web": {Image: "example/app", ContainerPorts: []int{3000}},
+	}}
 
 	// A running container backs the domain's service.
 	e.agent.Containers = []agent.Container{{
@@ -49,6 +52,15 @@ func TestDomainCRUD(t *testing.T) {
 			t.Errorf("hostname %q = %d, want 400", bad, rec.Code)
 		}
 	}
+	for _, bad := range []map[string]any{
+		{"hostname": "bad-service.example.com", "service": "missing", "container_port": 3000},
+		{"hostname": "bad-port.example.com", "service": "web", "container_port": 8080},
+	} {
+		rec = e.do(t, http.MethodPost, "/api/v1/projects/app/domains", bad, cookie)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("invalid domain target %#v = %d: %s", bad, rec.Code, rec.Body.String())
+		}
+	}
 
 	// List reports status.
 	rec = e.do(t, http.MethodGet, "/api/v1/projects/app/domains", nil, cookie)
@@ -77,6 +89,9 @@ func TestDomainSyncBuildsRoutes(t *testing.T) {
 	e := newTestEnv(t)
 	cookie := e.login(t)
 	e.prepareDeployableProject(t, cookie, "app")
+	e.agent.Resolved["app"] = agent.ResolvedConfig{Services: map[string]agent.ResolvedService{
+		"web": {Image: "example/app", ContainerPorts: []int{3000}},
+	}}
 
 	e.agent.Containers = []agent.Container{{
 		ID: "c1", Name: "app-web-1", State: "running",

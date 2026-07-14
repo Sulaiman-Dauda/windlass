@@ -1,51 +1,75 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { useLogout, type User } from "../api/auth";
+import { Logo } from "../ui/Logo";
+import { Icon, type IconName } from "../ui/Icon";
+import { ThemeToggle } from "../ui/ThemeToggle";
+import { cn } from "../ui/cn";
 
-const nav = [
-  { to: "/", label: "Dashboard" },
-  { to: "/projects", label: "Projects" },
-  { to: "/templates", label: "Templates" },
-  { to: "/settings", label: "Settings" },
+const nav: { to: string; label: string; icon: IconName }[] = [
+  { to: "/", label: "Dashboard", icon: "dashboard" },
+  { to: "/projects", label: "Projects", icon: "projects" },
+  { to: "/templates", label: "Templates", icon: "templates" },
+  { to: "/settings", label: "Settings", icon: "settings" },
 ];
 
 export default function Layout({ user }: { user: User }) {
   const logout = useLogout();
+  const initials = user.email.slice(0, 2).toUpperCase();
 
   return (
-    <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
-      <aside className="flex w-52 flex-col border-r border-zinc-900 p-4">
-        <div className="mb-8 px-2 text-lg font-semibold tracking-tight">
-          Windlass
+    <div className="flex min-h-screen bg-canvas text-fg">
+      <aside className="sticky top-0 flex h-screen w-[244px] flex-none flex-col border-r border-chrome-edge bg-chrome p-3 backdrop-blur-xl">
+        <div className="flex items-center gap-2.5 px-2 pb-1 pt-2">
+          <Logo size={30} />
+          <span className="text-md font-bold tracking-[-0.02em]">Windlass</span>
         </div>
-        <nav className="flex flex-1 flex-col gap-1">
+
+        <nav className="mt-5 flex flex-1 flex-col gap-0.5">
           {nav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === "/"}
               className={({ isActive }) =>
-                `rounded-md px-2 py-1.5 text-sm ${
+                cn(
+                  "flex items-center gap-3 rounded-[10px] px-2.5 py-2 text-sm transition-[background-color,color] duration-200",
                   isActive
-                    ? "bg-zinc-800 text-zinc-100"
-                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-                }`
+                    ? "bg-accent-soft font-semibold text-accent"
+                    : "font-medium text-fg2 hover:bg-surface2 hover:text-fg",
+                )
               }
             >
+              <Icon name={item.icon} size={18} />
               {item.label}
             </NavLink>
           ))}
         </nav>
-        <div className="border-t border-zinc-900 pt-3">
-          <div className="truncate px-2 text-xs text-zinc-500">{user.email}</div>
-          <button
-            onClick={() => logout.mutate()}
-            className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-sm text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-          >
-            Sign out
-          </button>
+
+        <div className="border-t border-hairline pt-2">
+          <div className="flex items-center justify-between px-2 py-2">
+            <span className="text-xs text-fg2">Appearance</span>
+            <ThemeToggle />
+          </div>
+          <div className="flex items-center gap-2.5 rounded-[10px] p-2">
+            <span className="grid h-8 w-8 flex-none place-items-center rounded-full border border-hairline bg-sunken text-xs font-bold text-fg2">
+              {initials}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-xs text-fg3" title={user.email}>
+              {user.email}
+            </span>
+            <button
+              onClick={() => logout.mutate()}
+              title="Sign out"
+              aria-label="Sign out"
+              className="grid h-8 w-8 flex-none place-items-center rounded-[9px] text-fg3 transition-colors duration-200 hover:bg-surface2 hover:text-fg"
+            >
+              <Icon name="signout" size={17} />
+            </button>
+          </div>
         </div>
       </aside>
-      <main className="flex-1 overflow-auto p-8">
+
+      <main className="min-w-0 flex-1 overflow-auto">
         <Outlet />
       </main>
     </div>

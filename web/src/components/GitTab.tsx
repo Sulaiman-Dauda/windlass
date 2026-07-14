@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useProject } from "../api/projects";
+import { Button } from "../ui/Button";
+import { Field, Input, Select } from "../ui/Field";
 
 interface Connection {
   id: number;
@@ -52,7 +54,7 @@ export default function GitTab({ project }: { project: string }) {
 
   return (
     <div className="max-w-2xl">
-      <p className="text-sm text-zinc-500">
+      <p className="text-sm leading-relaxed text-fg2">
         Connect a repository and Windlass deploys on every push to the branch:
         clone/pull → compose pull/build → up. Private repositories need a git
         connection (Settings → Git).
@@ -65,33 +67,27 @@ export default function GitTab({ project }: { project: string }) {
           save.mutate();
         }}
       >
-        <label className="block">
-          <span className="mb-1 block text-xs text-zinc-500">Repository (https clone URL)</span>
-          <input
+        <Field label="Repository (https clone URL)">
+          <Input
             required
             value={repo}
             onChange={(e) => setRepo(e.target.value)}
             placeholder="https://github.com/acme/app.git"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-zinc-600"
           />
-        </label>
+        </Field>
 
         <div className="flex gap-3">
-          <label className="flex-1">
-            <span className="mb-1 block text-xs text-zinc-500">Branch</span>
-            <input
+          <Field label="Branch" className="flex-1">
+            <Input
               required
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-zinc-600"
             />
-          </label>
-          <label className="flex-1">
-            <span className="mb-1 block text-xs text-zinc-500">Connection (private repos)</span>
-            <select
+          </Field>
+          <Field label="Connection (private repos)" className="flex-1">
+            <Select
               value={connectionId}
               onChange={(e) => setConnectionId(parseInt(e.target.value, 10))}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-zinc-600"
             >
               <option value={0}>None (public repo)</option>
               {connections.data?.map((c) => (
@@ -99,52 +95,47 @@ export default function GitTab({ project }: { project: string }) {
                   {c.name} ({c.provider})
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </Field>
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-zinc-300">
+        <label className="flex items-center gap-2.5 text-sm text-fg">
           <input
             type="checkbox"
             checked={autoDeploy}
             onChange={(e) => setAutoDeploy(e.target.checked)}
+            className="h-[18px] w-[18px] flex-none rounded-[6px] accent-[var(--color-accent-fill)]"
           />
           Deploy automatically on push
         </label>
 
-        <button
-          type="submit"
-          disabled={save.isPending}
-          className="rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
-        >
+        <Button type="submit" variant="primary" disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save git settings"}
-        </button>
+        </Button>
         {save.isError && (
-          <p className="text-sm text-red-400">
+          <p className="text-sm text-err">
             {save.error instanceof Error ? save.error.message : "Save failed"}
           </p>
         )}
       </form>
 
       {secret && (
-        <div className="mt-6 rounded-md border border-emerald-900/50 bg-emerald-950/20 p-4 text-sm">
-          <p className="font-medium text-emerald-300">
-            Add this webhook to your repository
-          </p>
-          <dl className="mt-3 space-y-2 text-zinc-300">
+        <div className="mt-6 rounded-[10px] bg-ok-soft px-4 py-3.5 text-sm text-ok">
+          <p className="font-semibold">Add this webhook to your repository</p>
+          <dl className="mt-3 space-y-2">
             <div>
-              <dt className="text-xs text-zinc-500">Payload URL (GitHub) — use /gitlab/ for GitLab</dt>
-              <dd className="font-mono text-xs">{webhookUrl}</dd>
+              <dt className="text-xs font-semibold text-fg3">Payload URL (GitHub) — use /gitlab/ for GitLab</dt>
+              <dd className="font-mono text-xs text-fg2 break-all">{webhookUrl}</dd>
             </div>
             <div>
-              <dt className="text-xs text-zinc-500">
+              <dt className="text-xs font-semibold text-fg3">
                 Secret (shown once — GitHub: webhook secret · GitLab: secret token)
               </dt>
-              <dd className="font-mono text-xs">{secret}</dd>
+              <dd className="font-mono text-xs text-fg2 break-all">{secret}</dd>
             </div>
             <div>
-              <dt className="text-xs text-zinc-500">Content type</dt>
-              <dd className="font-mono text-xs">application/json</dd>
+              <dt className="text-xs font-semibold text-fg3">Content type</dt>
+              <dd className="font-mono text-xs text-fg2 break-all">application/json</dd>
             </div>
           </dl>
         </div>

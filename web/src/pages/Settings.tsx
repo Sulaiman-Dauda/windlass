@@ -1,6 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { Page } from "../ui/Page";
+import { Card } from "../ui/Card";
+import { Button, btn } from "../ui/Button";
+import { Input, Select, Field } from "../ui/Field";
+import { StatusPill, Chip } from "../ui/Badge";
+import { Icon } from "../ui/Icon";
+import { ThemeToggle } from "../ui/ThemeToggle";
+import { cn } from "../ui/cn";
 
 interface Connection {
   id: number;
@@ -10,40 +19,172 @@ interface Connection {
 
 export default function Settings() {
   return (
-    <div>
-      <h1 className="text-xl font-semibold">Settings</h1>
-      <div className="mt-6 max-w-2xl space-y-10">
+    <Page title="Settings">
+      <div className="max-w-[760px]">
+        <AppearanceSection />
+        <PanelDomainSection />
         <SecuritySection />
+        <OAuthAppsSection />
         <GitConnections />
         <UsersSection />
+        <DockerStorageSection />
         <UpdateSection />
       </div>
+    </Page>
+  );
+}
+
+// ---------- Layout helpers ----------
+
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="mb-7">
+      <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.03em] text-fg3">{title}</div>
+      <Card className="overflow-hidden p-0">
+        <div className="divide-y divide-hairline">{children}</div>
+      </Card>
+    </section>
+  );
+}
+
+function Row({
+  title,
+  desc,
+  children,
+  stack,
+}: {
+  title?: ReactNode;
+  desc?: ReactNode;
+  children?: ReactNode;
+  stack?: boolean;
+}) {
+  return (
+    <div className={cn("flex gap-4 px-5 py-4", stack ? "flex-col items-stretch" : "items-center")}>
+      {(title || desc) && (
+        <div className="min-w-0 flex-1">
+          {title && <div className="text-md font-semibold">{title}</div>}
+          {desc && <div className="mt-0.5 text-sm leading-normal text-fg3">{desc}</div>}
+        </div>
+      )}
+      {children && <div className={cn(stack ? "" : "flex flex-none items-center gap-2.5")}>{children}</div>}
     </div>
   );
 }
+
+function Notice({ tone, children, onClose }: { tone: "ok" | "err"; children: ReactNode; onClose?: () => void }) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-2 rounded-[10px] px-3.5 py-2.5 text-sm",
+        tone === "ok" ? "bg-ok-soft text-ok" : "bg-err-soft text-err",
+      )}
+    >
+      <span className="flex-1">{children}</span>
+      {onClose && (
+        <button onClick={onClose} className="opacity-70 hover:opacity-100" aria-label="Dismiss">
+          <Icon name="x" size={15} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------- Appearance ----------
+
+function AppearanceSection() {
+  return (
+    <Group title="Appearance">
+      <Row title="Theme" desc="Auto matches your system between light and dark automatically.">
+        <ThemeToggle />
+      </Row>
+    </Group>
+  );
+}
+
+// ---------- Panel domain ----------
+
+interface PanelDomainStatus {
+  hostname: string;
+  url?: string;
+  configured: boolean;
+  proxy_available: boolean;
+}
+
+function PanelDomainSection() {
+  const qc = useQueryClient();
+  const status = useQuery<PanelDomainStatus>({
+    queryKey: ["system", "panel-domain"],
+    queryFn: () => api("/system/panel-domain"),
+    retry: false,
+  });
+  const [hostname, setHostname] = useState("");
+  useEffect(() => {
+    if (status.data) setHostname(status.data.hostname);
+  }, [status.data]);
+  const save = useMutation<PanelDomainStatus, Error, string>({
+    mutationFn: (value) => api("/system/panel-domain", { method: "PUT", body: JSON.stringify({ hostname: value }) }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["system", "panel-domain"] }),
+  });
+
+  if (status.isError) return null;
+  return (
+    <Group title="Panel domain">
+      <Row
+        title="Hostname"
+        desc="Point this name's DNS A/AAAA record at the server; Windlass adds its own Caddy route and gets HTTPS automatically."
+        stack
+      >
+        <div className="mt-1 flex gap-2">
+          <Input
+            value={hostname}
+            onChange={(e) => setHostname(e.target.value.toLowerCase())}
+            placeholder="windlass.example.com"
+          />
+          <Button variant="primary" onClick={() => save.mutate(hostname.trim())} disabled={save.isPending}>
+            {save.isPending ? "Saving…" : "Save"}
+          </Button>
+        </div>
+        {status.data?.configured && (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <StatusPill tone={status.data.proxy_available ? "ok" : "warn"}>
+              {status.data.proxy_available ? "Active" : "Caddy unavailable"}
+            </StatusPill>
+            <a className="font-mono text-sm text-accent hover:underline" href={status.data.url}>
+              {status.data.url}
+            </a>
+            <button
+              className="text-xs text-fg3 hover:text-err"
+              onClick={() => { setHostname(""); save.mutate(""); }}
+            >
+              Remove
+            </button>
+          </div>
+        )}
+        {save.isError && (
+          <p className="mt-2 text-sm text-err">
+            {save.error instanceof Error ? save.error.message : "Could not configure panel domain"}
+          </p>
+        )}
+      </Row>
+    </Group>
+  );
+}
+
+// ---------- Two-factor ----------
 
 function SecuritySection() {
   const [enroll, setEnroll] = useState<{ secret: string; otpauth_url: string } | null>(null);
   const [code, setCode] = useState("");
   const qc = useQueryClient();
-  const me = useQuery<{ totp_enabled: boolean }>({
-    queryKey: ["auth", "me"],
-    queryFn: () => api("/auth/me"),
-  });
+  const me = useQuery<{ totp_enabled: boolean }>({ queryKey: ["auth", "me"], queryFn: () => api("/auth/me") });
 
   const begin = useMutation({
-    mutationFn: () =>
-      api<{ secret: string; otpauth_url: string }>("/auth/totp/setup", { method: "POST" }),
+    mutationFn: () => api<{ secret: string; otpauth_url: string }>("/auth/totp/setup", { method: "POST" }),
     onSuccess: setEnroll,
   });
   const verify = useMutation({
-    mutationFn: () =>
-      api("/auth/totp/verify", { method: "POST", body: JSON.stringify({ code }) }),
-    onSuccess: () => {
-      setEnroll(null);
-      setCode("");
-      qc.invalidateQueries({ queryKey: ["auth", "me"] });
-    },
+    mutationFn: () => api("/auth/totp/verify", { method: "POST", body: JSON.stringify({ code }) }),
+    onSuccess: () => { setEnroll(null); setCode(""); qc.invalidateQueries({ queryKey: ["auth", "me"] }); },
   });
   const disable = useMutation({
     mutationFn: () => api("/auth/totp/disable", { method: "POST" }),
@@ -51,63 +192,224 @@ function SecuritySection() {
   });
 
   return (
-    <section>
-      <h2 className="text-base font-medium">Two-factor authentication</h2>
+    <Group title="Two-factor authentication">
       {me.data?.totp_enabled ? (
-        <div className="mt-2 flex items-center gap-4">
-          <span className="text-sm text-emerald-400">TOTP is enabled</span>
-          <button
-            onClick={() => disable.mutate()}
-            className="text-xs text-zinc-500 hover:text-red-400"
-          >
-            Disable
-          </button>
-        </div>
+        <Row title="Authenticator app" desc="An authenticator code is required at sign-in.">
+          <StatusPill tone="ok">Enabled</StatusPill>
+          <Button size="sm" variant="ghost" onClick={() => disable.mutate()}>Disable</Button>
+        </Row>
       ) : enroll ? (
-        <div className="mt-3 space-y-3 rounded-md border border-zinc-900 p-4 text-sm">
-          <p className="text-zinc-400">
-            Add this secret to your authenticator app, then confirm a code:
-          </p>
-          <code className="block break-all rounded bg-zinc-900 p-2 font-mono text-xs">
-            {enroll.secret}
-          </code>
-          <code className="block break-all rounded bg-zinc-900 p-2 font-mono text-xs text-zinc-500">
-            {enroll.otpauth_url}
-          </code>
-          <div className="flex gap-2">
-            <input
+        <Row title="Set up authenticator" stack>
+          <p className="text-sm text-fg2">Add this secret to your authenticator app, then confirm a code:</p>
+          <code className="mt-2 block break-all rounded-[8px] bg-sunken p-2.5 font-mono text-xs">{enroll.secret}</code>
+          <code className="mt-2 block break-all rounded-[8px] bg-sunken p-2.5 font-mono text-xs text-fg3">{enroll.otpauth_url}</code>
+          <div className="mt-3 flex gap-2">
+            <Input
               inputMode="numeric"
               maxLength={6}
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
               placeholder="123456"
-              className="w-32 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-center font-mono text-sm text-zinc-100 outline-none"
+              className="w-36 text-center font-mono tracking-[0.3em]"
             />
-            <button
-              onClick={() => verify.mutate()}
-              disabled={code.length !== 6 || verify.isPending}
-              className="rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 disabled:opacity-50"
-            >
+            <Button variant="primary" onClick={() => verify.mutate()} disabled={code.length !== 6 || verify.isPending}>
               Confirm
-            </button>
+            </Button>
           </div>
           {verify.isError && (
-            <p className="text-red-400">
+            <p className="mt-2 text-sm text-err">
               {verify.error instanceof Error ? verify.error.message : "Invalid code"}
             </p>
           )}
-        </div>
+        </Row>
       ) : (
-        <button
-          onClick={() => begin.mutate()}
-          className="mt-2 rounded-md border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900"
-        >
-          Enable TOTP
-        </button>
+        <Row title="Authenticator app" desc="Add a second factor with any TOTP authenticator.">
+          <Button size="sm" onClick={() => begin.mutate()}>Enable TOTP</Button>
+        </Row>
       )}
-    </section>
+    </Group>
   );
 }
+
+// ---------- OAuth applications ----------
+
+function OAuthAppsSection() {
+  const qc = useQueryClient();
+  const me = useQuery<{ role: string }>({ queryKey: ["auth", "me"], queryFn: () => api("/auth/me") });
+  const providers = useQuery<{ github: boolean; google: boolean }>({
+    queryKey: ["auth", "oauth-providers"],
+    queryFn: () => api("/auth/oauth/providers"),
+  });
+
+  const [provider, setProvider] = useState("github");
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+
+  const save = useMutation({
+    mutationFn: () =>
+      api(`/system/oauth/${provider}`, {
+        method: "PUT",
+        body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+      }),
+    onSuccess: () => { setClientId(""); setClientSecret(""); qc.invalidateQueries({ queryKey: ["auth", "oauth-providers"] }); },
+  });
+
+  if (me.data?.role !== "admin") return null;
+  const callbackUrl = `${window.location.origin}/api/v1/auth/oauth/${provider}/callback`;
+
+  return (
+    <Group title="OAuth applications">
+      <Row
+        title="Connect an identity provider"
+        desc="Enables sign-in with GitHub/Google and one-click GitHub repository connections. Register an app with this callback URL, then paste its credentials."
+        stack
+      >
+        <Chip className="mt-1 self-start break-all">{callbackUrl}</Chip>
+        <form
+          className="mt-3 flex flex-wrap items-end gap-2.5"
+          onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
+        >
+          <Field label="Provider" className="w-[130px]">
+            <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
+              <option value="github">GitHub</option>
+              <option value="google">Google</option>
+            </Select>
+          </Field>
+          <Field label="Client ID" className="min-w-[160px] flex-1">
+            <Input required value={clientId} onChange={(e) => setClientId(e.target.value)} className="font-mono" />
+          </Field>
+          <Field label="Client secret" className="min-w-[160px] flex-1">
+            <Input required type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
+          </Field>
+          <Button type="submit" variant="primary" disabled={save.isPending}>Save</Button>
+        </form>
+        <div className="mt-3 flex gap-4 text-xs text-fg3">
+          <span>GitHub · {providers.data?.github ? <span className="text-ok">configured</span> : "not configured"}</span>
+          <span>Google · {providers.data?.google ? <span className="text-ok">configured</span> : "not configured"}</span>
+        </div>
+        {save.isError && (
+          <p className="mt-2 text-sm text-err">
+            {save.error instanceof Error ? save.error.message : "Failed to save"}
+          </p>
+        )}
+      </Row>
+    </Group>
+  );
+}
+
+// ---------- Git connections ----------
+
+const gitErrorMessages: Record<string, string> = {
+  not_configured: "The GitHub OAuth app is not configured.",
+  state_mismatch: "The authorization state did not match — try connecting again.",
+  exchange_failed: "GitHub rejected the authorization code — try connecting again.",
+  profile_failed: "Connected, but the GitHub profile could not be read.",
+};
+
+function GitConnections() {
+  const qc = useQueryClient();
+  const connections = useQuery<Connection[]>({ queryKey: ["git", "connections"], queryFn: () => api("/git/connections") });
+  const providers = useQuery<{ github: boolean; google: boolean }>({
+    queryKey: ["auth", "oauth-providers"],
+    queryFn: () => api("/auth/oauth/providers"),
+  });
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const connected = searchParams.get("git_connected");
+  const gitError = searchParams.get("git_error");
+
+  const [provider, setProvider] = useState("github");
+  const [name, setName] = useState("");
+  const [token, setToken] = useState("");
+  const [manualOpen, setManualOpen] = useState(false);
+
+  const add = useMutation({
+    mutationFn: () => api("/git/connections", { method: "POST", body: JSON.stringify({ provider, name, token }) }),
+    onSuccess: () => { setName(""); setToken(""); setManualOpen(false); qc.invalidateQueries({ queryKey: ["git", "connections"] }); },
+  });
+  const remove = useMutation({
+    mutationFn: (id: number) => api(`/git/connections/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["git", "connections"] }),
+  });
+
+  return (
+    <Group title="Git connections">
+      <Row
+        title="Private repository access"
+        desc="Tokens are stored encrypted and never written to disk."
+        stack
+      >
+        {connected && (
+          <div className="mb-3">
+            <Notice tone="ok" onClose={() => setSearchParams({}, { replace: true })}>
+              GitHub account connected as <span className="font-mono">{connected}</span>.
+            </Notice>
+          </div>
+        )}
+        {gitError && (
+          <div className="mb-3">
+            <Notice tone="err" onClose={() => setSearchParams({}, { replace: true })}>
+              {gitErrorMessages[gitError] ?? "GitHub connect failed."}
+            </Notice>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          {providers.data?.github ? (
+            <a href="/api/v1/git/connections/github/connect" className={btn("primary", "md")}>
+              <Icon name="github" size={16} /> Connect GitHub
+            </a>
+          ) : (
+            <p className="text-sm text-fg3">Configure a GitHub OAuth app above for one-click connect.</p>
+          )}
+          <Button variant="ghost" onClick={() => setManualOpen((o) => !o)}>
+            {manualOpen ? "Cancel manual token" : "Add a token manually"}
+          </Button>
+        </div>
+
+        {manualOpen && (
+          <form
+            className="mt-4 flex flex-wrap items-end gap-2.5"
+            onSubmit={(e) => { e.preventDefault(); add.mutate(); }}
+          >
+            <Field label="Provider" className="w-[120px]">
+              <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
+                <option value="github">GitHub</option>
+                <option value="gitlab">GitLab</option>
+              </Select>
+            </Field>
+            <Field label="Name" className="w-[150px]">
+              <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="acme-bot" />
+            </Field>
+            <Field label="Token" className="min-w-[160px] flex-1">
+              <Input required type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="ghp_… / glpat-…" />
+            </Field>
+            <Button type="submit" variant="primary" disabled={add.isPending}>Add</Button>
+          </form>
+        )}
+        {add.isError && (
+          <p className="mt-2 text-sm text-err">{add.error instanceof Error ? add.error.message : "Failed"}</p>
+        )}
+
+        {connections.data && connections.data.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {connections.data.map((c) => (
+              <div key={c.id} className="flex items-center justify-between rounded-[10px] border border-hairline bg-surface2 px-4 py-2.5">
+                <div className="flex items-center gap-2.5 text-sm">
+                  <span className="font-mono font-medium">{c.name}</span>
+                  <StatusPill tone="idle">{c.provider}</StatusPill>
+                </div>
+                <button onClick={() => remove.mutate(c.id)} className="text-xs text-fg3 hover:text-err">Remove</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Row>
+    </Group>
+  );
+}
+
+// ---------- Users ----------
 
 interface AdminUser {
   id: number;
@@ -120,114 +422,126 @@ interface AdminUser {
 
 function UsersSection() {
   const qc = useQueryClient();
-  const users = useQuery<AdminUser[]>({
-    queryKey: ["users"],
-    queryFn: () => api("/users"),
-    retry: false, // 403 for non-admins
-  });
+  const users = useQuery<AdminUser[]>({ queryKey: ["users"], queryFn: () => api("/users"), retry: false });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("member");
 
   const create = useMutation({
-    mutationFn: () =>
-      api("/users", { method: "POST", body: JSON.stringify({ email, password, role }) }),
-    onSuccess: () => {
-      setEmail("");
-      setPassword("");
-      qc.invalidateQueries({ queryKey: ["users"] });
-    },
+    mutationFn: () => api("/users", { method: "POST", body: JSON.stringify({ email, password, role }) }),
+    onSuccess: () => { setEmail(""); setPassword(""); qc.invalidateQueries({ queryKey: ["users"] }); },
   });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/users/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
   });
 
-  if (users.isError) return null; // not an admin
+  if (users.isError) return null;
 
   return (
-    <section>
-      <h2 className="text-base font-medium">Users</h2>
-      <form
-        className="mt-3 flex items-end gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          create.mutate();
-        }}
-      >
-        <label className="flex-1">
-          <span className="mb-1 block text-xs text-zinc-500">Email</span>
-          <input
-            required
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 outline-none"
-          />
-        </label>
-        <label>
-          <span className="mb-1 block text-xs text-zinc-500">Password (min 10)</span>
-          <input
-            type="password"
-            minLength={10}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="empty = OAuth-only"
-            className="w-44 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 outline-none"
-          />
-        </label>
-        <label>
-          <span className="mb-1 block text-xs text-zinc-500">Role</span>
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-100 outline-none"
-          >
-            <option value="viewer">viewer</option>
-            <option value="member">member</option>
-            <option value="admin">admin</option>
-          </select>
-        </label>
-        <button
-          type="submit"
-          disabled={create.isPending}
-          className="rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 disabled:opacity-50"
-        >
-          Add
-        </button>
-      </form>
-      {create.isError && (
-        <p className="mt-2 text-sm text-red-400">
-          {create.error instanceof Error ? create.error.message : "Failed"}
-        </p>
-      )}
-      <div className="mt-3 space-y-2">
-        {users.data?.map((u) => (
-          <div
-            key={u.id}
-            className="flex items-center justify-between rounded-md border border-zinc-900 bg-zinc-900/40 px-4 py-2.5 text-sm"
-          >
-            <div>
-              {u.email}
-              <span className="ml-2 text-xs text-zinc-500">
-                {u.role}
-                {u.totp_enabled ? " · 2FA" : ""}
-              </span>
-            </div>
-            <button
-              onClick={() => {
-                if (confirm(`Delete user ${u.email}?`)) remove.mutate(u.id);
-              }}
-              className="text-xs text-zinc-500 hover:text-red-400"
-            >
-              Remove
-            </button>
+    <Group title="Users">
+      <Row stack>
+        <form className="flex flex-wrap items-end gap-2.5" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
+          <Field label="Email" className="min-w-[180px] flex-1">
+            <Input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+          <Field label="Password (min 10)" className="w-[180px]">
+            <Input type="password" minLength={10} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="empty = OAuth-only" />
+          </Field>
+          <Field label="Role" className="w-[130px]">
+            <Select value={role} onChange={(e) => setRole(e.target.value)}>
+              <option value="viewer">viewer</option>
+              <option value="member">member</option>
+              <option value="admin">admin</option>
+            </Select>
+          </Field>
+          <Button type="submit" variant="primary" disabled={create.isPending}>Add</Button>
+        </form>
+        {create.isError && (
+          <p className="mt-2 text-sm text-err">{create.error instanceof Error ? create.error.message : "Failed"}</p>
+        )}
+        {users.data && users.data.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {users.data.map((u) => (
+              <div key={u.id} className="flex items-center justify-between rounded-[10px] border border-hairline bg-surface2 px-4 py-2.5 text-sm">
+                <div className="flex items-center gap-2.5">
+                  <span className="font-medium">{u.email}</span>
+                  <StatusPill tone={u.role === "admin" ? "accent" : "idle"}>{u.role}</StatusPill>
+                  {u.totp_enabled && <span className="text-xs text-fg3">2FA</span>}
+                </div>
+                <button
+                  onClick={() => { if (confirm(`Delete user ${u.email}?`)) remove.mutate(u.id); }}
+                  className="text-xs text-fg3 hover:text-err"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-    </section>
+        )}
+      </Row>
+    </Group>
   );
 }
+
+// ---------- Docker storage ----------
+
+interface ImageDiskUsage {
+  total_count: number;
+  active_count: number;
+  total_bytes: number;
+  reclaimable_bytes: number;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KiB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GiB`;
+}
+
+function DockerStorageSection() {
+  const qc = useQueryClient();
+  const usage = useQuery<ImageDiskUsage>({ queryKey: ["system", "docker", "images"], queryFn: () => api("/system/docker/images"), retry: false });
+  const prune = useMutation<{ deleted: number; reclaimed_bytes: number }>({
+    mutationFn: () => api("/system/docker/images/prune", { method: "POST", body: JSON.stringify({ retention_days: 7, keep_deployments: 5 }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["system", "docker", "images"] }),
+  });
+
+  if (usage.isError) return null;
+  return (
+    <Group title="Docker image storage">
+      <Row
+        title="Reclaim disk space"
+        desc={
+          usage.data
+            ? `${usage.data.total_count} images use ${formatBytes(usage.data.total_bytes)}; ${formatBytes(usage.data.reclaimable_bytes)} potentially reclaimable.`
+            : "Calculating image usage…"
+        }
+        stack
+      >
+        <div className="mt-1">
+          <Button
+            size="sm"
+            onClick={() => {
+              if (confirm("Remove unused images older than 7 days while preserving the last 5 successful deployments per project?")) prune.mutate();
+            }}
+            disabled={prune.isPending}
+          >
+            {prune.isPending ? "Cleaning…" : "Clean unused images"}
+          </Button>
+        </div>
+        {prune.data && (
+          <p className="mt-2 text-sm text-ok">Removed {prune.data.deleted} images ({formatBytes(prune.data.reclaimed_bytes)}).</p>
+        )}
+        {prune.isError && (
+          <p className="mt-2 text-sm text-err">{prune.error instanceof Error ? prune.error.message : "Cleanup failed"}</p>
+        )}
+      </Row>
+    </Group>
+  );
+}
+
+// ---------- Updates ----------
 
 interface UpdateInfo {
   version: string;
@@ -236,163 +550,38 @@ interface UpdateInfo {
 }
 
 function UpdateSection() {
-  const check = useQuery<UpdateInfo>({
-    queryKey: ["system", "update"],
-    queryFn: () => api("/system/update"),
-    retry: false,
-  });
-  const apply = useMutation({
-    mutationFn: () => api("/system/update", { method: "POST" }),
-  });
+  const check = useQuery<UpdateInfo>({ queryKey: ["system", "update"], queryFn: () => api("/system/update"), retry: false });
+  const apply = useMutation({ mutationFn: () => api("/system/update", { method: "POST" }) });
 
-  if (check.isError) return null; // not admin, or offline
+  if (check.isError) return null;
 
   return (
-    <section>
-      <h2 className="text-base font-medium">Updates</h2>
-      <div className="mt-2 text-sm text-zinc-400">
-        Running {check.data?.current_version ?? "…"}
-        {check.data?.update_available ? (
-          <span className="ml-3">
-            <span className="text-amber-400">{check.data.version} available</span>
-            <button
-              onClick={() => apply.mutate()}
-              disabled={apply.isPending}
-              className="ml-3 rounded-md bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-900 disabled:opacity-50"
-            >
-              {apply.isPending ? "Updating…" : "Update now"}
-            </button>
-          </span>
-        ) : (
-          <span className="ml-2 text-zinc-600">— up to date</span>
-        )}
-      </div>
-      {apply.isSuccess && (
-        <p className="mt-2 text-sm text-emerald-400">
-          Updating — the panel restarts in a few seconds. Deployed apps are unaffected.
-        </p>
-      )}
-      {apply.isError && (
-        <p className="mt-2 text-sm text-red-400">
-          {apply.error instanceof Error ? apply.error.message : "Update failed"}
-        </p>
-      )}
-    </section>
-  );
-}
-
-function GitConnections() {
-  const qc = useQueryClient();
-  const connections = useQuery<Connection[]>({
-    queryKey: ["git", "connections"],
-    queryFn: () => api("/git/connections"),
-  });
-
-  const [provider, setProvider] = useState("github");
-  const [name, setName] = useState("");
-  const [token, setToken] = useState("");
-
-  const add = useMutation({
-    mutationFn: () =>
-      api("/git/connections", {
-        method: "POST",
-        body: JSON.stringify({ provider, name, token }),
-      }),
-    onSuccess: () => {
-      setName("");
-      setToken("");
-      qc.invalidateQueries({ queryKey: ["git", "connections"] });
-    },
-  });
-  const remove = useMutation({
-    mutationFn: (id: number) =>
-      api(`/git/connections/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["git", "connections"] }),
-  });
-
-  return (
-    <section>
-      <h2 className="text-base font-medium">Git connections</h2>
-      <p className="mt-1 text-sm text-zinc-500">
-        Personal access tokens for private repositories. Stored encrypted;
-        used only during git sync, never written to disk.
-      </p>
-
-      <form
-        className="mt-4 flex items-end gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          add.mutate();
-        }}
+    <Group title="Software updates">
+      <Row
+        title={`Running ${check.data?.current_version ?? "…"}`}
+        desc={check.data?.update_available ? `Version ${check.data.version} is available.` : "You're up to date."}
       >
-        <label>
-          <span className="mb-1 block text-xs text-zinc-500">Provider</span>
-          <select
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-            className="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-          >
-            <option value="github">GitHub</option>
-            <option value="gitlab">GitLab</option>
-          </select>
-        </label>
-        <label>
-          <span className="mb-1 block text-xs text-zinc-500">Name</span>
-          <input
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="acme-bot"
-            className="w-36 rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-          />
-        </label>
-        <label className="flex-1">
-          <span className="mb-1 block text-xs text-zinc-500">Token</span>
-          <input
-            required
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="ghp_… / glpat-…"
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={add.isPending}
-          className="rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
-        >
-          Add
-        </button>
-      </form>
-      {add.isError && (
-        <p className="mt-2 text-sm text-red-400">
-          {add.error instanceof Error ? add.error.message : "Failed"}
-        </p>
-      )}
-
-      <div className="mt-4 space-y-2">
-        {connections.data?.map((c) => (
-          <div
-            key={c.id}
-            className="flex items-center justify-between rounded-md border border-zinc-900 bg-zinc-900/40 px-4 py-2.5"
-          >
-            <div className="text-sm">
-              {c.name}
-              <span className="ml-2 text-xs text-zinc-500">{c.provider}</span>
-            </div>
-            <button
-              onClick={() => remove.mutate(c.id)}
-              className="text-xs text-zinc-500 hover:text-red-400"
-            >
-              Remove
-            </button>
-          </div>
-        ))}
-        {connections.data?.length === 0 && (
-          <p className="text-sm text-zinc-600">No connections yet.</p>
+        {check.data?.update_available ? (
+          <>
+            <StatusPill tone="warn">Update available</StatusPill>
+            <Button size="sm" variant="primary" onClick={() => apply.mutate()} disabled={apply.isPending}>
+              {apply.isPending ? "Updating…" : "Update now"}
+            </Button>
+          </>
+        ) : (
+          <StatusPill tone="ok">Up to date</StatusPill>
         )}
-      </div>
-    </section>
+      </Row>
+      {(apply.isSuccess || apply.isError) && (
+        <Row stack>
+          {apply.isSuccess && (
+            <p className="text-sm text-ok">Updating — the panel restarts in a few seconds. Deployed apps are unaffected.</p>
+          )}
+          {apply.isError && (
+            <p className="text-sm text-err">{apply.error instanceof Error ? apply.error.message : "Update failed"}</p>
+          )}
+        </Row>
+      )}
+    </Group>
   );
 }

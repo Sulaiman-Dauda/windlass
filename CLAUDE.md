@@ -1,37 +1,57 @@
-# Windlass
+# Windlass contributor guide
 
-A lightweight, self-hosted Docker Compose control plane (Coolify alternative). Single Go binary with an embedded React frontend; Caddy for routing/TLS; SQLite for metadata only.
+Windlass is a single-Go-process Docker Compose control plane with an embedded React SPA,
+Caddy integration, and SQLite platform storage.
 
-## Non-negotiable principles
+## Architectural rules
 
-1. Docker Compose is the source of truth — projects are plain directories (`compose.yaml` + `.env`) a user can edit by hand.
-2. If the panel is removed, every deployed app keeps running.
-3. Every privileged operation (Docker, Caddy, project FS, exec) goes through `internal/agent` — the future mTLS node-agent boundary. Only `internal/agent/local` may import the Docker SDK (enforced by depguard).
-4. SQLite stores metadata only, never application state. No Redis/queues/Prometheus/K8s. Minimal dependencies — each one must justify itself.
-5. Idle RAM budget: <40MB for the Go process. Deployments are idempotent and resumable.
-6. All APIs live under `/api/v1`. Every operation emits structured events (SSE) and audit-log entries.
+1. The project filesystem is authoritative for application configuration. Compose owns
+   service configuration; `.env` owns environment values; `.windlass.json` owns the small
+   amount of Windlass-specific application configuration.
+2. SQLite stores platform state and rebuildable indexes/caches. Never make a running
+   application depend on a database-only copy of Compose configuration.
+3. Deployed containers must continue running if Windlass stops or is removed.
+4. Privileged operations go through `internal/agent`. Only `internal/agent/local` imports
+   Docker/Moby packages or directly accesses Docker, Caddy, project files, Git, or exec.
+5. Compose operations shell out to `docker compose`; do not reconstruct container specs.
+6. Caddy changes use targeted `@id` operations. Windlass owns `windlass_routes`,
+   `windlass_panel_route`, and their child `windlass_route_*` objects only. Never load or
+   replace the complete Caddy configuration.
+7. The installed service reaches Docker through the restricted loopback socket proxy. Do
+   not add the `windlass` user to the `docker` group.
+8. Keep the Go process below the 40 MiB CI idle-RSS budget and avoid always-on dependencies.
+9. APIs are versioned under `/api/v1`; state-changing handlers require the appropriate role
+   and write audit entries.
 
-## Build & test
+## Source tree
 
-- `go test ./...` — unit tests, run anywhere (Windows-safe; uses `internal/agent/fake`). Never requires Node or Docker.
-- `go build ./cmd/windlass` — dev binary with a placeholder frontend (no Node needed).
-- `cd web && npm run build` then `go build -tags embedweb ./cmd/windlass` — production binary with embedded SPA.
-- `go test -tags integration ./...` — real Docker + Caddy; Linux/CI only, never on this Windows dev machine.
-- Frontend dev: `npm run dev` in web/ (proxies `/api` to :8080) alongside `go run ./cmd/windlass`.
+- `cmd/windlass`: configuration, dependency wiring, lifecycle
+- `internal/agent`: privileged-operation interfaces; `local` and deterministic `fake`
+- `internal/projects`: filesystem discovery, manifests, files, and `.env` synchronization
+- `internal/deploy`: resumable Compose deployment state machine
+- `internal/proxy`: domain desired state and Caddy reconciliation
+- `internal/store`: SQLite setup, generated sqlc queries, and custom rebuild helpers
+- `internal/server` and `internal/api`: routing, middleware, streaming, and thin handlers
+- `web`: React/Vite frontend embedded with the `embedweb` tag
+- `migrations`: forward-only embedded SQLite migrations
+- `install`: systemd and Docker Compose installation methods
 
-### Windows dev machine notes
+## Build and test
 
-- Go lives at `%LOCALAPPDATA%\go-toolchain\go\bin\go.exe` (zip install, no admin). If `go` is not on PATH, use the full path.
-- Docker is NOT available locally — anything touching `agent/local` Docker/Caddy code is compile-checked here, behavior-tested in CI.
+```sh
+go test ./...
+go vet ./...
+cd web && npm run build
+go test -tags integration ./...  # Linux, Docker, and Caddy required
+```
 
-## Architecture map
+For a production binary, build the frontend first and then use:
 
-- `cmd/windlass` — entrypoint, wiring
-- `internal/agent` — privileged-op interfaces (serializable types only; no Docker SDK types leak out); `local/` real impl, `fake/` for unit tests
-- `internal/server` — chi router, middleware, SSE/WS plumbing, SPA serving
-- `internal/api` — thin /api/v1 handlers → services
-- `internal/{projects,deploy,jobs,events,proxy,git,secrets,dbtemplates,backups,metrics,plugins,update,terminal}` — one service package per subsystem
-- `internal/store` — sqlc queries + embedded migrations; `migrations/*.sql` forward-only
-- `web/` — React+Vite+Tailwind SPA, embedded via `web/embed.go` behind the `embedweb` build tag (stub otherwise)
+```sh
+CGO_ENABLED=0 go build -trimpath -tags embedweb ./cmd/windlass
+```
 
-The full build plan with milestone acceptance criteria lives in `docs/plan.md`.
+Unit tests use `internal/agent/fake` and run without Docker. The integration suite deploys
+real Compose stacks, exercises Caddy over trusted HTTPS, checks user-owned route preservation,
+and proves a fresh SQLite database can rebuild its application index while containers remain
+running.

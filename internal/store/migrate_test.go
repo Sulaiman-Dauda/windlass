@@ -1,18 +1,30 @@
 package store
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/windlass-dev/windlass/migrations"
 )
 
 func TestOpenAndMigrate(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "windlass.db"))
+	path := filepath.Join(t.TempDir(), "windlass.db")
+	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	defer db.Close()
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("database permissions = %o, want 600", got)
+		}
+	}
 
 	if err := Migrate(db, migrations.FS); err != nil {
 		t.Fatalf("Migrate: %v", err)

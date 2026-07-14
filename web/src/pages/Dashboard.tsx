@@ -1,7 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useProjects } from "../api/projects";
+import { Page, SectionHead, EmptyState } from "../ui/Page";
+import { Card, CardLink } from "../ui/Card";
+import { Icon, type IconName } from "../ui/Icon";
+import { cn } from "../ui/cn";
 
 interface Metrics {
   host: {
@@ -13,12 +16,7 @@ interface Metrics {
     load1: number;
     uptime_seconds: number;
   };
-  node: {
-    hostname: string;
-    docker_version: string;
-    compose_version: string;
-    caddy_version: string;
-  };
+  node: { hostname: string; docker_version: string; compose_version: string; caddy_version: string };
   containers: { running: number; total: number };
 }
 
@@ -26,13 +24,44 @@ function gb(bytes: number): string {
   return (bytes / (1 << 30)).toFixed(1) + " GB";
 }
 
-function Card({ title, value, sub }: { title: string; value: string; sub?: string }) {
+function Metric({
+  label,
+  icon,
+  value,
+  unit,
+  sub,
+  pct,
+}: {
+  label: string;
+  icon: IconName;
+  value: string;
+  unit?: string;
+  sub?: string;
+  pct?: number | null;
+}) {
+  const warn = pct != null && pct >= 85;
   return (
-    <div className="rounded-lg border border-zinc-900 bg-zinc-900/50 p-4">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">{title}</div>
-      <div className="mt-2 text-lg font-semibold">{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-zinc-500">{sub}</div>}
-    </div>
+    <Card className="flex flex-col gap-2.5 p-4">
+      <div className="flex items-center justify-between">
+        <span className="text-2xs font-semibold uppercase tracking-[0.04em] text-fg3">{label}</span>
+        <span className="text-fg3">
+          <Icon name={icon} size={16} />
+        </span>
+      </div>
+      <div className="text-3xl font-semibold leading-none tracking-[-0.02em] tabular-nums">
+        {value}
+        {unit && <span className="ml-0.5 text-base font-medium text-fg3">{unit}</span>}
+      </div>
+      {pct != null && (
+        <div className="h-[5px] overflow-hidden rounded-full bg-sunken">
+          <div
+            className={cn("h-full rounded-full", warn ? "bg-warn" : "bg-accent")}
+            style={{ width: `${Math.min(100, Math.max(2, pct))}%` }}
+          />
+        </div>
+      )}
+      {sub && <div className="text-xs tabular-nums text-fg3">{sub}</div>}
+    </Card>
   );
 }
 
@@ -45,68 +74,71 @@ export default function Dashboard() {
   const projects = useProjects();
 
   const m = metrics.data;
-  const memPct =
-    m && m.host.memory_total > 0
-      ? Math.round((m.host.memory_used / m.host.memory_total) * 100)
-      : null;
-  const diskPct =
-    m && m.host.disk_total > 0
-      ? Math.round((m.host.disk_used / m.host.disk_total) * 100)
-      : null;
+  const memPct = m && m.host.memory_total > 0 ? Math.round((m.host.memory_used / m.host.memory_total) * 100) : null;
+  const diskPct = m && m.host.disk_total > 0 ? Math.round((m.host.disk_used / m.host.disk_total) * 100) : null;
 
   return (
-    <div>
-      <h1 className="text-xl font-semibold">
-        {m?.node.hostname || "Dashboard"}
-      </h1>
-      {m && (
-        <p className="mt-1 text-xs text-zinc-600">
-          docker {m.node.docker_version || "—"} · compose{" "}
-          {m.node.compose_version || "—"} · caddy {m.node.caddy_version || "unavailable"}
-        </p>
-      )}
-
-      <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Card
-          title="CPU"
-          value={m ? `${m.host.cpu_percent.toFixed(0)}%` : "—"}
+    <Page
+      title={m?.node.hostname || "Dashboard"}
+      subtitle={
+        m
+          ? `docker ${m.node.docker_version || "—"} · compose ${m.node.compose_version || "—"} · caddy ${m.node.caddy_version || "unavailable"}`
+          : undefined
+      }
+    >
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Metric
+          label="CPU"
+          icon="dashboard"
+          value={m ? `${m.host.cpu_percent.toFixed(0)}` : "—"}
+          unit={m ? "%" : undefined}
+          pct={m ? m.host.cpu_percent : null}
           sub={m ? `load ${m.host.load1.toFixed(2)}` : undefined}
         />
-        <Card
-          title="Memory"
-          value={memPct !== null ? `${memPct}%` : "—"}
+        <Metric
+          label="Memory"
+          icon="database"
+          value={memPct !== null ? `${memPct}` : "—"}
+          unit={memPct !== null ? "%" : undefined}
+          pct={memPct}
           sub={m && m.host.memory_total > 0 ? `${gb(m.host.memory_used)} / ${gb(m.host.memory_total)}` : undefined}
         />
-        <Card
-          title="Disk"
-          value={diskPct !== null ? `${diskPct}%` : "—"}
+        <Metric
+          label="Disk"
+          icon="globe"
+          value={diskPct !== null ? `${diskPct}` : "—"}
+          unit={diskPct !== null ? "%" : undefined}
+          pct={diskPct}
           sub={m && m.host.disk_total > 0 ? `${gb(m.host.disk_used)} / ${gb(m.host.disk_total)}` : undefined}
         />
-        <Card
-          title="Containers"
+        <Metric
+          label="Containers"
+          icon="projects"
           value={m ? `${m.containers.running}` : "—"}
-          sub={m ? `${m.containers.total} total` : undefined}
+          sub={m ? `of ${m.containers.total} total` : undefined}
         />
       </div>
 
-      <h2 className="mt-10 text-base font-medium">Projects</h2>
-      <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {projects.data?.map((p) => (
-          <Link
-            key={p.name}
-            to={`/projects/${p.name}`}
-            className="rounded-lg border border-zinc-900 bg-zinc-900/50 p-4 hover:border-zinc-700"
-          >
-            <div className="font-medium">{p.name}</div>
-            <div className="mt-1 text-xs text-zinc-500">{p.source}</div>
-          </Link>
-        ))}
-        {projects.data?.length === 0 && (
-          <p className="text-sm text-zinc-600">
-            No projects yet — create one from Projects or Templates.
-          </p>
-        )}
-      </div>
-    </div>
+      <SectionHead title="Projects" />
+      {projects.data && projects.data.length === 0 ? (
+        <EmptyState
+          icon={<Icon name="projects" size={26} />}
+          title="No projects yet"
+          desc="Create one from Projects or spin up a database from Templates."
+        />
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {projects.data?.map((p) => (
+            <CardLink key={p.name} to={`/projects/${p.name}`} className="p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-md font-semibold tracking-[-0.01em]">{p.name}</span>
+                <Icon name="chevronRight" size={16} className="text-fg3" />
+              </div>
+              <div className="mt-2 truncate font-mono text-xs text-fg3">{p.source}</div>
+            </CardLink>
+          ))}
+        </div>
+      )}
+    </Page>
   );
 }

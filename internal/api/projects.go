@@ -41,7 +41,10 @@ func (a *API) projectRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("member"))
 		r.Post("/", a.handleCreateProject)
-		r.Delete("/{name}", a.handleDeleteProject)
+		r.Post("/scan", a.handleScanProjects)
+		// limitAuth: delete re-verifies the password, so it is a credential
+		// endpoint and shares the brute-force budget.
+		r.Delete("/{name}", a.limitAuth(a.handleDeleteProject))
 		r.Put("/{name}/files/*", a.handleWriteProjectFile)
 		r.Put("/{name}/env", a.handleSetProjectEnv)
 		r.Put("/{name}/git", a.handleConfigureProjectGit)
@@ -57,6 +60,22 @@ func (a *API) projectRoutes(r chi.Router) {
 	r.Route("/{name}/domains", a.domainRoutes)
 	r.Route("/{name}/backups", a.backupRoutes)
 	r.With(auth.RequireRole("member")).Post("/{name}/actions/{action}", a.handleProjectAction)
+}
+
+func (a *API) handleScanProjects(w http.ResponseWriter, r *http.Request) {
+	if err := a.Projects.Reconcile(r.Context()); err != nil {
+		a.internalError(w, "scan projects", err)
+		return
+	}
+	list, err := a.Projects.List(r.Context())
+	if err != nil {
+		a.internalError(w, "list projects after scan", err)
+		return
+	}
+	user, _ := auth.UserFrom(r.Context())
+	a.Audit.Write(r.Context(), user.ID, "project.scan", "project", "*", remoteIP(r),
+		map[string]any{"count": len(list)})
+	writeJSON(w, http.StatusOK, map[string]int{"count": len(list)})
 }
 
 func (a *API) handleListProjects(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +133,27 @@ func (a *API) handleGetProject(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+
+	// Deleting stops containers and removes the project directory, so a live
+	// session alone is not enough: users with a password must re-enter it.
+	// OAuth-only accounts have no password hash and skip this check.
+	user, _ := auth.UserFrom(r.Context())
+	if user.PasswordHash.Valid {
+		var req struct {
+			Password string `json:"password"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Password == "" {
+			writeError(w, http.StatusForbidden, "password_required", "re-enter your password to delete this project")
+			return
+		}
+		if err := auth.VerifyPassword(user.PasswordHash.String, req.Password); err != nil {
+			a.Audit.Write(r.Context(), user.ID, "project.delete_denied", "project", name, remoteIP(r), nil)
+			writeError(w, http.StatusForbidden, "invalid_password", "password does not match")
+			return
+		}
+	}
+
 	err := a.Projects.Delete(r.Context(), name)
 	if errors.Is(err, projects.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "project not found")
@@ -123,7 +163,6 @@ func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 		a.internalError(w, "delete project", err)
 		return
 	}
-	user, _ := auth.UserFrom(r.Context())
 	a.Audit.Write(r.Context(), user.ID, "project.delete", "project", name, remoteIP(r), nil)
 	w.WriteHeader(http.StatusNoContent)
 }

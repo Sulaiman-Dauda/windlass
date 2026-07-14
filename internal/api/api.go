@@ -73,6 +73,10 @@ func (a *API) Routes(r chi.Router) {
 		r.Get("/events", a.handleGlobalEvents)
 		r.Get("/proxy/status", a.handleProxyStatus)
 		r.Get("/system/metrics", a.handleSystemMetrics)
+		// GitHub redirects the admin's browser here after authorizing the
+		// repo-scope connect flow; the session cookie authenticates it.
+		r.With(auth.RequireRole("admin")).
+			Get("/auth/oauth/github/callback/git", a.handleGitConnectCallback)
 		r.Route("/projects", a.projectRoutes)
 		r.Route("/git", a.gitRoutes)
 		r.Route("/templates", a.templateRoutes)
@@ -84,6 +88,10 @@ func (a *API) Routes(r chi.Router) {
 			r.Put("/system/backups/s3", a.handleSetS3Config)
 			r.Get("/system/update", a.handleCheckUpdate)
 			r.Post("/system/update", a.handleApplyUpdate)
+			r.Get("/system/docker/images", a.handleImageDiskUsage)
+			r.Post("/system/docker/images/prune", a.handlePruneImages)
+			r.Get("/system/panel-domain", a.handleGetPanelDomain)
+			r.Put("/system/panel-domain", a.handleSetPanelDomain)
 			r.Put("/system/oauth/{provider}", a.handleSetOAuthConfig)
 		})
 	})

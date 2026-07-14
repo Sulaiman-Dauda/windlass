@@ -1,70 +1,86 @@
 # Life without the panel
 
-Windlass' core promise: **if the panel disappears, nothing you deployed
-breaks**, and everything it manages is operable with standard tools. This
-page proves it.
+Windlass is deliberately removable from the application runtime path. Docker keeps containers
+running and Caddy keeps its active configuration when the Windlass process stops.
 
-## Where everything lives
+## Files on disk
 
-```
+```text
 /var/lib/windlass/
-├── projects/<name>/     # one directory per project — THE source of truth
-│   ├── compose.yaml     # plain Docker Compose, yours to edit
-│   ├── .env             # rendered env vars (also editable by hand)
-│   └── src/             # git checkout (git-sourced projects)
+├── projects/<name>/
+│   ├── compose.yaml       # authoritative Compose configuration
+│   ├── .env               # authoritative dotenv values, mode 0600
+│   ├── .windlass.json     # Git/source/domain metadata used for index rebuilds
+│   └── ...                # source and application files
 ├── data/
-│   ├── windlass.db        # SQLite metadata (users, deploy history, domains)
-│   ├── secret.key       # encryption key for stored secrets (0600)
-│   └── session.key      # session signing key
-└── backups/             # tar.gz archives
+│   ├── windlass.db        # platform state and rebuildable indexes/caches
+│   ├── secret.key         # encryption key, mode 0600
+│   └── session.key        # session-signing key, mode 0600
+├── backups/               # local project archives
+└── plugins/               # optional plugin directories
 ```
 
-## Operating a project by hand
+## Operate a stack directly
 
 ```sh
 cd /var/lib/windlass/projects/myapp
-docker compose ps                 # status
-docker compose logs -f web        # logs
-docker compose up -d              # deploy after editing compose.yaml
-docker compose down               # stop
+sudo docker compose -p myapp config
+sudo docker compose -p myapp ps
+sudo docker compose -p myapp logs -f web
+sudo docker compose -p myapp up -d --remove-orphans
+sudo docker compose -p myapp down
 ```
 
-The panel notices hand-edits: the next panel deploy simply runs the same
-compose commands against the files as they are on disk.
+These are the same files and Compose project name Windlass uses. A hand edit is visible in the
+Files/Environment screens on their next read, and the next deployment uses it directly. A
+manual `docker compose up -d` updates containers immediately; Windlass reads live container
+state rather than overwriting the file from SQLite on the next deployment.
 
-## Routing without the panel
+## Rebuild the application index
 
-Windlass owns exactly one object in Caddy's config, tagged
-`"@id": "windlass_routes"`. Inspect or remove it:
+If `windlass.db` is replaced with a new database, create/claim a new administrator and choose
+**Scan stacks directory**. Windlass discovers directories containing `compose.yaml` or
+`compose.yml`, reads `.windlass.json`, imports `.env`, and rebuilds project/domain indexes.
+Running containers are unaffected throughout.
+
+The following are platform state and cannot be reconstructed from project files: users,
+sessions, audit history, deployment/event history, jobs, backup records/schedules, settings,
+plugin enablement, and encrypted Git/S3/OAuth credentials. Back up the complete `data`
+directory when those records matter.
+
+## Caddy without Windlass
+
+Windlass-owned objects can be inspected through the loopback Caddy admin API:
 
 ```sh
-curl localhost:2019/id/windlass_routes          # view
-curl -X DELETE localhost:2019/id/windlass_routes  # remove all panel routes
+curl http://127.0.0.1:2019/id/windlass_routes
+curl http://127.0.0.1:2019/id/windlass_panel_route
 ```
 
-Everything else in your Caddy config is untouched by Windlass, always.
-If you delete the panel, existing routes keep working until Caddy restarts;
-make them permanent by adding normal Caddyfile sites.
+Application routes and the panel route remain in Caddy's active in-memory configuration when
+Windlass stops. A Caddy reload/restart reconstructs configuration from the administrator's
+persistent Caddy config, then Windlass normally reapplies its desired routes. If Windlass has
+been permanently removed, add any routes that must survive Caddy restarts to the Caddyfile.
+
+To remove only Windlass-owned routes manually:
+
+```sh
+curl -X DELETE http://127.0.0.1:2019/id/windlass_routes
+curl -X DELETE http://127.0.0.1:2019/id/windlass_panel_route
+```
+
+Unrelated Caddy objects are not touched.
 
 ## Secrets
 
-`.env` files on disk contain the rendered values — that's what compose
-actually uses, and it survives the panel. The encrypted copies in SQLite are
-only the panel's editing store.
+Compose requires `.env` values in plaintext on disk, protected by filesystem ownership and
+mode `0600`. The encrypted SQLite environment copy is a cache, not the source of truth. Git,
+OAuth, TOTP, and S3 credentials remain encrypted platform state and need `secret.key` for
+recovery.
 
-## Backups
+## Project backups
 
-Backups are ordinary `tar.gz` files in `/var/lib/windlass/backups/`:
-
-```sh
-tar xzf backups/myapp-20260713-101500.tar.gz -C projects/myapp
-cd projects/myapp && docker compose up -d
-```
-
-Database templates include a `db_dump.sql` in the archive for native restore.
-
-## The metadata database
-
-`data/windlass.db` is SQLite — `sqlite3 data/windlass.db .schema` shows
-everything. Losing it loses users/history/domain records but not a single
-running container, compose file, or env var.
+Local backups are ordinary archives under `/var/lib/windlass/backups`. Restore through the UI,
+or inspect/extract one with standard archive tools. Windlass attempts a native SQL dump for
+recognized PostgreSQL/MySQL template stacks before archiving; failure of that best-effort dump
+does not prevent the filesystem archive.

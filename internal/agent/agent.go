@@ -90,13 +90,15 @@ type ComposeUpReq struct {
 }
 
 type ServiceStatus struct {
-	Service    string `json:"service"`
-	Name       string `json:"name"` // container name
-	State      string `json:"state"`
-	Health     string `json:"health"` // "", "starting", "healthy", "unhealthy"
-	ExitCode   int    `json:"exit_code"`
-	Image      string `json:"image"`
+	Service        string        `json:"service"`
+	Name           string        `json:"name"` // container name
+	State          string        `json:"state"`
+	Health         string        `json:"health"` // "", "starting", "healthy", "unhealthy"
+	ExitCode       int           `json:"exit_code"`
+	Image          string        `json:"image"`
 	PublishedPorts []PortBinding `json:"published_ports,omitempty"`
+	MemoryLimit    int64         `json:"memory_limit,omitempty"`
+	CPULimit       float64       `json:"cpu_limit,omitempty"`
 }
 
 type PortBinding struct {
@@ -106,12 +108,24 @@ type PortBinding struct {
 }
 
 type ResolvedConfig struct {
-	Services map[string]ResolvedService `json:"services"`
+	Services     map[string]ResolvedService `json:"services"`
+	HealthChecks []ApplicationHealthCheck   `json:"health_checks,omitempty"`
+}
+
+type ApplicationHealthCheck struct {
+	Service          string `json:"service"`
+	URL              string `json:"url"`
+	ExpectedStatus   int    `json:"expected_status"`
+	Contains         string `json:"contains,omitempty"`
+	StabilitySeconds int    `json:"stability_seconds"`
 }
 
 type ResolvedService struct {
-	Image string `json:"image"`
-	Build bool   `json:"build"` // service has a build context
+	Image          string  `json:"image"`
+	Build          bool    `json:"build"` // service has a build context
+	ContainerPorts []int   `json:"container_ports,omitempty"`
+	MemoryLimit    int64   `json:"memory_limit,omitempty"`
+	CPULimit       float64 `json:"cpu_limit,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -126,8 +140,27 @@ type DockerAgent interface {
 	ImageTag(ctx context.Context, source, target string) error
 	// ImageDigest resolves an image reference to its content digest.
 	ImageDigest(ctx context.Context, ref string) (string, error)
+	ImageDiskUsage(ctx context.Context) (ImageDiskUsage, error)
+	PruneImages(ctx context.Context, req ImagePruneReq) (ImagePruneResult, error)
 	// Events streams Docker daemon events (health, restarts) until ctx ends.
 	Events(ctx context.Context, out func(DockerEvent)) error
+}
+
+type ImageDiskUsage struct {
+	TotalCount       int64 `json:"total_count"`
+	ActiveCount      int64 `json:"active_count"`
+	TotalBytes       int64 `json:"total_bytes"`
+	ReclaimableBytes int64 `json:"reclaimable_bytes"`
+}
+
+type ImagePruneReq struct {
+	OlderThanSeconds int64    `json:"older_than_seconds"`
+	ProtectedDigests []string `json:"protected_digests,omitempty"`
+}
+
+type ImagePruneResult struct {
+	Deleted        int   `json:"deleted"`
+	ReclaimedBytes int64 `json:"reclaimed_bytes"`
 }
 
 type ContainerFilter struct {
@@ -136,14 +169,14 @@ type ContainerFilter struct {
 }
 
 type Container struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Image          string    `json:"image"`
-	State          string    `json:"state"`
-	Health         string    `json:"health"`
-	RestartCount   int       `json:"restart_count"`
-	ComposeProject string    `json:"compose_project,omitempty"`
-	ComposeService string    `json:"compose_service,omitempty"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Image          string `json:"image"`
+	State          string `json:"state"`
+	Health         string `json:"health"`
+	RestartCount   int    `json:"restart_count"`
+	ComposeProject string `json:"compose_project,omitempty"`
+	ComposeService string `json:"compose_service,omitempty"`
 	// IPAddress is the container's address on its first network, reachable
 	// from the host on standard bridge networking; used for proxy upstreams.
 	IPAddress string    `json:"ip_address,omitempty"`
@@ -165,11 +198,11 @@ type ContainerStats struct {
 }
 
 type DockerEvent struct {
-	Type      string    `json:"type"`   // "container"
-	Action    string    `json:"action"` // "die", "health_status: unhealthy", ...
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Time      time.Time `json:"time"`
+	Type   string    `json:"type"`   // "container"
+	Action string    `json:"action"` // "die", "health_status: unhealthy", ...
+	ID     string    `json:"id"`
+	Name   string    `json:"name"`
+	Time   time.Time `json:"time"`
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +217,9 @@ type ProxyAgent interface {
 	Available(ctx context.Context) (ProxyInfo, error)
 	ApplyRoutes(ctx context.Context, routes []Route) error
 	CurrentRoutes(ctx context.Context) ([]Route, error)
+	// ApplyPanelDomain converges the separately owned panel route. An empty
+	// hostname removes that route without touching application/user routes.
+	ApplyPanelDomain(ctx context.Context, hostname string) error
 }
 
 type ProxyInfo struct {
@@ -206,6 +242,10 @@ type Route struct {
 // FSAgent performs file operations strictly inside the projects root; paths
 // are project-relative and validated against traversal.
 type FSAgent interface {
+	// DiscoverProjects returns valid project directory names that contain a
+	// compose.yaml or compose.yml. It is the basis for rebuilding SQLite's
+	// project index from the filesystem.
+	DiscoverProjects(ctx context.Context) ([]string, error)
 	ReadFile(ctx context.Context, project, rel string) ([]byte, error)
 	// WriteFile writes atomically (temp file + rename).
 	WriteFile(ctx context.Context, project, rel string, data []byte, mode fs.FileMode) error
@@ -271,18 +311,29 @@ type ExecSession interface {
 
 type HostAgent interface {
 	Metrics(ctx context.Context) (HostMetrics, error)
+	HTTPCheck(ctx context.Context, req HTTPCheckReq) (HTTPCheckResult, error)
 	// GitSync clones or updates a repository into a project directory.
 	GitSync(ctx context.Context, req GitSyncReq, out LogSink) (GitSyncResult, error)
 }
 
+type HTTPCheckReq struct {
+	URL     string `json:"url"`
+	Timeout int    `json:"timeout_seconds"`
+}
+
+type HTTPCheckResult struct {
+	StatusCode int    `json:"status_code"`
+	Body       string `json:"body"`
+}
+
 type HostMetrics struct {
-	CPUPercent     float64 `json:"cpu_percent"`
-	MemoryUsed     uint64  `json:"memory_used"`
-	MemoryTotal    uint64  `json:"memory_total"`
-	DiskUsed       uint64  `json:"disk_used"`
-	DiskTotal      uint64  `json:"disk_total"`
-	Load1          float64 `json:"load1"`
-	UptimeSeconds  uint64  `json:"uptime_seconds"`
+	CPUPercent    float64 `json:"cpu_percent"`
+	MemoryUsed    uint64  `json:"memory_used"`
+	MemoryTotal   uint64  `json:"memory_total"`
+	DiskUsed      uint64  `json:"disk_used"`
+	DiskTotal     uint64  `json:"disk_total"`
+	Load1         float64 `json:"load1"`
+	UptimeSeconds uint64  `json:"uptime_seconds"`
 }
 
 type GitSyncReq struct {

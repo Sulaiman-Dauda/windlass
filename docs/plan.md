@@ -1,210 +1,139 @@
-# Windlass — Lightweight Docker Compose Control Plane (full build plan)
+# Windlass implementation record
 
-## Context
+This document records the product that exists now. It is not a speculative roadmap; behavior
+described here must stay synchronized with code, OpenAPI, tests, and operator documentation.
 
-The user runs Coolify on a VPS and finds it too heavy (~800MB–2GB idle, 15–30 containers). After researching alternatives (Dokploy, CapRover, Dokku, Dockge, Kamal) they spec'd a new product: a **lightweight, self-hosted "Docker Compose control plane"** — Coolify's core value (Git deploys, domains + auto-HTTPS, one-click databases, logs, env management) at <80MB idle RAM, built so that **if the panel is deleted, every deployed app keeps running** on plain Docker Compose + Caddy.
+## Product boundaries
 
-This plan builds the product **end to end (all 10 deliverables)**, executed as ~12 sequential production-quality milestones with tests — per the user's explicit choices.
+Windlass is a single-server Docker Compose control plane. It deliberately does not implement
+a proprietary scheduler or container specification. Its responsibilities are:
 
-## User-locked decisions
+- authenticate operators and provide an audited UI/API;
+- maintain plain project directories and a rebuildable application index;
+- run resumable `docker compose` deployments;
+- maintain targeted Caddy routes and certificate automation;
+- expose logs, terminal access, metrics, backups, templates, Git/webhooks, updates, and
+  optional external-process plugins.
 
-| Decision | Choice |
-|---|---|
-| Scope | Everything: backend, frontend, DB schema, Docker image, installer, auto-update, CI/CD, OpenAPI docs, plugin SDK, docs |
-| Execution | Milestone-by-milestone with tests per subsystem, not one monolithic pass |
-| Architecture | **Single Go binary, agent-ready**: all privileged ops behind an internal `agent` interface; in-process now, splittable into an mTLS node-agent later |
-| Local toolchain | **Go only** (install via winget). Unit tests mock the agent; real Docker/Caddy integration tests run in GitHub Actions ubuntu runners |
-| Name | **Windlass** (researched — below) |
+Multi-node execution is not implemented. The internal agent interface is a seam for a future
+remote agent, but the current implementation is in-process only.
 
-## Product name: Windlass
+## Non-negotiable behavior
 
-A windlass is the ship's winch that does the heavy lifting — raising the anchor, hauling mooring lines. Fits the product, short, easy to spell, brandable.
+1. `compose.yaml`, `.env`, and `.windlass.json` are authoritative application configuration.
+2. SQLite contains platform state and rebuildable indexes/caches, never Compose YAML.
+3. Windlass executes the Compose CLI rather than building container specs through the SDK.
+4. Stopping Windlass never stops application containers.
+5. Caddy updates are limited to stable Windlass-owned `@id` objects.
+6. The systemd service has no direct Docker socket access and uses an API-allowlisted proxy.
+7. Deployment jobs are checkpointed, idempotent, and reclaimable after process interruption.
+8. Optional features must not require Redis, Kubernetes, Swarm, Prometheus, or another queue.
+9. The Go process must remain below the CI 40 MiB idle-RSS budget.
 
-- **Conflict check (2026-07)**: no software/DevOps/GitHub project of note named "windlass". Binary/CLI: `windlass` · module: `github.com/windlass-dev/windlass` (org TBD at repo-publish time) · data dir: `/var/lib/windlass`.
-- Runner-ups (also clean): Moorage, Homeport, Fairlead. Rejected for conflicts: Slipway (existing Caddy-based deploy platform), Dockhand + Hawser (existing panel + agent), Cleat (cleat.sh AI sandbox), Gantry, Berth, Stevedore, Bowline.
+## Implemented stack
 
-## Non-negotiable principles (verbatim from user — govern every milestone)
+- Go 1.26, chi, sqlc-generated queries, pure-Go `modernc.org/sqlite`, Moby client packages,
+  `coder/websocket`, and standard-library HTTP/SSE handling.
+- React 18, TypeScript, Vite, Tailwind, TanStack Query, React Router, and xterm.js.
+- Embedded production SPA selected by the `embedweb` build tag.
+- Caddy admin API for routing/TLS and Docker Compose v2 for application lifecycle.
 
-1. Docker Compose is the source of truth.
-2. The platform is stateless except for metadata.
-3. Every feature must work if accessed directly from Linux.
-4. No proprietary deployment formats.
-5. No unnecessary background services.
-6. Everything should be replaceable by standard Linux tools.
-7. If the panel is removed, every deployed application must continue running.
-8. Prefer deleting code over adding abstractions.
-9. New features must not increase idle RAM by more than 5 MB without compelling reason.
-10. Every dependency must justify its existence.
-11. Every privileged operation must go through the (internal, future-splittable) Node Agent boundary.
-12. Control Plane ↔ Node Agent communication uses mTLS with certificate rotation (applies when the agent splits out; the interface is designed for it now).
-13. Every deployment is idempotent and resumable after interruption.
-14. All APIs are versioned from day one.
-15. Every operation emits structured events for the UI and audit log.
+## Persistent model
 
-## Tech stack (locked)
+### Project files
 
-- **Backend**: Go 1.24.x, chi, sqlc, SQLite WAL (**`modernc.org/sqlite`** — pure Go, CGO-free ⇒ painless cross-compile from Windows), Docker SDK, Caddy admin API, slog, graceful shutdown, no global state
-- **Frontend**: React + Vite + TypeScript, Tailwind, shadcn/ui, TanStack Query, React Router, xterm.js, CodeMirror 6 (lighter than Monaco) — static build embedded via `go:embed`. One binary total. Node 22 used at build time only.
-- **Realtime**: SSE for deploys/logs/events (replayable via `Last-Event-ID`); WebSocket (`coder/websocket`) only for the terminal
-- **Auth**: argon2id local users, JWT in HTTP-only cookies (carrying a revocable session id), RBAC (`admin|member|viewer`), optional TOTP, GitHub + Google OAuth
-- **Proxy**: Caddy (auto Let's Encrypt) via admin API, zero-downtime targeted updates, graceful degradation banner if absent
-- **Zero**: Redis, queues, Kafka, Prometheus, Grafana, K8s, Swarm, ORM, gopsutil (read `/proc` directly), aws-sdk (hand-rolled S3 SigV4, ~200 LOC)
-- **Compose execution: shell out to `docker compose` CLI** (not SDK reimplementation) — identical behavior to what a user runs by hand (principles 1/6/8); machine-read via `--format json`; require compose v2.24+
-
-## Repository layout
-
-```
-windlass/
-├── cmd/windlass/main.go        # entrypoint: flags, wiring, run
-├── internal/
-│   ├── agent/                  # THE privileged boundary
-│   │   ├── agent.go            # interfaces + serializable req/resp types
-│   │   ├── local/              # in-process impl (Docker SDK, compose CLI, Caddy, FS)
-│   │   ├── fake/               # deterministic fake for unit tests (Windows-safe)
-│   │   └── proto/              # reserved for future mTLS wire types
-│   ├── server/                 # chi router, middleware, SSE/WS plumbing, embedded web/dist
-│   ├── api/                    # /api/v1 handlers, validation, DTOs (thin)
-│   ├── auth/                   # argon2id, JWT cookies, TOTP, OAuth, RBAC
-│   ├── store/                  # sqlc queries + embedded migrations runner
-│   ├── projects/               # project dir lifecycle: compose.yaml + .env on disk
-│   ├── deploy/                 # deployment state machine + rollback
-│   ├── jobs/                   # SQLite-persisted in-process job runner (resumable)
-│   ├── events/                 # event bus → SSE fan-out + audit sink
-│   ├── proxy/                  # Caddy config generation, ownership, degrade
-│   ├── git/                    # clone/pull, GitHub/GitLab APIs, webhook HMAC
-│   ├── secrets/                # AES-256-GCM env encryption, key file
-│   ├── dbtemplates/            # one-click postgres/redis/mysql/mongo compose generators
-│   ├── backups/                # manual + cron, local + S3 (SigV4)
-│   ├── metrics/                # Docker stats + /proc host metrics, on-demand
-│   ├── plugins/                # external-process plugin discovery/lifecycle/proxy
-│   ├── update/                 # self-update: download, verify, atomic replace
-│   ├── terminal/               # WS ↔ agent exec bridge
-│   └── version/
-├── migrations/                 # 0001_init.sql… forward-only, embedded
-├── web/                        # React+Vite app → dist/ embedded
-├── install/                    # install.sh, windlass.service, docker-compose install
-├── plugins-sdk/                # manifest spec + example plugin + docs
-├── docs/                       # markdown docs (install, architecture, "life without the panel")
-├── api/openapi.yaml            # hand-maintained OpenAPI 3.1
-├── .github/workflows/{ci.yaml,release.yaml}
-├── Dockerfile, Makefile, sqlc.yaml, go.mod
+```text
+projects/<name>/
+├── compose.yaml or compose.yml
+├── .env
+└── .windlass.json
 ```
 
-Dependency direction: `api → services → agent + store`. Only `internal/agent/local` may import the Docker SDK or touch Caddy/FS — **enforced by depguard in golangci-lint**.
+The manifest schema is versioned and currently records `source`, `git_repo`, `git_branch`,
+`auto_deploy`, and domain mappings. The scanner imports existing stacks and synthesizes a
+manifest from legacy SQLite rows when needed.
 
-## The agent interface (heart of the codebase)
+### SQLite tables
 
-Rules that keep it mTLS-splittable: every method takes `context.Context`; params/results are plain serializable structs (no `io.Writer`, no Docker SDK types leaking); streaming = typed serializable events via `LogSink func(LogLine)` callbacks; long ops cancellable. Maps 1:1 to gRPC unary + server-streaming later.
+The migrations define platform tables for users, sessions, audit entries, settings, projects,
+environment cache rows, deployments, deployment artifacts/events, jobs, domains, Git
+connections, backups/schedules, and plugin enablement. Project/domain/environment rows can be
+rebuilt from files; user and historical/platform records cannot.
 
-```go
-type Agent interface {
-    Compose() ComposeAgent   // Up/Down/Pull/Build/PS/Config — via docker compose CLI
-    Docker() DockerAgent     // ListContainers/Logs/Stats/Inspect/ImageTag/ImageDigest/Prune/Events
-    Proxy() ProxyAgent       // Available/ApplyRoutes(desired-state)/CurrentRoutes
-    FS() FSAgent             // Read/Write(atomic tmp+rename)/List/EnsureProject/RemoveProject — scoped to /var/lib/windlass/projects, path-traversal-proof
-    Exec() ExecAgent         // Start(ExecReq) → ExecSession{Write,Resize,Output <-chan []byte,Wait,Close} — only bidirectional stream (terminal)
-    Host() HostAgent         // Metrics (/proc + statfs), GitSync (clone/pull with deploy key)
-    Ping(ctx) (NodeInfo, error)  // versions, docker/caddy availability
-}
+Secrets stored as platform state use AES-256-GCM with `data/secret.key`. Session signing uses
+`data/session.key`. `.env` remains plaintext because Docker Compose consumes it directly and is
+protected with mode `0600`.
+
+## Deployment state machine
+
+```text
+queued → preparing → syncing → pulling → building → applying → verifying → succeeded
 ```
 
-v1 wires `agent/local.New(cfg)`. Future split: `agent/remote` (gRPC + mTLS client) + `windlass agent` subcommand serving `local` — zero changes above the interface.
+- Preparing imports `.env`, rejects obvious placeholder secrets, and runs `compose config`.
+- Syncing updates Git projects to the requested commit.
+- Pulling/building calls the Compose CLI and records resolved image digests.
+- Applying calls `docker compose up -d --quiet-pull --remove-orphans`.
+- Verifying polls `compose ps`; Docker unhealthy/non-zero exits fail immediately. Optional
+  `windlass.health.*` labels add HTTP status/body/stability checks.
+- Rollback deployments use recorded image digests in `compose.rollback.yaml`.
 
-## SQLite schema (WAL, foreign_keys=ON, single-writer discipline)
+The SQLite job runner writes checkpoints before steps, reclaims interrupted jobs, and prevents
+two active deployments for the same project.
 
-- **users**: email UNIQUE, password_hash (argon2id, NULL if OAuth-only), role, totp_secret_enc, oauth_provider/subject, disabled_at
-- **sessions**: token-hash id, user_id, expires_at, ip, user_agent (JWT carries session id → revocable)
-- **projects**: name UNIQUE (= dir name = compose project name), source (`git|manual|template`), git_repo/branch, auto_deploy. *No compose content — disk is truth.*
-- **env_vars**: project_id, key, value_enc (AES-256-GCM nonce-prefixed), UNIQUE(project_id,key). Rendered to `.env` at deploy; hand-edits re-imported on drift detection.
-- **deployments**: project_id, per-project seq number, status, trigger (`manual|webhook|rollback|schedule`), git_commit, error, rollback_of
-- **deployment_artifacts**: deployment_id, service, image_ref, image_digest → enables rollback retag
-- **deployment_events**: deployment_id, seq, ts, type, message, data — replayable SSE catch-up
-- **domains**: project_id, hostname UNIQUE, service, container_port, tls, status
-- **git_connections**: provider, token_enc, webhook_secret_enc
-- **jobs**: type, payload, status (`queued|running|done|failed|dead`), step (resume checkpoint), attempts, run_after, locked_at
-- **backups** + **backup_schedules** (cron_expr, destination JSON w/ encrypted S3 creds, retention)
-- **settings** (key/value JSON), **audit_log** (append-only), **plugin_installs**
-- Migrations: numbered forward-only SQL, embedded, transactional, tracked in `schema_migrations`
+## Routing model
 
-## Deployment pipeline state machine
+- `windlass_routes`: application route subtree.
+- `windlass_route_<hostname>`: individual reverse-proxy route to a live Compose container IP.
+- `windlass_panel_route`: Settings-managed route to `WINDLASS_PANEL_UPSTREAM`.
 
-`queued → preparing → syncing → pulling → building → applying → verifying → succeeded`, with `failed`/`cancelled` from any active state; `rolled_back` as terminal annotation.
+All updates use targeted Caddy admin paths. Certificate automation hostnames are merged, not
+replaced. Desired state is reapplied at startup and after relevant runtime events. Runtime-only
+routes do not survive a Caddy restart while Windlass is permanently absent; the Caddyfile is
+the persistent administrator-owned fallback.
 
-Steps = persisted `jobs.step` checkpoints (written before execution, marked after):
-1. **preparing** — snapshot env → write `.env` atomically; `compose config` validates; record image refs
-2. **syncing** — git checkout to pinned SHA (skipped for manual projects)
-3. **pulling/building** — `compose pull` / `compose build`; persist image digests to deployment_artifacts
-4. **applying** — `compose up -d --remove-orphans` (convergent, idempotent)
-5. **verifying** — poll `compose ps` + healthchecks until healthy or 120s timeout; then apply Caddy routes
+## API and UI
 
-**Resume after crash**: startup reclaims `running` jobs with stale `locked_at`; every step is idempotent so resume = re-execute checkpointed step. Reclaimed jobs re-check they're still the project's latest deployment before resuming.
-**Rollback**: new deployment with `rollback_of=N` — git projects check out N's commit; image projects retag recorded digests via `compose.rollback.yaml` override, then `up -d`. Last K deployments' artifacts protected from prune.
-**Concurrency**: one active deployment per project (partial UNIQUE index); webhook deploys for same project debounce/collapse to latest.
+All APIs use `/api/v1`; `api/openapi.yaml` is served by the application and a route-coverage
+test fails when a handler path is undocumented.
 
-## API surface (`/api/v1`)
+Implemented UI areas are dashboard, projects, project overview/deployments/domains/Git/files/
+environment/logs/terminal/backups, templates, and settings for panel domain, TOTP, Git
+connections, users, Docker image storage, and updates. Plugin lifecycle and some platform
+configuration are API-driven rather than presented as dedicated Settings sections.
 
-- **auth**: login/logout, totp setup/verify, oauth start/callback, me
-- **users** (admin): CRUD + roles
-- **projects**: CRUD, `files/{path}` GET/PUT (compose editing), `env` GET/PUT, actions start/stop/restart
-- **deployments**: create (deploy), list, get, rollback, cancel
-- **domains**: CRUD per project; `GET /proxy/status`
-- **git**: connections CRUD; `POST /webhooks/{provider}/{project}` (public, HMAC-verified)
-- **templates**: list; `POST /templates/{postgres|redis|mysql|mongodb}` → creates project
-- **system**: metrics, info, update, health (public)
-- **backups**: CRUD, restore, schedules
-- **plugins**: list/install/enable; `ANY /plugins/{name}/proxy/*`
-- **Streaming**: SSE `GET /events?topics=` (global bus → invalidations), SSE deployment events (replay + live via `Last-Event-ID`), SSE container logs; WS terminal only
-- Errors `{error:{code,message}}`; OpenAPI 3.1 hand-written, served + static viewer; CI route-coverage check (chi routes vs spec paths)
+The Environment tab accepts individual entries or bulk dotenv paste. The Files tab is a raw
+text editor: it sends the edited bytes directly and therefore does not parse/reformat YAML.
 
-## Frontend structure
+## Security boundaries
 
-Routes: `/login`, `/` (dashboard: host metrics, project cards, recent deploys), `/projects/:name` tabs — Overview, Deployments (live log view), Files (CodeMirror), Env, Domains, Logs, Terminal, Backups; `/templates`, `/settings/{users,git,system,plugins,backups}`.
+- Local password authentication, revocable sessions, RBAC, TOTP, and optional GitHub/Google
+  OAuth are implemented.
+- Security headers, login rate limiting, encrypted platform credentials, audit entries, path
+  traversal protection, and role checks cover the web/control plane.
+- The Docker proxy blocks API families not allowlisted, but Compose container creation remains
+  a root-equivalent host trust boundary. Keep Windlass authenticated and private.
+- Caddy and Docker admin endpoints must remain loopback/private-network only.
 
-SSE ↔ TanStack Query: one `useEventSource` hook; global `/events` maps event types → `queryClient.invalidateQueries` so views stay live without polling; deploy-log streams bypass Query (local ring buffer — logs aren't cache-shaped). Dev mode: Vite proxies `/api` to Go binary.
+## Verification gates
 
-## Milestones (~12, each shippable + tested)
+- `go test ./...` and `go vet ./...`
+- frontend TypeScript production build
+- OpenAPI route coverage
+- Linux integration tests with real Docker and Caddy
+- trusted-HTTPS nginx routing while preserving a user-owned Caddy route
+- fresh-SQLite filesystem reconstruction while the Compose stack remains running
+- Playwright first-run → project → real deploy → service state → sign-out
+- installer test for service health, Docker proxy allowlisting, and direct-socket denial
+- production-binary idle-RSS check below 40 MiB
 
-0. **Toolchain**: install Go via winget on this machine; git init the repo.
-1. **Scaffold + CI skeleton** — Go module, chi + `/system/health`, slog, graceful shutdown, config; Vite app embedded and served; Makefile (`make dev/build` works on Windows sans Docker); CI: vet, golangci-lint, unit tests, frontend build, cross-compile linux/amd64+arm64. *Done: one binary serves SPA + health; CI green.*
-2. **Store + auth + audit** — migrations, sqlc, users/sessions/audit, argon2id, JWT cookies, RBAC, first-run admin bootstrap token, login UI + app shell. *Done: auth unit tests; browser login works.*
-3. **Agent interface + fake + local skeleton** — full interface, scriptable `fake`, `local` (Docker/FS/Host), depguard rule. *Done: unit tests on Windows via fake; first build-tagged integration test lists containers on ubuntu CI.*
-4. **Projects on disk + files UI** — CRUD, compose.yaml/.env editing, `compose config` validation, env encryption + key file. *Done: full project lifecycle from UI; path-traversal tests.*
-5. **Deploy pipeline v1 (manual)** — jobs runner, state machine, ComposeAgent, deployment_events, SSE deploy logs, Deployments UI. *Done: crash/resume matrix tests vs fake; CI deploys real nginx project end-to-end.*
-6. **Domains + Caddy** — ProxyAgent desired-state under `windlass_*` @id-tagged subtree, degrade banner, Domains UI. *Done: CI curl-through-Caddy test; panel restart never clobbers user's own Caddy routes.*
-7. **Git + webhooks + rollback** — connections, deploy keys, HMAC webhooks, auto-deploy, digest tracking, rollback UI. *Done: HMAC unit tests; CI webhook→deploy; rollback restores previous digest.*
-8. **Templates + logs + terminal + metrics** — one-click DBs (generated passwords into env_vars), log SSE, xterm WS terminal, dashboard metrics. *Done: CI creates + connects to Postgres; WS echo test.*
-9. **Backups** — project-dir tar + DB-native dumps via exec, local + S3 SigV4, cron schedules, restore. *Done: CI round-trip.*
-10. **Installer + Docker image + auto-update** — install.sh (distro detect, Docker/Caddy install, systemd, bootstrap URL), Dockerfile, release workflow (checksummed signed binaries + GHCR), atomic self-update. *Done: CI installer test on bare ubuntu; vN-1→vN update smoke; VPS smoke-test doc.*
-11. **Plugin SDK + OpenAPI polish** — `plugin.json` manifest, external-process lifecycle (spawned only when enabled ⇒ zero RAM idle), proxy route, example plugin; finalize spec + viewer + route-coverage check. *Done: example plugin installs/serves UI tab/uninstalls.*
-12. **Hardening + docs + 1.0** — README + docs set (incl. "life without the panel" per principle 7), auth rate limiting, `/security-review` pass, idle-RSS budget check in CI (<40MB Go process), one Playwright critical-path smoke (login→create→deploy→logs→domain). *Done: perf budget green; docs complete.*
+## Known operational limitations
 
-## Testing strategy
-
-- **Unit (Windows-safe, every milestone)**: services vs `agent/fake`; state-machine crash simulation; AES-GCM known-answer tests; Caddy config golden JSON; webhook HMAC
-- **Integration (`//go:build integration`, ubuntu CI)**: real Docker + Caddy, `agent/local` + full API via httptest; serialized, namespaced, torn down
-- **E2E**: exactly one Playwright smoke spec (SSE/WS/xterm are where API tests lie) — capped to limit maintenance
-- **CI**: job1 lint+unit → job2 frontend build/typecheck/vitest → job3 integration (Docker + Caddy) → job4 Playwright. Release: tag → CGO-free cross-compile → checksums → Release + GHCR image
-- **Frontend embed**: `web/dist` never committed; placeholder `dist/index.html` behind a `dev` build tag so `go test ./...` needs no Node — established in milestone 1
-
-## Installer + auto-update
-
-- **install.sh**: root check → distro detect → Docker via get.docker.com if missing (prompt unless `--yes`) → Caddy from official repo → `windlass` system user (docker group) → `/var/lib/windlass/{projects,data,backups}` → download binary, sha256 verify → systemd unit → start → print one-time bootstrap URL. Flags: `--version --no-caddy --yes`. Also: docker-compose method (self-update disabled there) and bare binary.
-- **systemd**: `Type=notify` (sd_notify ≈30 LOC, no dep), `Restart=on-failure`, `NoNewPrivileges=yes`, `ReadWritePaths=/var/lib/windlass`
-- **Self-update**: GitHub Releases check → download → sha256 + minisign verify → atomic `rename(2)` over binary → drain jobs → exit; systemd restarts into new binary → migrations run; crash-loop leaves `windlass.previous` for one-command rollback. App containers never touched.
-
-## Key risks (top calls already locked)
-
-1. **Compose via CLI** (not SDK reimplementation) — identical-by-construction behavior; parse only `--format json` outputs
-2. **Caddy ownership** — only touch `windlass_*` @id objects via targeted PUTs, never `POST /load`; diff-and-warn on drift; golden-file tests
-3. **Secret key** — 32-byte key at `data/secret.key` (0600); included in platform backups but archive is passphrase-encrypted (scrypt); documented loudly
-4. **SSE through proxies** — flush per event, `flush_interval -1` on panel's own Caddy route, 15s heartbeats, per-user stream caps, lossless reconnect via event replay
-5. **RAM budget** — ring-buffered log fan-out (1000 lines/stream), on-demand log streaming only, CI idle-RSS assertion
-6. **Resume edge cases** — explicit crash-matrix tests in milestone 5, not later bug fixes
-
-## Verification (end-to-end)
-
-- Every milestone: `go test ./...` green on Windows (fake agent) + CI integration suite green on ubuntu (real Docker + Caddy)
-- Pipeline proof: CI test that kills the process mid-deploy and asserts convergence after restart (principle 13)
-- Principle 7 proof: CI test that stops the panel and asserts the deployed nginx app still serves through Caddy
-- Perf: CI asserts idle RSS < 40MB for the Go process; startup < 500ms
-- Final: user deploys to a real VPS via `curl | sh` installer and runs the documented smoke checklist (create project → domain → HTTPS → webhook deploy → rollback)
+- Files are read on screen load/deploy/scan; there is no continuous filesystem watcher.
+- The panel-domain feature cannot create DNS records. DNS must point at the server first.
+- Container installation does not bundle Caddy; operators must provide reachable Caddy admin
+  and panel-upstream addresses.
+- Deleting SQLite loses platform accounts/history/settings even though applications can be
+  rediscovered.
+- Application route persistence across a Caddy restart depends on Windlass being available to
+  reconcile, unless equivalent routes are also maintained in the administrator's Caddyfile.

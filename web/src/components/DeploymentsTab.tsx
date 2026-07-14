@@ -8,23 +8,24 @@ import {
   useDeployments,
   type Deployment,
 } from "../api/deployments";
+import { Button } from "../ui/Button";
+import { StatusPill, type Tone } from "../ui/Badge";
+import { Icon } from "../ui/Icon";
+import { cn } from "../ui/cn";
 
-const statusColors: Record<string, string> = {
-  succeeded: "text-emerald-400",
-  failed: "text-red-400",
-  cancelled: "text-zinc-500",
+const statusTones: Record<string, Tone> = {
+  succeeded: "ok",
+  failed: "err",
+  cancelled: "idle",
 };
 
 function StatusBadge({ status }: { status: string }) {
-  const color = statusColors[status] ?? "text-amber-400";
+  const tone = statusTones[status] ?? "warn";
   const active = !TERMINAL_STATUSES.includes(status);
   return (
-    <span className={`inline-flex items-center gap-1.5 text-xs ${color}`}>
-      {active && (
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-      )}
+    <StatusPill tone={tone} live={active}>
       {status}
-    </span>
+    </StatusPill>
   );
 }
 
@@ -53,25 +54,26 @@ export default function DeploymentsTab({ project }: { project: string }) {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-zinc-500">
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-sm leading-relaxed text-fg2">
           Deployments run: env render → validate → sync → pull → build → up →
           verify. Interrupted deployments resume automatically.
         </p>
-        <button
+        <Button
+          variant="primary"
           onClick={() =>
             create.mutate(undefined, {
               onSuccess: (d) => setSelected(d.number),
             })
           }
           disabled={create.isPending}
-          className="rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
         >
+          <Icon name="deploy" size={15} />
           Deploy
-        </button>
+        </Button>
       </div>
       {create.isError && (
-        <p className="mt-2 text-sm text-red-400">
+        <p className="mt-2 text-sm text-err">
           {create.error instanceof Error ? create.error.message : "Deploy failed"}
         </p>
       )}
@@ -82,17 +84,18 @@ export default function DeploymentsTab({ project }: { project: string }) {
             <button
               key={d.id}
               onClick={() => setSelected(d.number)}
-              className={`block w-full rounded-md border px-3 py-2 text-left ${
+              className={cn(
+                "block w-full rounded-[10px] border px-4 py-3 text-left transition-colors",
                 selected === d.number
-                  ? "border-zinc-700 bg-zinc-900"
-                  : "border-transparent hover:bg-zinc-900/60"
-              }`}
+                  ? "border-accent bg-surface2"
+                  : "border-hairline bg-surface2 hover:border-edge",
+              )}
             >
               <div className="flex items-center justify-between">
-                <span className="text-sm">#{d.number}</span>
+                <span className="text-sm text-fg">#{d.number}</span>
                 <StatusBadge status={d.status} />
               </div>
-              <div className="mt-0.5 flex items-center justify-between text-xs text-zinc-600">
+              <div className="mt-0.5 flex items-center justify-between text-xs text-fg3">
                 <span>
                   {d.triggered_by}
                   {d.git_commit ? ` · ${d.git_commit.slice(0, 7)}` : ""}
@@ -108,7 +111,7 @@ export default function DeploymentsTab({ project }: { project: string }) {
                           rollback.mutate(d.number);
                         }
                       }}
-                      className="text-zinc-500 hover:text-zinc-200"
+                      className="text-fg3 hover:text-fg"
                     >
                       roll back
                     </span>
@@ -117,7 +120,7 @@ export default function DeploymentsTab({ project }: { project: string }) {
             </button>
           ))}
           {deployments.data?.length === 0 && (
-            <p className="text-sm text-zinc-600">No deployments yet.</p>
+            <p className="text-sm text-fg3">No deployments yet.</p>
           )}
         </div>
 
@@ -132,9 +135,9 @@ export default function DeploymentsTab({ project }: { project: string }) {
 }
 
 const eventStyles: Record<string, string> = {
-  step: "text-sky-300",
-  error: "text-red-400",
-  done: "text-emerald-400",
+  step: "text-accent",
+  error: "text-err",
+  done: "text-ok",
 };
 
 function DeploymentLog({ project, number }: { project: string; number: number }) {
@@ -149,16 +152,16 @@ function DeploymentLog({ project, number }: { project: string; number: number })
   return (
     <div
       ref={pane}
-      className="h-96 overflow-auto rounded-md border border-zinc-900 bg-black p-3 font-mono text-xs leading-5"
+      className="max-h-[26rem] overflow-auto rounded-[13px] border border-hairline bg-term p-4 font-mono text-xs leading-relaxed"
     >
       {eventLog.map((ev) => (
-        <div key={ev.seq} className={eventStyles[ev.type] ?? "text-zinc-300"}>
+        <div key={ev.seq} className={eventStyles[ev.type] ?? "text-fg2"}>
           {ev.type === "step" ? "── " : ""}
           {ev.message}
         </div>
       ))}
       {eventLog.length === 0 && (
-        <span className="text-zinc-600">Waiting for output…</span>
+        <span className="text-fg3">Waiting for output…</span>
       )}
     </div>
   );

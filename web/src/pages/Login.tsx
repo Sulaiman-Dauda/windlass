@@ -2,6 +2,11 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import { useLogin } from "../api/auth";
+import { Logo } from "../ui/Logo";
+import { Button, btn } from "../ui/Button";
+import { Input, Field } from "../ui/Field";
+import { Icon } from "../ui/Icon";
+import { Spinner } from "../ui/Spinner";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -19,95 +24,79 @@ export default function Login() {
     (login.error.code === "totp_required" || login.error.code === "totp_invalid");
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-950 px-4">
+    <div className="grid min-h-screen place-items-center bg-canvas px-5">
       <form
-        className="w-full max-w-sm space-y-5"
+        className="w-full max-w-[384px]"
         onSubmit={(e) => {
           e.preventDefault();
           login.mutate({ email, password, totp_code: totp || undefined });
         }}
       >
-        <div className="text-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-100">
-            Windlass
-          </h1>
-          <p className="mt-1 text-sm text-zinc-500">Sign in to your server</p>
+        <div className="mb-7 flex flex-col items-center text-center">
+          <Logo size={46} />
+          <h1 className="mt-3.5 text-2xl font-bold tracking-[-0.02em]">Windlass</h1>
+          <p className="mt-1 text-sm text-fg3">Sign in to your server</p>
         </div>
 
-        <label className="block">
-          <span className="mb-1 block text-sm text-zinc-400">Email</span>
-          <input
-            type="email"
-            required
-            autoComplete="username"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-sm text-zinc-400">Password</span>
-          <input
-            type="password"
-            required
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600"
-          />
-        </label>
-
-        {needsTotp && (
-          <label className="block">
-            <span className="mb-1 block text-sm text-zinc-400">
-              Authenticator code
-            </span>
-            <input
-              autoFocus
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength={6}
+        <div className="flex flex-col gap-4">
+          <Field label="Email">
+            <Input
+              type="email"
               required
-              value={totp}
-              onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-center font-mono text-lg tracking-widest text-zinc-100 outline-none focus:border-zinc-600"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
-          </label>
-        )}
+          </Field>
 
-        {login.isError && login.error instanceof ApiError && login.error.code !== "totp_required" && (
-          <p className="text-sm text-red-400">{login.error.message}</p>
-        )}
+          <Field label="Password">
+            <Input
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </Field>
 
-        <button
-          type="submit"
-          disabled={login.isPending}
-          className="w-full rounded-md bg-zinc-100 py-2 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
-        >
-          {login.isPending ? "Signing in…" : "Sign in"}
-        </button>
+          {needsTotp && (
+            <Field label="Authenticator code">
+              <Input
+                autoFocus
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                required
+                value={totp}
+                onChange={(e) => setTotp(e.target.value.replace(/\D/g, ""))}
+                className="text-center font-mono text-lg tracking-[0.4em]"
+              />
+            </Field>
+          )}
 
-        {(providers.data?.github || providers.data?.google) && (
-          <div className="space-y-2 border-t border-zinc-900 pt-4">
-            {providers.data?.github && (
-              <a
-                href="/api/v1/auth/oauth/github/start"
-                className="block w-full rounded-md border border-zinc-700 py-2 text-center text-sm text-zinc-200 hover:bg-zinc-900"
-              >
-                Continue with GitHub
-              </a>
-            )}
-            {providers.data?.google && (
-              <a
-                href="/api/v1/auth/oauth/google/start"
-                className="block w-full rounded-md border border-zinc-700 py-2 text-center text-sm text-zinc-200 hover:bg-zinc-900"
-              >
-                Continue with Google
-              </a>
-            )}
-          </div>
-        )}
+          {login.isError && login.error instanceof ApiError && login.error.code !== "totp_required" && (
+            <p className="text-sm text-err">{login.error.message}</p>
+          )}
+
+          <Button type="submit" variant="primary" size="lg" block disabled={login.isPending}>
+            {login.isPending ? <><Spinner /> Signing in…</> : "Sign in"}
+          </Button>
+
+          {(providers.data?.github || providers.data?.google) && (
+            <div className="mt-1 flex flex-col gap-2 border-t border-hairline pt-4">
+              {providers.data?.github && (
+                <a href="/api/v1/auth/oauth/github/start" className={btn("secondary", "lg", "w-full")}>
+                  <Icon name="github" size={17} /> Continue with GitHub
+                </a>
+              )}
+              {providers.data?.google && (
+                <a href="/api/v1/auth/oauth/google/start" className={btn("secondary", "lg", "w-full")}>
+                  Continue with Google
+                </a>
+              )}
+            </div>
+          )}
+        </div>
       </form>
     </div>
   );

@@ -3,10 +3,14 @@ package local
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 )
@@ -15,6 +19,33 @@ type hostLocal struct{ l *Local }
 
 func (h hostLocal) Metrics(ctx context.Context) (agent.HostMetrics, error) {
 	return readHostMetrics(ctx, h.l.cfg.ProjectsDir)
+}
+
+func (h hostLocal) HTTPCheck(ctx context.Context, req agent.HTTPCheckReq) (agent.HTTPCheckResult, error) {
+	parsed, err := url.Parse(req.URL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return agent.HTTPCheckResult{}, fmt.Errorf("invalid health-check URL %q", req.URL)
+	}
+	timeout := time.Duration(req.Timeout) * time.Second
+	if timeout <= 0 || timeout > 30*time.Second {
+		timeout = 10 * time.Second
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodGet, req.URL, nil)
+	if err != nil {
+		return agent.HTTPCheckResult{}, err
+	}
+	response, err := http.DefaultClient.Do(httpReq)
+	if err != nil {
+		return agent.HTTPCheckResult{}, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	if err != nil {
+		return agent.HTTPCheckResult{}, err
+	}
+	return agent.HTTPCheckResult{StatusCode: response.StatusCode, Body: string(body)}, nil
 }
 
 // GitSync clones or updates a repository inside the project directory.

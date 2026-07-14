@@ -52,6 +52,7 @@ var (
 
 // VerifyTimeout is how long the verify step waits for services to be healthy.
 var VerifyTimeout = 120 * time.Second
+var verifyPollInterval = 2 * time.Second
 
 type payload struct {
 	DeploymentID int64  `json:"deployment_id"`
@@ -298,6 +299,13 @@ func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pro
 		if err := s.projects.RenderEnvFile(ctx, project); err != nil {
 			return fmt.Errorf("render .env: %w", err)
 		}
+		warnings, err := s.projects.ValidateEnv(ctx, project)
+		if err != nil {
+			return err
+		}
+		for _, warning := range warnings {
+			s.event(ctx, d.ID, "log", "warning: "+warning)
+		}
 		if d.RollbackOf.Valid {
 			arts, err := s.q.ListDeploymentArtifacts(ctx, d.RollbackOf.Int64)
 			if err != nil {
@@ -404,6 +412,12 @@ func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pro
 // timeout expires.
 func (s *Service) verify(ctx context.Context, deploymentID int64, project string) error {
 	deadline := time.Now().Add(VerifyTimeout)
+	config, err := s.agent.Compose().Config(ctx, project)
+	if err != nil {
+		return err
+	}
+	stableSince := make(map[string]time.Time, len(config.HealthChecks))
+	lastHealthError := ""
 	for {
 		statuses, err := s.agent.Compose().PS(ctx, project)
 		if err != nil {
@@ -429,20 +443,54 @@ func (s *Service) verify(ctx context.Context, deploymentID int64, project string
 			return errors.New(anyFatal)
 		}
 		if allGood && len(statuses) > 0 {
-			s.event(ctx, deploymentID, "step", "all services healthy")
-			return nil
+			checksGood := true
+			for _, check := range config.HealthChecks {
+				result, checkErr := s.agent.Host().HTTPCheck(ctx, agent.HTTPCheckReq{URL: check.URL, Timeout: 10})
+				key := check.Service + "|" + check.URL
+				switch {
+				case checkErr != nil:
+					lastHealthError = fmt.Sprintf("%s health URL: %v", check.Service, checkErr)
+					stableSince[key] = time.Time{}
+					checksGood = false
+				case result.StatusCode != check.ExpectedStatus:
+					lastHealthError = fmt.Sprintf("%s health URL returned HTTP %d, expected %d",
+						check.Service, result.StatusCode, check.ExpectedStatus)
+					stableSince[key] = time.Time{}
+					checksGood = false
+				case check.Contains != "" && !strings.Contains(result.Body, check.Contains):
+					lastHealthError = fmt.Sprintf("%s health response did not contain required text", check.Service)
+					stableSince[key] = time.Time{}
+					checksGood = false
+				default:
+					if stableSince[key].IsZero() {
+						stableSince[key] = time.Now()
+					}
+					if time.Since(stableSince[key]) < time.Duration(check.StabilitySeconds)*time.Second {
+						checksGood = false
+						lastHealthError = fmt.Sprintf("%s health check is waiting for its %ds stability window",
+							check.Service, check.StabilitySeconds)
+					}
+				}
+			}
+			if checksGood {
+				s.event(ctx, deploymentID, "step", "all services and application checks healthy")
+				return nil
+			}
 		}
 		if len(statuses) == 0 {
 			return errors.New("no services were created")
 		}
 
 		if time.Now().After(deadline) {
+			if lastHealthError != "" {
+				return fmt.Errorf("application not healthy after %s: %s", VerifyTimeout, lastHealthError)
+			}
 			return fmt.Errorf("services not healthy after %s", VerifyTimeout)
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(2 * time.Second):
+		case <-time.After(verifyPollInterval):
 		}
 	}
 }

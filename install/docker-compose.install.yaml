@@ -3,20 +3,51 @@
 #   docker compose -f docker-compose.install.yaml up -d
 #
 # Notes:
-# - The Docker socket mount gives the panel full control of the host's
-#   Docker — same trust level as the binary install.
+# - Only the socket proxy mounts docker.sock. It allowlists the API families
+#   needed by Compose; container creation remains a privileged trust boundary.
 # - Self-update is disabled in container mode; update by pulling a newer
 #   image instead.
 # - Projects live in the named volume; mount a host path instead if you
 #   want to hand-edit compose files from the host.
 services:
+  docker-proxy:
+    image: ghcr.io/tecnativa/docker-socket-proxy:v0.4.2
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      POST: 1
+      BUILD: 1
+      CONTAINERS: 1
+      ALLOW_START: 1
+      ALLOW_STOP: 1
+      ALLOW_RESTARTS: 1
+      EVENTS: 1
+      EXEC: 1
+      IMAGES: 1
+      INFO: 1
+      NETWORKS: 1
+      SYSTEM: 1
+      VOLUMES: 1
+      VERSION: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [control]
+
   windlass:
     image: ghcr.io/windlass-dev/windlass:latest
     restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - windlass_data:/var/lib/windlass
+    environment:
+      DOCKER_HOST: tcp://docker-proxy:2375
+    depends_on: [docker-proxy]
+    networks: [control, outbound]
 volumes:
   windlass_data:
+networks:
+  control:
+    internal: true
+  outbound: {}

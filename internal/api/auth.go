@@ -135,6 +135,9 @@ func (a *API) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": dto.ID, "email": dto.Email, "role": dto.Role,
 		"totp_enabled": user.TotpEnabled != 0,
+		// OAuth-only accounts have no password; the UI uses this to decide
+		// whether destructive actions can ask for one.
+		"has_password": user.PasswordHash.Valid,
 	})
 }
 

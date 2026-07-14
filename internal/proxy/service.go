@@ -14,25 +14,30 @@ import (
 
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/events"
+	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/store/db"
 )
 
 var (
-	ErrNotFound = errors.New("domain not found")
-	ErrConflict = errors.New("hostname already in use")
+	ErrNotFound        = errors.New("domain not found")
+	ErrConflict        = errors.New("hostname already in use")
+	ErrInvalidHostname = errors.New("invalid hostname")
 )
 
+const panelDomainSettingKey = "panel.domain"
+
 type Service struct {
-	q      *db.Queries
-	agent  agent.Agent
-	bus    *events.Bus
-	logger *slog.Logger
+	q        *db.Queries
+	agent    agent.Agent
+	projects *projects.Service
+	bus      *events.Bus
+	logger   *slog.Logger
 
 	syncCh chan struct{}
 }
 
-func New(q *db.Queries, ag agent.Agent, bus *events.Bus, logger *slog.Logger) *Service {
-	return &Service{q: q, agent: ag, bus: bus, logger: logger, syncCh: make(chan struct{}, 1)}
+func New(q *db.Queries, ag agent.Agent, projectSvc *projects.Service, bus *events.Bus, logger *slog.Logger) *Service {
+	return &Service{q: q, agent: ag, projects: projectSvc, bus: bus, logger: logger, syncCh: make(chan struct{}, 1)}
 }
 
 type Domain struct {
@@ -44,6 +49,31 @@ type Domain struct {
 	Status string `json:"status"`
 }
 
+func (s *Service) PanelDomain(ctx context.Context) (string, error) {
+	value, err := s.q.GetSetting(ctx, panelDomainSettingKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return strings.TrimSpace(value), err
+}
+
+// SetPanelDomain persists desired state before applying it so a temporary
+// Caddy outage converges automatically on the next proxy sync.
+func (s *Service) SetPanelDomain(ctx context.Context, hostname string) error {
+	hostname = strings.ToLower(strings.TrimSpace(hostname))
+	if hostname != "" && !validHostname(hostname) {
+		return fmt.Errorf("%w: %q", ErrInvalidHostname, hostname)
+	}
+	if err := s.q.SetSetting(ctx, db.SetSettingParams{Key: panelDomainSettingKey, Value: hostname}); err != nil {
+		return err
+	}
+	s.RequestSync()
+	if err := s.agent.Proxy().ApplyPanelDomain(ctx, hostname); err != nil {
+		return fmt.Errorf("panel hostname saved but Caddy has not applied it yet: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) Add(ctx context.Context, projectID int64, hostname, service string, port int64) (db.Domain, error) {
 	hostname = strings.ToLower(strings.TrimSpace(hostname))
 	if !validHostname(hostname) {
@@ -51,6 +81,30 @@ func (s *Service) Add(ctx context.Context, projectID int64, hostname, service st
 	}
 	if service == "" || port <= 0 || port > 65535 {
 		return db.Domain{}, errors.New("service and a valid container port are required")
+	}
+	project, err := s.q.ProjectByID(ctx, projectID)
+	if err != nil {
+		return db.Domain{}, err
+	}
+	config, err := s.agent.Compose().Config(ctx, project.Name)
+	if err != nil {
+		return db.Domain{}, err
+	}
+	resolved, ok := config.Services[service]
+	if !ok {
+		return db.Domain{}, fmt.Errorf("service %q is not defined in compose.yaml", service)
+	}
+	if len(resolved.ContainerPorts) > 0 {
+		declared := false
+		for _, candidate := range resolved.ContainerPorts {
+			if int64(candidate) == port {
+				declared = true
+				break
+			}
+		}
+		if !declared {
+			return db.Domain{}, fmt.Errorf("port %d is not exposed by service %q", port, service)
+		}
 	}
 
 	d, err := s.q.CreateDomain(ctx, db.CreateDomainParams{
@@ -60,6 +114,10 @@ func (s *Service) Add(ctx context.Context, projectID int64, hostname, service st
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return db.Domain{}, ErrConflict
 		}
+		return db.Domain{}, err
+	}
+	if err := s.persistDomains(ctx, project.Name, project.ID); err != nil {
+		_ = s.q.DeleteDomain(ctx, d.ID)
 		return db.Domain{}, err
 	}
 
@@ -79,9 +137,29 @@ func (s *Service) Delete(ctx context.Context, projectName, hostname string) erro
 	if err := s.q.DeleteDomain(ctx, d.ID); err != nil {
 		return err
 	}
+	project, err := s.q.GetProjectByName(ctx, projectName)
+	if err != nil {
+		return err
+	}
+	if err := s.persistDomains(ctx, projectName, project.ID); err != nil {
+		return err
+	}
 	s.RequestSync()
 	s.bus.Publish(events.Event{Topic: "domain", Type: "domain.deleted", Resource: hostname})
 	return nil
+}
+
+func (s *Service) persistDomains(ctx context.Context, projectName string, projectID int64) error {
+	rows, err := s.q.ListProjectDomains(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	domains := make([]projects.DomainConfig, 0, len(rows))
+	for _, row := range rows {
+		domains = append(domains, projects.DomainConfig{Hostname: row.Hostname,
+			Service: row.Service, ContainerPort: row.ContainerPort})
+	}
+	return s.projects.SetDomains(ctx, projectName, domains)
 }
 
 // List returns a project's domains with live routing status.
@@ -133,6 +211,13 @@ func (s *Service) Sync(ctx context.Context) error {
 	if err != nil || !info.Available {
 		s.logger.Warn("proxy unavailable; skipping route sync")
 		return nil // degrade gracefully (plan: warn, don't fail)
+	}
+	panelDomain, err := s.PanelDomain(ctx)
+	if err != nil {
+		return err
+	}
+	if err := s.agent.Proxy().ApplyPanelDomain(ctx, panelDomain); err != nil {
+		return fmt.Errorf("apply panel domain: %w", err)
 	}
 
 	domains, err := s.q.ListAllDomains(ctx)

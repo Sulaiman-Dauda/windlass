@@ -135,19 +135,45 @@ if ! id windlass >/dev/null 2>&1; then
   useradd --system --home-dir "$DATA_DIR" --shell /usr/sbin/nologin windlass 2>/dev/null \
     || adduser -S -h "$DATA_DIR" -s /sbin/nologin windlass
 fi
-usermod -aG docker windlass 2>/dev/null || addgroup windlass docker 2>/dev/null || true
+# Direct Docker socket access is root-equivalent. Windlass uses the restricted
+# loopback proxy installed below instead of membership in the docker group.
+gpasswd -d windlass docker >/dev/null 2>&1 || true
 
 mkdir -p "$DATA_DIR/projects" "$DATA_DIR/data" "$DATA_DIR/backups"
 chown -R windlass:windlass "$DATA_DIR"
 chmod 750 "$DATA_DIR"
+chmod 700 "$DATA_DIR/data"
+chmod 750 "$DATA_DIR/projects" "$DATA_DIR/backups"
 
 if [ -d /etc/systemd/system ]; then
+  cat > /etc/systemd/system/windlass-docker-proxy.service <<'PROXYUNIT'
+[Unit]
+Description=Restricted Docker API proxy for Windlass
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/docker rm -f windlass-docker-proxy
+ExecStart=/usr/bin/docker run --rm --name windlass-docker-proxy --cap-drop=ALL --security-opt=no-new-privileges -p 127.0.0.1:2375:2375 -v /var/run/docker.sock:/var/run/docker.sock:ro -e POST=1 -e BUILD=1 -e CONTAINERS=1 -e ALLOW_START=1 -e ALLOW_STOP=1 -e ALLOW_RESTARTS=1 -e EVENTS=1 -e EXEC=1 -e IMAGES=1 -e INFO=1 -e NETWORKS=1 -e SYSTEM=1 -e VERSION=1 -e VOLUMES=1 ghcr.io/tecnativa/docker-socket-proxy:v0.4.2
+ExecStop=-/usr/bin/docker stop -t 10 windlass-docker-proxy
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+PROXYUNIT
+
   cat > /etc/systemd/system/windlass.service <<'UNIT'
 [Unit]
 Description=Windlass — Docker Compose control plane
-After=network-online.target docker.service
+After=network-online.target docker.service windlass-docker-proxy.service
 Wants=network-online.target
-Requires=docker.service
+Requires=docker.service windlass-docker-proxy.service
 
 [Service]
 Type=notify
@@ -155,9 +181,24 @@ ExecStart=/usr/local/bin/windlass
 User=windlass
 Group=windlass
 Environment=WINDLASS_DATA=/var/lib/windlass
+Environment=DOCKER_HOST=tcp://127.0.0.1:2375
 Restart=always
 RestartSec=2
+UMask=0077
 NoNewPrivileges=yes
+CapabilityBoundingSet=
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
 ReadWritePaths=/var/lib/windlass
 ProtectSystem=full
 ProtectHome=yes
@@ -166,6 +207,7 @@ ProtectHome=yes
 WantedBy=multi-user.target
 UNIT
   systemctl daemon-reload
+  systemctl enable --now windlass-docker-proxy
   systemctl enable --now windlass
   ok "systemd service started"
 else

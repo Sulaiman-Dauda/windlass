@@ -110,7 +110,7 @@ func (a *API) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 		MaxAge: 600, HttpOnly: true, Secure: isTLS(r), SameSite: http.SameSiteLaxMode,
 	})
 
-	target, err := auth.OAuthAuthorizeURL(provider, cfg, a.oauthRedirectURI(r, provider), state)
+	target, err := auth.OAuthAuthorizeURL(provider, cfg, a.oauthRedirectURI(r, provider), state, "")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return

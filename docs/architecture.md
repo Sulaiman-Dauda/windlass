@@ -1,80 +1,116 @@
 # Architecture
 
-One Go binary, one embedded React SPA, SQLite for metadata. Docker Compose
-is the deployment engine, Caddy the router; Windlass orchestrates both and
-invents nothing.
+Windlass is one Go process with an embedded React SPA. Docker Compose is the deployment
+engine, Caddy is the HTTP/TLS router, and SQLite stores control-plane state.
 
-```
-Browser ── React SPA (embedded, TanStack Query + SSE)
-   │
-   ▼  /api/v1 (chi, JWT-cookie sessions, RBAC)
-Control plane ──────────────────────────────────────────┐
-   │ services: projects · deploy · proxy · git ·        │
-   │           backups · plugins · update               │
-   │                                                    │ SQLite (WAL)
-   ▼ internal/agent — THE privileged boundary           │ metadata only
-┌─────────────────────────────────────────────┐         │
-│ agent/local (the only pkg touching:)        │◄────────┘
-│  · Docker SDK  · docker compose CLI         │
-│  · Caddy admin API  · project filesystem    │
-│  · git CLI  · container exec                │
-└─────────────────────────────────────────────┘
-```
-
-## The agent boundary (principle 11)
-
-Every privileged operation goes through the `agent.Agent` interface —
-serializable types only, context everywhere, streaming as typed callbacks.
-depguard fails CI if any other package imports the Docker SDK.
-
-This is the future node-agent seam: replacing `agent/local` with a gRPC/mTLS
-client turns Windlass multi-server without touching anything above the
-interface. Tests run against `agent/fake` on any OS.
-
-## The deploy pipeline (principle 13)
-
-```
-queued → preparing → syncing → pulling → building → applying → verifying
+```text
+Browser
+  │ HTTPS / API / SSE / WebSocket
+  ▼
+Caddy ── user-owned configuration
+  │      + windlass_panel_route
+  │      + windlass_routes / windlass_route_*
+  ▼
+Windlass Go process
+  ├── API, auth, audit, jobs, deploy, proxy, backup, plugin services
+  ├── SQLite (platform state + rebuildable indexes/caches)
+  └── internal/agent
+       ├── docker compose CLI
+       ├── Docker API through the restricted socket proxy
+       ├── Caddy admin API
+       ├── project filesystem and Git
+       └── container exec and host metrics
 ```
 
-Jobs persist in SQLite with a step checkpoint written *before* each step.
-Every step is idempotent (pinned git SHAs, convergent compose commands), so
-a crash resumes by re-executing the checkpointed step at boot. Superseded
-deployments cancel themselves; one active deployment per project; rollbacks
-re-apply recorded image digests via a compose override file.
+## Application configuration ownership
 
-## Events
+The project directory is authoritative:
 
-An in-process bus fans out structured events (principle 15) to SSE clients;
-deployment events are *also* persisted per-deployment for lossless replay
-(`Last-Event-ID`). The bus is lossy by design; the store is not.
+- `compose.yaml` or `compose.yml`: every Compose-defined setting, including services,
+  images, ports, volumes, networks, environment references, restart policies, healthchecks,
+  and CPU/memory limits.
+- `.env`: standard dotenv values used by Compose. Windlass writes it atomically with mode
+  `0600`, reads hand edits, and maintains an encrypted SQLite cache.
+- `.windlass.json`: versioned Windlass manifest containing source type, Git repository and
+  branch, auto-deploy choice, and domain mappings.
 
-## Caddy ownership (principle 6)
+`projects.Service.Reconcile` scans directories containing a Compose file, creates a manifest
+for installations that predate it, and upserts the project/domain index. Missing directories
+are hidden rather than cascade-deleted so temporary mount failures do not erase platform
+history. An explicitly requested project deletion removes both the directory and its platform
+records.
 
-Windlass owns exactly one `@id`-tagged route object, applied with targeted
-PATCHes — never `POST /load`. User-written Caddy config is never modified.
-Routes re-sync on deployment completion and docker container events
-(container IPs change on restart).
+## Platform storage
 
-## Storage
+SQLite uses WAL mode and foreign keys. It stores:
 
-- SQLite (`modernc.org/sqlite`, pure Go): users, sessions, deployments +
-  events + artifacts, domains, git connections, backups, jobs, settings,
-  audit log. Single connection, WAL.
-- Disk: projects (source of truth), backups, key files.
-- Secrets (env vars, tokens, TOTP seeds, S3/OAuth creds): AES-256-GCM with a
-  key file, nonce-prefixed ciphertexts.
+- users, sessions, roles, TOTP/OAuth state, audit entries, and settings;
+- deployment/job state, events, image artifacts, backups, and schedules;
+- encrypted Git/S3/OAuth credentials;
+- rebuildable project, domain, and environment indexes/caches.
 
-## RAM budget (principle 9)
+The database does not contain Compose YAML or replace the project files. A new database can
+rediscover applications, domains, Git source metadata, and `.env` values from disk. Accounts,
+audit history, deployment history, backup records, and encrypted platform credentials require
+a platform backup.
 
-No queues, no Prometheus, no background collectors. Log fan-out is
-ring-buffered; container logs stream on demand only; metrics are read
-straight from /proc and the Docker API when the dashboard asks. Idle target:
-<40 MB RSS for the Go process, enforced by a CI check.
+## Agent boundary and Docker access
 
-## Dependency policy (principle 10)
+All privileged operations use `agent.Agent` interfaces with serializable request/response
+types. `agent/local` is the in-process implementation; `agent/fake` supports deterministic
+unit tests.
 
-Direct dependencies: chi, Docker SDK, coder/websocket, modernc/sqlite,
-x/crypto (argon2). Hand-rolled instead of imported: JWT (HMAC), TOTP
-(RFC 6238), S3 SigV4 PUT/GET, sd_notify, OAuth flows, rate limiting,
-host metrics, cron-lite scheduling.
+The systemd installation does not grant direct `docker.sock` access to the Windlass user.
+`windlass-docker-proxy.service` mounts the socket and exposes an API-allowlisted endpoint only
+on `127.0.0.1:2375`. Windlass and the Compose CLI use `DOCKER_HOST` to reach it. Container
+creation is still a privileged trust boundary, but unrelated Docker API families are blocked.
+
+## Deployment chain
+
+A deployment is a persisted SQLite job:
+
+```text
+queued → preparing → syncing → pulling → building → applying → verifying → succeeded
+```
+
+The relevant execution chain is:
+
+```text
+projects.RenderEnvFile       # reads/imports the authoritative .env
+docker compose config
+git sync                     # Git projects only
+docker compose pull --ignore-buildable
+docker compose build         # services with build contexts
+docker compose up -d --quiet-pull --remove-orphans
+docker compose ps -a --format json
+HTTP application checks      # when windlass.health.* labels exist
+```
+
+Step checkpoints are recorded before execution. A restarted runner reclaims interrupted jobs
+and reruns the idempotent checkpoint. Rollback deployments use recorded image digests in a
+temporary Compose override.
+
+## Caddy ownership
+
+Windlass uses targeted admin-API requests and never calls `POST /load`:
+
+- `windlass_routes` is the application-domain subtree.
+- `windlass_route_<hostname>` is an individual application route.
+- `windlass_panel_route` is the Settings-managed panel hostname.
+
+Certificate automation names are merged with existing names. User routes and unrelated Caddy
+configuration remain untouched. Routes are reconciled at startup and after relevant Docker,
+deployment, project, or domain events.
+
+## Events and UI safety
+
+An in-process event bus drives live invalidation. Deployment events are also persisted for SSE
+replay with sequence numbers. Container logs stream on demand; the terminal alone uses a
+WebSocket. A React route error boundary prevents a rendering failure from blanking the whole
+application.
+
+## Resource policy
+
+Metrics are read on demand from `/proc` and Docker. There is no metrics collector, Redis, or
+external queue. CI starts the production binary and enforces an idle Go-process RSS below
+40 MiB. Caddy and the Docker socket proxy are separate processes and are measured separately.

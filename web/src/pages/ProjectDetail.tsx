@@ -1,13 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
+import { NavLink, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import {
-  NavLink,
-  Route,
-  Routes,
-  useNavigate,
-  useParams,
-} from "react-router-dom";
-import {
-  useDeleteProject,
   useProject,
   useProjectEnv,
   useProjectFile,
@@ -15,70 +8,77 @@ import {
   useSaveProjectEnv,
   useSaveProjectFile,
 } from "../api/projects";
-import { lazy, Suspense } from "react";
 import BackupsTab from "../components/BackupsTab";
 import DeploymentsTab from "../components/DeploymentsTab";
 import DomainsTab from "../components/DomainsTab";
 import GitTab from "../components/GitTab";
 import LogsTab from "../components/LogsTab";
 import OverviewTab from "../components/OverviewTab";
+import DeleteProjectDialog from "../components/DeleteProjectDialog";
+import { Page } from "../ui/Page";
+import { Button } from "../ui/Button";
+import { Input, Textarea } from "../ui/Field";
+import { Icon } from "../ui/Icon";
+import { cn } from "../ui/cn";
 
-// xterm is heavy; load it only when the Terminal tab opens.
 const TerminalTab = lazy(() => import("../components/TerminalTab"));
+
+const tabs = [
+  { to: "", label: "Overview", end: true },
+  { to: "deployments", label: "Deployments" },
+  { to: "domains", label: "Domains" },
+  { to: "git", label: "Git" },
+  { to: "files", label: "Files" },
+  { to: "env", label: "Environment" },
+  { to: "logs", label: "Logs" },
+  { to: "terminal", label: "Terminal" },
+  { to: "backups", label: "Backups" },
+];
 
 export default function ProjectDetail() {
   const { name = "" } = useParams();
   const project = useProject(name);
-  const del = useDeleteProject();
   const navigate = useNavigate();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   if (project.isLoading) {
-    return <p className="text-sm text-zinc-500">Loading…</p>;
+    return <p className="p-10 text-sm text-fg3">Loading…</p>;
   }
   if (project.isError) {
-    return <p className="text-sm text-red-400">Project not found.</p>;
+    return <p className="p-10 text-sm text-err">Project not found.</p>;
   }
 
-  const tabs = [
-    { to: "", label: "Overview", end: true },
-    { to: "deployments", label: "Deployments" },
-    { to: "domains", label: "Domains" },
-    { to: "git", label: "Git" },
-    { to: "files", label: "Files" },
-    { to: "env", label: "Environment" },
-    { to: "logs", label: "Logs" },
-    { to: "terminal", label: "Terminal" },
-    { to: "backups", label: "Backups" },
-  ];
-
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">{name}</h1>
-        <button
-          onClick={() => {
-            if (confirm(`Delete project "${name}"? Its containers are stopped and its directory removed.`)) {
-              del.mutate(name, { onSuccess: () => navigate("/projects") });
-            }
-          }}
-          className="rounded-md border border-red-900/60 px-3 py-1.5 text-sm text-red-400 hover:bg-red-950/40"
-        >
-          Delete
-        </button>
-      </div>
+    <Page
+      title={name}
+      subtitle={project.data ? `${project.data.source}${project.data.git_repo ? ` · ${project.data.git_repo}` : ""}` : undefined}
+      actions={
+        <Button size="sm" variant="danger" onClick={() => setConfirmingDelete(true)}>
+          <Icon name="trash" size={15} /> Delete
+        </Button>
+      }
+    >
+      {confirmingDelete && (
+        <DeleteProjectDialog
+          name={name}
+          onClose={() => setConfirmingDelete(false)}
+          onDeleted={() => navigate("/projects")}
+        />
+      )}
 
-      <nav className="mt-4 flex gap-1 border-b border-zinc-900">
+      <nav className="mb-6 flex gap-1 overflow-x-auto border-b border-hairline [scrollbar-width:none]">
         {tabs.map((t) => (
           <NavLink
             key={t.label}
             to={t.to}
             end={t.end}
             className={({ isActive }) =>
-              `border-b-2 px-3 py-2 text-sm ${
+              cn(
+                "relative whitespace-nowrap px-3 pb-3 pt-2.5 text-sm transition-colors duration-200",
                 isActive
-                  ? "border-zinc-100 text-zinc-100"
-                  : "border-transparent text-zinc-500 hover:text-zinc-300"
-              }`
+                  ? "font-semibold text-fg after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-t after:bg-accent"
+                  : "font-medium text-fg2 hover:text-fg",
+              )
             }
           >
             {t.label}
@@ -86,27 +86,25 @@ export default function ProjectDetail() {
         ))}
       </nav>
 
-      <div className="mt-6">
-        <Routes>
-          <Route index element={<OverviewTab project={name} />} />
-          <Route path="deployments" element={<DeploymentsTab project={name} />} />
-          <Route path="domains" element={<DomainsTab project={name} />} />
-          <Route path="git" element={<GitTab project={name} />} />
-          <Route path="files" element={<FilesTab name={name} />} />
-          <Route path="env" element={<EnvTab name={name} />} />
-          <Route path="logs" element={<LogsTab project={name} />} />
-          <Route
-            path="terminal"
-            element={
-              <Suspense fallback={<p className="text-sm text-zinc-600">Loading terminal…</p>}>
-                <TerminalTab project={name} />
-              </Suspense>
-            }
-          />
-          <Route path="backups" element={<BackupsTab project={name} />} />
-        </Routes>
-      </div>
-    </div>
+      <Routes>
+        <Route index element={<OverviewTab project={name} />} />
+        <Route path="deployments" element={<DeploymentsTab project={name} />} />
+        <Route path="domains" element={<DomainsTab project={name} />} />
+        <Route path="git" element={<GitTab project={name} />} />
+        <Route path="files" element={<FilesTab name={name} />} />
+        <Route path="env" element={<EnvTab name={name} />} />
+        <Route path="logs" element={<LogsTab project={name} />} />
+        <Route
+          path="terminal"
+          element={
+            <Suspense fallback={<p className="text-sm text-fg3">Loading terminal…</p>}>
+              <TerminalTab project={name} />
+            </Suspense>
+          }
+        />
+        <Route path="backups" element={<BackupsTab project={name} />} />
+      </Routes>
+    </Page>
   );
 }
 
@@ -125,53 +123,52 @@ function FilesTab({ name }: { name: string }) {
 
   return (
     <div className="flex gap-6">
-      <div className="w-48 shrink-0">
-        {files.data?.filter((f) => !f.IsDir).map((f) => (
+      <div className="w-52 flex-none">
+        {files.data?.filter((f) => !f.is_dir).map((f) => (
           <button
-            key={f.Name}
-            onClick={() => setSelected(f.Name)}
-            className={`block w-full truncate rounded px-2 py-1 text-left text-sm ${
-              selected === f.Name
-                ? "bg-zinc-800 text-zinc-100"
-                : "text-zinc-400 hover:bg-zinc-900"
-            }`}
+            key={f.name}
+            onClick={() => setSelected(f.name)}
+            className={cn(
+              "block w-full truncate rounded-[8px] px-2.5 py-1.5 text-left font-mono text-sm transition-colors duration-150",
+              selected === f.name ? "bg-accent-soft text-accent" : "text-fg2 hover:bg-surface2 hover:text-fg",
+            )}
           >
-            {f.Name}
+            {f.name}
           </button>
         ))}
       </div>
 
-      <div className="flex-1">
+      <div className="min-w-0 flex-1">
         {selected === null ? (
-          <p className="text-sm text-zinc-500">Select a file.</p>
+          <p className="text-sm text-fg3">Select a file.</p>
         ) : file.isError ? (
-          <p className="text-sm text-red-400">
+          <p className="text-sm text-err">
             {file.error instanceof Error ? file.error.message : "Cannot open file"}
           </p>
         ) : (
           <>
-            <textarea
+            <Textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               spellCheck={false}
-              rows={20}
-              className="w-full rounded-md border border-zinc-800 bg-zinc-950 p-3 font-mono text-sm text-zinc-100 outline-none focus:border-zinc-600"
+              rows={22}
+              className="font-mono text-sm"
             />
-            <div className="mt-2 flex items-center gap-3">
-              <button
+            <div className="mt-2.5 flex items-center gap-3">
+              <Button
+                variant="primary"
                 onClick={() => save.mutate({ path: selected, content: draft })}
                 disabled={save.isPending || draft === file.data?.content}
-                className="rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
               >
                 {save.isPending ? "Saving…" : "Save"}
-              </button>
+              </Button>
               {save.isError && (
-                <span className="text-sm text-red-400">
+                <span className="text-sm text-err">
                   {save.error instanceof Error ? save.error.message : "Save failed"}
                 </span>
               )}
               {save.isSuccess && draft === file.data?.content && (
-                <span className="text-sm text-emerald-400">Saved</span>
+                <span className="text-sm text-ok">Saved</span>
               )}
             </div>
           </>
@@ -188,11 +185,58 @@ interface EnvRow {
   value: string;
 }
 
+function parseEnvBlock(input: string): { rows: EnvRow[]; errors: string[] } {
+  const values = new Map<string, string>();
+  const errors: string[] = [];
+
+  input.split(/\r?\n/).forEach((source, index) => {
+    let line = source.trim();
+    if (!line || line.startsWith("#")) return;
+    if (line.startsWith("export ")) line = line.slice(7).trimStart();
+
+    const separator = line.indexOf("=");
+    if (separator < 1) {
+      errors.push(`Line ${index + 1}: expected KEY=value`);
+      return;
+    }
+
+    const key = line.slice(0, separator).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      errors.push(`Line ${index + 1}: invalid variable name "${key}"`);
+      return;
+    }
+
+    let value = line.slice(separator + 1).trim();
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      const quote = value[0];
+      value = value.slice(1, -1);
+      if (quote === '"') {
+        value = value
+          .replace(/\\n/g, "\n")
+          .replace(/\\r/g, "\r")
+          .replace(/\\t/g, "\t")
+          .replace(/\\"/g, '"')
+          .replace(/\\\\/g, "\\");
+      }
+    }
+
+    values.set(key, value);
+  });
+
+  return { rows: Array.from(values, ([key, value]) => ({ key, value })), errors };
+}
+
 function EnvTab({ name }: { name: string }) {
   const env = useProjectEnv(name);
   const save = useSaveProjectEnv(name);
   const [rows, setRows] = useState<EnvRow[]>([]);
   const [dirty, setDirty] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkDraft, setBulkDraft] = useState("");
+  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
 
   useEffect(() => {
     if (env.data && !dirty) {
@@ -211,63 +255,101 @@ function EnvTab({ name }: { name: string }) {
 
   return (
     <div className="max-w-2xl">
-      <p className="text-sm text-zinc-500">
-        Values are encrypted at rest and written to the project's{" "}
-        <code className="text-zinc-400">.env</code> at deploy time.
+      <p className="text-sm leading-relaxed text-fg2">
+        The project's standard <code className="font-mono text-fg">.env</code> file is the source of
+        truth (server mode 0600). Windlass also keeps an encrypted SQLite cache for platform features.
       </p>
+
+      <div className="mt-4">
+        <Button size="sm" onClick={() => { setBulkOpen((o) => !o); setBulkErrors([]); }}>
+          {bulkOpen ? "Cancel bulk paste" : "Paste .env variables"}
+        </Button>
+
+        {bulkOpen && (
+          <div className="mt-3 rounded-[13px] border border-hairline bg-surface2 p-3.5">
+            <p className="mb-2 text-xs text-fg3">
+              Paste one <code className="font-mono">KEY=value</code> per line. Blank lines and lines
+              starting with <code className="font-mono">#</code> are ignored. Pasted values replace
+              matching keys; others stay unchanged.
+            </p>
+            <Textarea
+              value={bulkDraft}
+              onChange={(e) => { setBulkDraft(e.target.value); setBulkErrors([]); }}
+              placeholder={"AP_ENVIRONMENT=prod\nAP_REDIS_HOST=redis\nAP_REDIS_PORT=6379"}
+              spellCheck={false}
+              rows={10}
+              className="font-mono text-sm"
+            />
+            {bulkErrors.length > 0 && (
+              <ul className="mt-2 space-y-1 text-xs text-err">
+                {bulkErrors.map((error) => <li key={error}>{error}</li>)}
+              </ul>
+            )}
+            <Button
+              variant="primary"
+              className="mt-2.5"
+              onClick={() => {
+                const parsed = parseEnvBlock(bulkDraft);
+                if (parsed.errors.length > 0) { setBulkErrors(parsed.errors); return; }
+                if (parsed.rows.length === 0) { setBulkErrors(["Paste at least one KEY=value line."]); return; }
+                const merged = new Map(rows.filter((row) => row.key).map((row) => [row.key, row.value]));
+                parsed.rows.forEach((row) => merged.set(row.key, row.value));
+                setRows(Array.from(merged, ([key, value]) => ({ key, value })).sort((a, b) => a.key.localeCompare(b.key)));
+                setDirty(true);
+                setBulkDraft("");
+                setBulkErrors([]);
+                setBulkOpen(false);
+              }}
+            >
+              Import into editor
+            </Button>
+          </div>
+        )}
+      </div>
 
       <div className="mt-4 space-y-2">
         {rows.map((row, i) => (
           <div key={i} className="flex gap-2">
-            <input
+            <Input
               value={row.key}
               onChange={(e) => update(i, { key: e.target.value.toUpperCase() })}
               placeholder="KEY"
-              className="w-56 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 font-mono text-sm text-zinc-100 outline-none focus:border-zinc-600"
+              className="w-56 font-mono text-sm"
             />
-            <input
+            <Input
               value={row.value}
               onChange={(e) => update(i, { value: e.target.value })}
               placeholder="value"
-              className="flex-1 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1.5 font-mono text-sm text-zinc-100 outline-none focus:border-zinc-600"
+              className="flex-1 font-mono text-sm"
             />
             <button
-              onClick={() => {
-                setDirty(true);
-                setRows((r) => r.filter((_, j) => j !== i));
-              }}
-              className="rounded-md px-2 text-zinc-500 hover:text-red-400"
+              onClick={() => { setDirty(true); setRows((r) => r.filter((_, j) => j !== i)); }}
+              className="grid w-9 flex-none place-items-center rounded-[9px] text-fg3 transition-colors hover:bg-err-soft hover:text-err"
               title="Remove"
             >
-              ×
+              <Icon name="x" size={15} />
             </button>
           </div>
         ))}
       </div>
 
       <div className="mt-3 flex items-center gap-3">
-        <button
-          onClick={() => {
-            setDirty(true);
-            setRows((r) => [...r, { key: "", value: "" }]);
-          }}
-          className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm hover:bg-zinc-900"
-        >
-          Add variable
-        </button>
-        <button
+        <Button size="sm" onClick={() => { setDirty(true); setRows((r) => [...r, { key: "", value: "" }]); }}>
+          <Icon name="plus" size={15} /> Add variable
+        </Button>
+        <Button
+          variant="primary"
           onClick={() => {
             const vars: Record<string, string> = {};
             for (const r of rows) if (r.key) vars[r.key] = r.value;
             save.mutate(vars, { onSuccess: () => setDirty(false) });
           }}
           disabled={save.isPending || !dirty}
-          className="rounded-md bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white disabled:opacity-50"
         >
           {save.isPending ? "Saving…" : "Save changes"}
-        </button>
+        </Button>
         {save.isError && (
-          <span className="text-sm text-red-400">
+          <span className="text-sm text-err">
             {save.error instanceof Error ? save.error.message : "Save failed"}
           </span>
         )}

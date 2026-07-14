@@ -20,13 +20,20 @@ type Config struct {
 	ProjectsDir string
 	// LogLevel controls slog verbosity.
 	LogLevel slog.Level
+	// PanelUpstream is the Caddy dial target used for the Settings-managed
+	// panel hostname. Override it when Caddy is not on the host network.
+	PanelUpstream string
+	// CaddyAdmin is the Caddy admin API base URL.
+	CaddyAdmin string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:     envOr("WINDLASS_ADDR", ":8080"),
-		DataDir:  envOr("WINDLASS_DATA", defaultDataDir()),
-		LogLevel: slog.LevelInfo,
+		Addr:          envOr("WINDLASS_ADDR", ":8080"),
+		DataDir:       envOr("WINDLASS_DATA", defaultDataDir()),
+		LogLevel:      slog.LevelInfo,
+		PanelUpstream: envOr("WINDLASS_PANEL_UPSTREAM", "127.0.0.1:8080"),
+		CaddyAdmin:    envOr("WINDLASS_CADDY_ADMIN", "http://127.0.0.1:2019"),
 	}
 
 	switch os.Getenv("WINDLASS_LOG_LEVEL") {
