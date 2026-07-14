@@ -1,0 +1,9 @@
+{
+  "key": "meilisearch",
+  "name": "Meilisearch",
+  "description": "Fast, typo-tolerant search engine, published on 127.0.0.1:7700",
+  "default_port": 7700,
+  "env": [
+    { "name": "MEILI_MASTER_KEY", "secret": "main" }
+  ]
+}

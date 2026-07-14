@@ -1,0 +1,12 @@
+{
+  "key": "n8n",
+  "name": "n8n",
+  "description": "Workflow automation with 400+ integrations, served over HTTPS on your domain",
+  "default_port": 0,
+  "route": { "service": "n8n", "container_port": 5678 },
+  "env": [
+    { "name": "N8N_HOST", "from": "domain" },
+    { "name": "N8N_URL", "from": "url" },
+    { "name": "N8N_ENCRYPTION_KEY", "secret": "enc" }
+  ]
+}

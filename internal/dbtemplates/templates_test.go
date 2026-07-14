@@ -123,3 +123,53 @@ func TestRenderMissingDomainFails(t *testing.T) {
 		t.Error("expected error when a url-injecting template has no domain")
 	}
 }
+
+// The Tier-1 batch: app templates carry a route, the search backing service
+// does not, and all render.
+func TestTier1TemplatesLoad(t *testing.T) {
+	keys := map[string]bool{}
+	for _, tmpl := range List() {
+		keys[tmpl.Key] = true
+	}
+	for _, want := range []string{"pocketbase", "n8n", "meilisearch", "gitea"} {
+		if !keys[want] {
+			t.Errorf("List() missing %q", want)
+		}
+	}
+	// Meilisearch is a loopback backing service (no route); n8n is an app.
+	if m, _ := Get("meilisearch"); m.Route != nil {
+		t.Errorf("meilisearch should have no route: %+v", m.Route)
+	}
+	if n, _ := Get("n8n"); n.Route == nil || n.Route.ContainerPort != 5678 {
+		t.Errorf("n8n route wrong: %+v", n.Route)
+	}
+}
+
+func TestN8nInjectsDomainAndURL(t *testing.T) {
+	_, env, err := Render("n8n", "flows", "n8n.example.com", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env["N8N_HOST"] != "n8n.example.com" {
+		t.Errorf("N8N_HOST = %q", env["N8N_HOST"])
+	}
+	if env["N8N_URL"] != "https://n8n.example.com" {
+		t.Errorf("N8N_URL = %q", env["N8N_URL"])
+	}
+	if env["N8N_ENCRYPTION_KEY"] == "" {
+		t.Error("N8N_ENCRYPTION_KEY not generated")
+	}
+}
+
+func TestMeilisearchRendersLoopbackPort(t *testing.T) {
+	compose, env, err := Render("meilisearch", "search", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(compose, "127.0.0.1:7700:7700") {
+		t.Errorf("meilisearch default port not rendered:\n%s", compose)
+	}
+	if env["MEILI_MASTER_KEY"] == "" {
+		t.Error("MEILI_MASTER_KEY not generated")
+	}
+}

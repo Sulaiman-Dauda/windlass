@@ -1,0 +1,11 @@
+{
+  "key": "gitea",
+  "name": "Gitea",
+  "description": "Lightweight self-hosted Git service, served over HTTPS on your domain",
+  "default_port": 0,
+  "route": { "service": "gitea", "container_port": 3000 },
+  "env": [
+    { "name": "GITEA_DOMAIN", "from": "domain" },
+    { "name": "GITEA_URL", "from": "url" }
+  ]
+}
