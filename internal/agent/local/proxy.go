@@ -297,10 +297,17 @@ func (p proxyLocal) install(ctx context.Context, obj caddyRoute) error {
 	}
 
 	if target == "" {
-		// No usable server: create one that Caddy will run auto-HTTPS on.
+		// No usable server: create one that terminates TLS on :443. The domain
+		// host matchers live inside the windlass_routes subroute, which Caddy's
+		// automatic-HTTPS host discovery does not traverse, so Caddy never
+		// attaches a TLS connection policy on its own. Without an explicit empty
+		// policy (match any SNI, serve the managed cert obtained via ensureTLS)
+		// the :443 listener stays plaintext and application HTTPS fails even
+		// though the certificate was issued.
 		server := map[string]any{
-			"listen": []string{":80", ":443"},
-			"routes": []caddyRoute{obj},
+			"listen":                  []string{":80", ":443"},
+			"routes":                  []caddyRoute{obj},
+			"tls_connection_policies": []map[string]any{{}},
 		}
 		// Parent objects may not exist on a fresh Caddy; build the path.
 		for _, step := range []struct {

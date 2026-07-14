@@ -102,6 +102,27 @@ if [ "$WANT_CADDY" = "1" ]; then
       fail "unsupported package manager; install Caddy manually or rerun with --no-caddy"
     fi
     ok "caddy installed"
+
+    # Windlass creates and owns its own :80+:443 server through the Caddy admin
+    # API. The distro package ships a :80-only welcome site; leaving it in place
+    # makes Windlass graft its routes onto that plain-HTTP server, so
+    # application domains never get an HTTPS listener. Replace it with an
+    # admin-only base so Windlass's server handles requests. Only done on a
+    # fresh install (the "caddy present" branch above leaves existing config
+    # untouched).
+    if [ -f /etc/caddy/Caddyfile ]; then
+      cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.default.bak 2>/dev/null || true
+    fi
+    mkdir -p /etc/caddy
+    cat > /etc/caddy/Caddyfile <<'CADDYFILE'
+{
+	admin 127.0.0.1:2019
+}
+CADDYFILE
+    systemctl reload caddy 2>/dev/null \
+      || systemctl restart caddy 2>/dev/null \
+      || rc-service caddy restart 2>/dev/null \
+      || true
   fi
 else
   log "skipping Caddy (domains and automatic HTTPS unavailable)"

@@ -121,6 +121,61 @@ func TestBuildRoutesObjectGolden(t *testing.T) {
 	}
 }
 
+// When Caddy has no usable server, install() must create one that actually
+// terminates TLS. Regression test for application domains serving plaintext on
+// :443 (host matchers are nested in the windlass_routes subroute, so Caddy's
+// automatic-HTTPS never attaches a connection policy by itself).
+func TestInstallCreatesServerWithTLSPolicy(t *testing.T) {
+	t.Parallel()
+
+	var created map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/config/apps/http/servers/windlass" {
+			body, _ := io.ReadAll(r.Body)
+			if err := json.Unmarshal(body, &created); err != nil {
+				t.Fatalf("decode server PUT: %v", err)
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		// Every GET returns an empty object: no servers exist yet (forcing the
+		// create-server path) and all config parents already exist.
+		if r.Method == http.MethodGet {
+			io.WriteString(w, "{}")
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	p := proxyLocal{l: &Local{cfg: Config{CaddyAdmin: srv.URL}}}
+	obj := buildRoutesObject([]agent.Route{
+		{ID: "windlass_route_app.example.com", Hostname: "app.example.com", Upstream: "10.0.0.2:3001", TLS: true},
+	})
+	if err := p.install(context.Background(), obj); err != nil {
+		t.Fatal(err)
+	}
+
+	if created == nil {
+		t.Fatal("windlass server was never created")
+	}
+	policies, ok := created["tls_connection_policies"].([]any)
+	if !ok || len(policies) == 0 {
+		t.Fatalf("created server missing tls_connection_policies (%#v): :443 would serve plaintext",
+			created["tls_connection_policies"])
+	}
+	listen, _ := created["listen"].([]any)
+	has443 := false
+	for _, l := range listen {
+		if l == ":443" {
+			has443 = true
+		}
+	}
+	if !has443 {
+		t.Fatalf("created server must listen on :443, got %v", listen)
+	}
+}
+
 func TestBuildRoutesObjectEmpty(t *testing.T) {
 	obj := buildRoutesObject(nil)
 	got, _ := json.Marshal(obj)
