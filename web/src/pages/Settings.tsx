@@ -39,9 +39,9 @@ export default function Settings() {
 
   return (
     <Page title="Settings">
-      <div className="max-w-[760px]">
+      <div className="w-full">
         <Segmented
-          className="mb-6"
+          className="mb-6 w-full"
           options={[...TABS]}
           value={tab as Tab}
           onChange={(v) => navigate(`/settings/${v}`)}

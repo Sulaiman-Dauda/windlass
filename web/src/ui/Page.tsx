@@ -6,13 +6,13 @@ export function Page({
   subtitle,
   actions,
   children,
-  width = 1120,
+  width = "90%",
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
-  width?: number;
+  width?: number | string;
 }) {
   return (
     <>
