@@ -198,6 +198,10 @@ Requires=docker.service windlass-docker-proxy.service
 
 [Service]
 Type=notify
+# Self-update: the panel stages a verified binary in its data dir (it cannot
+# write /usr/local/bin under ProtectSystem=); this privileged hook swaps it
+# in before every start, keeping the old binary as windlass.previous.
+ExecStartPre=+/bin/sh -c "if [ -x /var/lib/windlass/data/update/windlass.next ]; then cp -a /usr/local/bin/windlass /usr/local/bin/windlass.previous 2>/dev/null || true; mv -f /var/lib/windlass/data/update/windlass.next /usr/local/bin/windlass; fi"
 ExecStart=/usr/local/bin/windlass
 User=windlass
 Group=windlass

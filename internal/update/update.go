@@ -188,10 +188,21 @@ func (s *Service) Apply(ctx context.Context) error {
 		s.logger.Warn("could not keep previous binary", "error", err)
 	}
 	if err := os.Rename(newBin, self); err != nil {
-		return fmt.Errorf("swap binary (is %s on the same filesystem?): %w", dir, err)
+		// Hardened installs (ProtectSystem=) leave the binary's directory
+		// read-only inside the service's mount namespace, so the rename
+		// fails with EXDEV or EROFS. Stage the verified binary in the data
+		// dir instead; the unit's privileged ExecStartPre hook swaps it
+		// into place on restart.
+		staged := filepath.Join(dir, "windlass.next")
+		os.Remove(staged)
+		if err2 := os.Rename(newBin, staged); err2 != nil {
+			return fmt.Errorf("swap binary: %w (staging also failed: %v)", err, err2)
+		}
+		s.logger.Info("update staged; the service manager swaps it in on restart",
+			"version", rel.Version, "staged", staged)
+	} else {
+		s.logger.Info("update installed; restarting", "version", rel.Version)
 	}
-
-	s.logger.Info("update installed; restarting", "version", rel.Version)
 	go func() {
 		time.Sleep(500 * time.Millisecond) // let the HTTP response flush
 		s.restart()
