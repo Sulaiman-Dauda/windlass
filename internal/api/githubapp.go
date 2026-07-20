@@ -61,7 +61,7 @@ var manifestPage = template.Must(template.New("m").Parse(`<!doctype html>
 <input type="hidden" name="manifest" value="{{.Manifest}}">
 <noscript><button type="submit">Continue to GitHub</button></noscript>
 </form>
-<script>document.forms[0].submit()</script>`))
+<script nonce="{{.Nonce}}">document.forms[0].submit()</script>`))
 
 func (a *API) handleGitHubAppCreate(w http.ResponseWriter, r *http.Request) {
 	origin := a.requestOrigin(r)
@@ -98,7 +98,9 @@ func (a *API) handleGitHubAppCreate(w http.ResponseWriter, r *http.Request) {
 		"default_permissions": map[string]string{
 			"contents": "read",
 			"metadata": "read",
-			"emails":   "read",
+			// User permission backing GET /user/emails, which GitHub sign-in
+			// uses to match the account to an existing Windlass user.
+			"email_addresses": "read",
 		},
 		"default_events": []string{"push"},
 		"hook_attributes": map[string]any{
@@ -107,10 +109,22 @@ func (a *API) handleGitHubAppCreate(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
+	// This one response needs what the global policy forbids: an inline
+	// script (to auto-submit) and a cross-origin form POST (to GitHub).
+	// Override the policy here rather than loosening it panel-wide — the
+	// script is pinned to a per-response nonce and the form target to
+	// github.com, so nothing else gains permission.
+	nonceBuf := make([]byte, 16)
+	rand.Read(nonceBuf)
+	nonce := hex.EncodeToString(nonceBuf)
+	w.Header().Set("Content-Security-Policy",
+		"default-src 'none'; script-src 'nonce-"+nonce+"'; form-action https://github.com")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	manifestPage.Execute(w, map[string]string{
 		"Action":   "https://github.com/settings/apps/new?state=" + state,
 		"Manifest": string(manifest),
+		"Nonce":    nonce,
 	})
 }
 
