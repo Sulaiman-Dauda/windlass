@@ -62,7 +62,7 @@ func TestGitConnectOAuthFlow(t *testing.T) {
 	// A callback whose state does not match the cookie is bounced back to
 	// Settings without touching GitHub.
 	rec = e.do(t, http.MethodGet, "/api/v1/auth/oauth/github/callback/git?state=bogus&code=x", nil, admin)
-	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/settings?git_error=state_mismatch" {
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/settings/git?git_error=state_mismatch" {
 		t.Errorf("callback with bad state = %d %q", rec.Code, rec.Header().Get("Location"))
 	}
 }
