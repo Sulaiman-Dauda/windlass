@@ -68,11 +68,17 @@ func TestGitHubAppManifestPage(t *testing.T) {
 	if !strings.HasSuffix(parsed.Hook.URL, "/api/v1/webhooks/github-app") {
 		t.Errorf("hook url = %q", parsed.Hook.URL)
 	}
-	// email_addresses (not "emails") is the user permission GET /user/emails
-	// needs; sign-in matches accounts by verified email.
-	for _, want := range []string{"contents", "metadata", "email_addresses"} {
+	for _, want := range []string{"contents", "metadata"} {
 		if parsed.Permissions[want] != "read" {
 			t.Errorf("permission %q = %q, want read", want, parsed.Permissions[want])
+		}
+	}
+	// GitHub validates default_permissions against the repository resource
+	// list and rejects the entire manifest if an account permission appears
+	// there, which is exactly how this flow broke once.
+	for _, account := range []string{"email_addresses", "emails", "profile", "followers", "gpg_keys"} {
+		if _, present := parsed.Permissions[account]; present {
+			t.Errorf("account permission %q in default_permissions; GitHub rejects the manifest", account)
 		}
 	}
 	if len(parsed.Events) != 1 || parsed.Events[0] != "push" {

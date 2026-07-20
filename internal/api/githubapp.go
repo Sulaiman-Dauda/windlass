@@ -95,12 +95,14 @@ func (a *API) handleGitHubAppCreate(w http.ResponseWriter, r *http.Request) {
 		"setup_url":       origin + "/api/v1/git/connections/github/setup",
 		"setup_on_update": true,
 		"public":          false,
+		// Repository permissions only: GitHub validates default_permissions
+		// against the repository/organization resource list and rejects the
+		// whole manifest if it contains an account permission. Account
+		// permissions (email_addresses, needed by GET /user/emails for
+		// sign-in) can only be added afterwards in the app's settings.
 		"default_permissions": map[string]string{
 			"contents": "read",
 			"metadata": "read",
-			// User permission backing GET /user/emails, which GitHub sign-in
-			// uses to match the account to an existing Windlass user.
-			"email_addresses": "read",
 		},
 		"default_events": []string{"push"},
 		"hook_attributes": map[string]any{

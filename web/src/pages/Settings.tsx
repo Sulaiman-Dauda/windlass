@@ -302,14 +302,19 @@ function GitHubAppSection() {
     <Group title="GitHub App">
       <Row
         title="Connect GitHub in two clicks"
-        desc="Windlass sends GitHub a pre-filled app manifest; you confirm once and the credentials come back automatically — sign-in with GitHub and repository access, no copying."
+        desc="Windlass sends GitHub a pre-filled app manifest; you confirm once and the credentials come back automatically — repository access and push auto-deploys, no copying."
         stack
       >
         {created && (
           <div className="mb-3">
             <Notice tone="ok" onClose={() => setSearchParams({}, { replace: true })}>
-              GitHub App <span className="font-mono">{created}</span> created — sign-in with
-              GitHub is enabled. Install it on your repositories from Settings → Git.
+              GitHub App <span className="font-mono">{created}</span> created. Install it on your
+              repositories from{" "}
+              <Link to="/settings/git" className="underline">
+                Settings → Git
+              </Link>
+              . To also sign in with GitHub, add the “Email addresses: read” account permission on
+              GitHub — manifests cannot request it.
             </Notice>
           </div>
         )}
