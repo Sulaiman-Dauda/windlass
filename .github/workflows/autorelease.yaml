@@ -1,0 +1,61 @@
+name: Auto release
+
+# Every green push to main becomes a release, so panels tracking this repo
+# (WINDLASS_UPDATE_REPO) surface an "update available" alert and can apply it
+# with one click. Manually tagged v* releases still go through release.yaml.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: autorelease
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Gate on tests
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Build frontend
+        working-directory: web
+        run: npm ci && npm run build
+
+      - name: Cross-compile
+        run: |
+          VERSION="v0.${GITHUB_RUN_NUMBER}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          LDFLAGS="-s -w -X github.com/windlass-dev/windlass/internal/version.Version=${VERSION} -X github.com/windlass-dev/windlass/internal/version.Commit=${GITHUB_SHA::7}"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -tags embedweb -ldflags "$LDFLAGS" -o dist/windlass-linux-amd64 ./cmd/windlass
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -tags embedweb -ldflags "$LDFLAGS" -o dist/windlass-linux-arm64 ./cmd/windlass
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum windlass-linux-* > checksums.txt
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$VERSION" \
+            --title "Windlass $VERSION" \
+            --notes "Automated release from ${GITHUB_SHA::7}: $(git log -1 --pretty=%s)" \
+            --latest \
+            dist/windlass-linux-amd64 dist/windlass-linux-arm64 dist/checksums.txt

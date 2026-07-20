@@ -1,4 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "../api/client";
 import { useLogout, type User } from "../api/auth";
 import { Logo } from "../ui/Logo";
 import { Icon, type IconName } from "../ui/Icon";
@@ -15,6 +17,16 @@ const nav: { to: string; label: string; icon: IconName }[] = [
 export default function Layout({ user }: { user: User }) {
   const logout = useLogout();
   const initials = user.email.slice(0, 2).toUpperCase();
+
+  // Same query key Settings uses, so the two stay in sync via the cache.
+  const update = useQuery<{ update_available: boolean; version: string }>({
+    queryKey: ["system", "update"],
+    queryFn: () => api("/system/update"),
+    enabled: user.role === "admin",
+    retry: false,
+    staleTime: 60 * 60 * 1000,
+    refetchInterval: 6 * 60 * 60 * 1000,
+  });
 
   return (
     <div className="flex min-h-screen bg-canvas text-fg">
@@ -44,6 +56,18 @@ export default function Layout({ user }: { user: User }) {
             </NavLink>
           ))}
         </nav>
+
+        {update.data?.update_available && (
+          <NavLink
+            to="/settings"
+            className="mb-2 flex items-center gap-2.5 rounded-[10px] bg-accent-soft px-2.5 py-2 text-xs font-semibold text-accent"
+          >
+            <Icon name="download" size={16} />
+            <span className="min-w-0 flex-1 truncate">
+              Update available · {update.data.version}
+            </span>
+          </NavLink>
+        )}
 
         <div className="border-t border-hairline pt-2">
           <div className="flex items-center justify-between px-2 py-2">

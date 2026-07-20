@@ -25,6 +25,12 @@ type Config struct {
 	PanelUpstream string
 	// CaddyAdmin is the Caddy admin API base URL.
 	CaddyAdmin string
+	// UpdateRepo is the GitHub repository ("owner/name") self-update checks
+	// for releases.
+	UpdateRepo string
+	// UpdateToken optionally authenticates release checks and downloads,
+	// required when UpdateRepo is private.
+	UpdateToken string
 }
 
 func Load() (Config, error) {
@@ -34,6 +40,8 @@ func Load() (Config, error) {
 		LogLevel:      slog.LevelInfo,
 		PanelUpstream: envOr("WINDLASS_PANEL_UPSTREAM", "127.0.0.1:8080"),
 		CaddyAdmin:    envOr("WINDLASS_CADDY_ADMIN", "http://127.0.0.1:2019"),
+		UpdateRepo:    envOr("WINDLASS_UPDATE_REPO", "windlass-dev/windlass"),
+		UpdateToken:   os.Getenv("WINDLASS_UPDATE_TOKEN"),
 	}
 
 	switch os.Getenv("WINDLASS_LOG_LEVEL") {

@@ -26,6 +26,11 @@ import (
 // Repo is the GitHub repository releases are fetched from.
 var Repo = "windlass-dev/windlass"
 
+// Token optionally authenticates GitHub API requests. Required when Repo is
+// private; a fine-grained PAT with read access to the repository contents is
+// enough.
+var Token = ""
+
 type Release struct {
 	Version     string `json:"version"`
 	CurrentVer  string `json:"current_version"`
@@ -54,6 +59,9 @@ type ghRelease struct {
 	Assets  []struct {
 		Name string `json:"name"`
 		URL  string `json:"browser_download_url"`
+		// APIURL downloads through the assets API, which is the only path
+		// that works for private repositories.
+		APIURL string `json:"url"`
 	} `json:"assets"`
 }
 
@@ -69,6 +77,9 @@ func (s *Service) Check(ctx context.Context) (Release, error) {
 		return rel, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if Token != "" {
+		req.Header.Set("Authorization", "Bearer "+Token)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return rel, err
@@ -87,11 +98,15 @@ func (s *Service) Check(ctx context.Context) (Release, error) {
 	rel.Notes = gh.Body
 	asset := fmt.Sprintf("windlass-linux-%s", runtime.GOARCH)
 	for _, a := range gh.Assets {
+		u := a.URL
+		if Token != "" {
+			u = a.APIURL
+		}
 		switch a.Name {
 		case asset:
-			rel.assetURL = a.URL
+			rel.assetURL = u
 		case "checksums.txt":
-			rel.checksumURL = a.URL
+			rel.checksumURL = u
 		}
 	}
 	rel.UpdateReady = rel.Version != "" &&
@@ -184,11 +199,21 @@ func (s *Service) Apply(ctx context.Context) error {
 	return nil
 }
 
+// authHeaders makes asset requests work against private repositories: the
+// assets API returns the binary only with the octet-stream accept type.
+func authHeaders(req *http.Request) {
+	if Token != "" {
+		req.Header.Set("Authorization", "Bearer "+Token)
+		req.Header.Set("Accept", "application/octet-stream")
+	}
+}
+
 func download(ctx context.Context, url, dest string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
+	authHeaders(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -211,6 +236,7 @@ func fetch(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	authHeaders(req)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
