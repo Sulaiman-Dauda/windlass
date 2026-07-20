@@ -49,6 +49,7 @@ export default function App() {
         />
         <Route path="templates" element={<Templates />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="settings/:tab" element={<Settings />} />
         <Route path="*" element={<Placeholder title="Not found" />} />
       </Route>
     </Routes>

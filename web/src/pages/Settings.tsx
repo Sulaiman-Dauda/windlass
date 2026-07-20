@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { Page } from "../ui/Page";
@@ -8,6 +8,7 @@ import { Button, btn } from "../ui/Button";
 import { Input, Select, Field } from "../ui/Field";
 import { StatusPill, Chip } from "../ui/Badge";
 import { Icon } from "../ui/Icon";
+import { Segmented } from "../ui/Segmented";
 import { ThemeToggle } from "../ui/ThemeToggle";
 import { cn } from "../ui/cn";
 
@@ -17,18 +18,54 @@ interface Connection {
   name: string;
 }
 
+// Each tab is a real route (/settings/<tab>) so sections are addressable:
+// the sidebar update alert links to system, and OAuth redirects land on git.
+const TABS = [
+  { value: "general", label: "General" },
+  { value: "auth", label: "Users & auth" },
+  { value: "git", label: "Git" },
+  { value: "system", label: "System" },
+] as const;
+
+type Tab = (typeof TABS)[number]["value"];
+
 export default function Settings() {
+  const { tab } = useParams();
+  const navigate = useNavigate();
+
+  if (!TABS.some((t) => t.value === tab)) {
+    return <Navigate to="/settings/general" replace />;
+  }
+
   return (
     <Page title="Settings">
       <div className="max-w-[760px]">
-        <AppearanceSection />
-        <PanelDomainSection />
-        <SecuritySection />
-        <OAuthAppsSection />
-        <GitConnections />
-        <UsersSection />
-        <DockerStorageSection />
-        <UpdateSection />
+        <Segmented
+          className="mb-6"
+          options={[...TABS]}
+          value={tab as Tab}
+          onChange={(v) => navigate(`/settings/${v}`)}
+        />
+        {tab === "general" && (
+          <>
+            <AppearanceSection />
+            <PanelDomainSection />
+          </>
+        )}
+        {tab === "auth" && (
+          <>
+            <UsersSection />
+            <SecuritySection />
+            <OAuthAppsSection />
+          </>
+        )}
+        {tab === "git" && <GitConnections />}
+        {tab === "system" && (
+          <>
+            <UpdateSection />
+            <DockerStorageSection />
+          </>
+        )}
       </div>
     </Page>
   );
@@ -360,7 +397,13 @@ function GitConnections() {
               <Icon name="github" size={16} /> Connect GitHub
             </a>
           ) : (
-            <p className="text-sm text-fg3">Configure a GitHub OAuth app above for one-click connect.</p>
+            <p className="text-sm text-fg3">
+              Set up a GitHub OAuth app in{" "}
+              <Link to="/settings/auth" className="text-accent hover:underline">
+                Users &amp; auth
+              </Link>{" "}
+              for one-click connect.
+            </p>
           )}
           <Button variant="ghost" onClick={() => setManualOpen((o) => !o)}>
             {manualOpen ? "Cancel manual token" : "Add a token manually"}
@@ -553,10 +596,29 @@ function UpdateSection() {
   const check = useQuery<UpdateInfo>({ queryKey: ["system", "update"], queryFn: () => api("/system/update"), retry: false });
   const apply = useMutation({ mutationFn: () => api("/system/update", { method: "POST" }) });
 
+  // Arriving from the sidebar update alert (#updates) briefly highlights
+  // this group so it's obvious where the click landed.
+  const location = useLocation();
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    if (location.hash === "#updates") {
+      setFlash(true);
+      const t = setTimeout(() => setFlash(false), 2000);
+      return () => clearTimeout(t);
+    }
+  }, [location.hash]);
+
   if (check.isError) return null;
 
   return (
-    <Group title="Software updates">
+    <div
+      id="updates"
+      className={cn(
+        "rounded-[16px] transition-shadow duration-500",
+        flash && "ring-2 ring-[var(--color-accent-fill)]",
+      )}
+    >
+      <Group title="Software updates">
       <Row
         title={`Running ${check.data?.current_version ?? "…"}`}
         desc={check.data?.update_available ? `Version ${check.data.version} is available.` : "You're up to date."}
@@ -572,16 +634,17 @@ function UpdateSection() {
           <StatusPill tone="ok">Up to date</StatusPill>
         )}
       </Row>
-      {(apply.isSuccess || apply.isError) && (
-        <Row stack>
-          {apply.isSuccess && (
-            <p className="text-sm text-ok">Updating — the panel restarts in a few seconds. Deployed apps are unaffected.</p>
-          )}
-          {apply.isError && (
-            <p className="text-sm text-err">{apply.error instanceof Error ? apply.error.message : "Update failed"}</p>
-          )}
-        </Row>
-      )}
-    </Group>
+        {(apply.isSuccess || apply.isError) && (
+          <Row stack>
+            {apply.isSuccess && (
+              <p className="text-sm text-ok">Updating — the panel restarts in a few seconds. Deployed apps are unaffected.</p>
+            )}
+            {apply.isError && (
+              <p className="text-sm text-err">{apply.error instanceof Error ? apply.error.message : "Update failed"}</p>
+            )}
+          </Row>
+        )}
+      </Group>
+    </div>
   );
 }

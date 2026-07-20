@@ -59,7 +59,7 @@ export default function Layout({ user }: { user: User }) {
 
         {update.data?.update_available && (
           <NavLink
-            to="/settings"
+            to="/settings/system#updates"
             className="mb-2 flex items-center gap-2.5 rounded-[10px] bg-accent-soft px-2.5 py-2 text-xs font-semibold text-accent"
           >
             <Icon name="download" size={16} />

@@ -69,7 +69,7 @@ func (a *API) handleGitConnectCallback(w http.ResponseWriter, r *http.Request) {
 	// The browser lands here from GitHub, so errors redirect back to
 	// Settings instead of rendering JSON.
 	fail := func(code string) {
-		http.Redirect(w, r, "/settings?git_error="+code, http.StatusFound)
+		http.Redirect(w, r, "/settings/git?git_error="+code, http.StatusFound)
 	}
 
 	cfg, err := a.oauthConfig(r.Context(), "github")
@@ -104,7 +104,7 @@ func (a *API) handleGitConnectCallback(w http.ResponseWriter, r *http.Request) {
 	user, _ := auth.UserFrom(r.Context())
 	a.Audit.Write(r.Context(), user.ID, "git.connection_create", "git_connection", conn.Name, remoteIP(r),
 		map[string]string{"via": "oauth"})
-	http.Redirect(w, r, "/settings?git_connected="+url.QueryEscape(conn.Name), http.StatusFound)
+	http.Redirect(w, r, "/settings/git?git_connected="+url.QueryEscape(conn.Name), http.StatusFound)
 }
 
 func (a *API) handleListGitConnections(w http.ResponseWriter, r *http.Request) {
