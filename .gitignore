@@ -1,8 +1,8 @@
 # Binaries
 /bin/
 /dist/
-windlass
-windlass.exe
+/windlass
+/windlass.exe
 *.exe
 
 # Frontend
