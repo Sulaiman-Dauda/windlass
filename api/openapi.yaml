@@ -240,6 +240,14 @@ paths:
       responses:
         "204": { description: Saved encrypted }
 
+  /webhooks/github-app:
+    post:
+      summary: GitHub App push webhook — fans out to all matching projects (public, signature-verified)
+      operationId: githubAppWebhook
+      responses:
+        "200": { description: "{result, deployed[]}" }
+        "403": { description: Invalid signature }
+
   /webhooks/{provider}/{project}:
     post:
       summary: Git push webhook (public, signature-verified)
@@ -438,6 +446,30 @@ paths:
       responses:
         "204": { description: Saved }
 
+  /system/github-app:
+    get:
+      summary: GitHub App status (admin)
+      operationId: githubAppStatus
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "{configured, slug?, owner?, html_url?}" }
+
+  /system/github-app/create:
+    get:
+      summary: Begin the two-click GitHub App manifest flow (admin)
+      operationId: githubAppCreate
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Auto-submitting manifest form redirecting to GitHub }
+
+  /system/github-app/callback:
+    get:
+      summary: Manifest conversion callback — stores app credentials and enables sign-in (admin)
+      operationId: githubAppCallback
+      security: [{ session: [] }]
+      responses:
+        "302": { description: Redirect to Settings → Users & auth }
+
   /projects/{name}/git:
     put:
       summary: Configure git source (member); returns webhook secret once
@@ -614,6 +646,14 @@ paths:
       responses:
         "200": { description: "Array of {full_name, clone_url, default_branch, private}" }
         "502": { description: Provider API unreachable or rejected the token }
+
+  /git/connections/github/setup:
+    get:
+      summary: GitHub App installation landing — turns the installation into a git connection (admin)
+      operationId: githubAppSetup
+      security: [{ session: [] }]
+      responses:
+        "302": { description: Redirect to Settings → Git }
 
   /git/connections/github/connect:
     get:

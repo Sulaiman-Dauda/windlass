@@ -61,6 +61,7 @@ func (a *API) Routes(r chi.Router) {
 	r.Get("/auth/oauth/providers", a.handleOAuthProviders)
 	r.Get("/auth/oauth/{provider}/start", a.handleOAuthStart)
 	r.Get("/auth/oauth/{provider}/callback", a.handleOAuthCallback)
+	r.Post("/webhooks/github-app", a.handleAppWebhook)
 	r.Post("/webhooks/{provider}/{project}", a.handleWebhook)
 
 	// Authenticated
@@ -93,6 +94,9 @@ func (a *API) Routes(r chi.Router) {
 			r.Get("/system/panel-domain", a.handleGetPanelDomain)
 			r.Put("/system/panel-domain", a.handleSetPanelDomain)
 			r.Put("/system/oauth/{provider}", a.handleSetOAuthConfig)
+			r.Get("/system/github-app", a.handleGitHubAppStatus)
+			r.Get("/system/github-app/create", a.handleGitHubAppCreate)
+			r.Get("/system/github-app/callback", a.handleGitHubAppCallback)
 		})
 	})
 }

@@ -122,7 +122,7 @@ func (s *Service) Token(ctx context.Context, p db.Project) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("decrypt token: %w", err)
 	}
-	return string(plain), nil
+	return s.resolveToken(ctx, conn.Provider, string(plain))
 }
 
 // connectionToken loads a connection and decrypts its token.
@@ -144,23 +144,35 @@ func (s *Service) connectionToken(ctx context.Context, id int64) (provider, toke
 // ListRepos returns the repositories a connection's token can access, for
 // the frontend repository picker.
 func (s *Service) ListRepos(ctx context.Context, connectionID int64) ([]Repo, error) {
-	provider, token, err := s.connectionToken(ctx, connectionID)
+	provider, stored, err := s.connectionToken(ctx, connectionID)
 	if err != nil {
 		return nil, err
 	}
-	return s.api.ListRepos(ctx, provider, token)
+	if isInstallation(stored) {
+		token, err := s.resolveToken(ctx, provider, stored)
+		if err != nil {
+			return nil, err
+		}
+		return s.listInstallationRepos(ctx, token)
+	}
+	return s.api.ListRepos(ctx, provider, stored)
 }
 
 // RegisterWebhook creates or updates the push webhook on the provider so the
 // user never has to paste the payload URL and secret by hand. origin is the
-// panel's external base URL (scheme://host).
+// panel's external base URL (scheme://host). Installation connections need
+// no per-repo hook: the GitHub App's own webhook already delivers pushes
+// for every repository it covers.
 func (s *Service) RegisterWebhook(ctx context.Context, connectionID int64, repoURL, origin, project, secret string) error {
-	provider, token, err := s.connectionToken(ctx, connectionID)
+	provider, stored, err := s.connectionToken(ctx, connectionID)
 	if err != nil {
 		return err
 	}
+	if isInstallation(stored) {
+		return nil
+	}
 	hookURL := strings.TrimRight(origin, "/") + "/api/v1/webhooks/" + provider + "/" + project
-	return s.api.EnsureWebhook(ctx, provider, token, repoURL, hookURL, secret)
+	return s.api.EnsureWebhook(ctx, provider, stored, repoURL, hookURL, secret)
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +264,10 @@ func hmacHex(key, body []byte) string {
 	mac := hmac.New(sha256.New, key)
 	mac.Write(body)
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func hmacEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 // PushBranch extracts the branch from a push payload's ref field

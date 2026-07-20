@@ -56,6 +56,7 @@ export default function Settings() {
           <>
             <UsersSection />
             <SecuritySection />
+            <GitHubAppSection />
             <OAuthAppsSection />
           </>
         )}
@@ -268,6 +269,91 @@ function SecuritySection() {
   );
 }
 
+// ---------- GitHub App ----------
+
+interface GitHubAppStatus {
+  configured: boolean;
+  slug?: string;
+  owner?: string;
+  html_url?: string;
+}
+
+const githubAppErrors: Record<string, string> = {
+  state_mismatch: "The creation state did not match — try again.",
+  missing_code: "GitHub did not return a creation code — try again.",
+  conversion_failed: "GitHub rejected the app manifest exchange — try again.",
+};
+
+function GitHubAppSection() {
+  const me = useQuery<{ role: string }>({ queryKey: ["auth", "me"], queryFn: () => api("/auth/me") });
+  const app = useQuery<GitHubAppStatus>({
+    queryKey: ["system", "github-app"],
+    queryFn: () => api("/system/github-app"),
+    retry: false,
+  });
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const created = searchParams.get("github_app");
+  const appError = searchParams.get("github_app_error");
+
+  if (me.data?.role !== "admin" || app.isError) return null;
+
+  return (
+    <Group title="GitHub App">
+      <Row
+        title="Connect GitHub in two clicks"
+        desc="Windlass sends GitHub a pre-filled app manifest; you confirm once and the credentials come back automatically — sign-in with GitHub and repository access, no copying."
+        stack
+      >
+        {created && (
+          <div className="mb-3">
+            <Notice tone="ok" onClose={() => setSearchParams({}, { replace: true })}>
+              GitHub App <span className="font-mono">{created}</span> created — sign-in with
+              GitHub is enabled. Install it on your repositories from Settings → Git.
+            </Notice>
+          </div>
+        )}
+        {appError && (
+          <div className="mb-3">
+            <Notice tone="err" onClose={() => setSearchParams({}, { replace: true })}>
+              {githubAppErrors[appError] ?? "GitHub App creation failed."}
+            </Notice>
+          </div>
+        )}
+
+        {app.data?.configured ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <StatusPill tone="ok">Configured</StatusPill>
+            <span className="text-sm">
+              <span className="font-mono font-medium">{app.data.slug}</span>
+              {app.data.owner && <span className="text-fg3"> · owned by {app.data.owner}</span>}
+            </span>
+            {app.data.html_url && (
+              <a
+                href={app.data.html_url}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm text-accent hover:underline"
+              >
+                Manage on GitHub
+              </a>
+            )}
+            <Link to="/settings/git" className="text-sm text-accent hover:underline">
+              Install on repositories
+            </Link>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2.5">
+            <a href="/api/v1/system/github-app/create" className={btn("primary", "md")}>
+              <Icon name="github" size={16} /> Create GitHub App
+            </a>
+          </div>
+        )}
+      </Row>
+    </Group>
+  );
+}
+
 // ---------- OAuth applications ----------
 
 function OAuthAppsSection() {
@@ -298,7 +384,7 @@ function OAuthAppsSection() {
     <Group title="OAuth applications">
       <Row
         title="Connect an identity provider"
-        desc="Enables sign-in with GitHub/Google and one-click GitHub repository connections. Register an app with this callback URL, then paste its credentials."
+        desc="Manual setup: register an app with this callback URL, then paste its credentials. Needed for Google sign-in; for GitHub, prefer the two-click GitHub App above."
         stack
       >
         <Chip className="mt-1 self-start break-all">{callbackUrl}</Chip>
@@ -341,6 +427,7 @@ const gitErrorMessages: Record<string, string> = {
   state_mismatch: "The authorization state did not match — try connecting again.",
   exchange_failed: "GitHub rejected the authorization code — try connecting again.",
   profile_failed: "Connected, but the GitHub profile could not be read.",
+  app_install_failed: "The GitHub App installation could not be linked — try again.",
 };
 
 function GitConnections() {
@@ -349,6 +436,11 @@ function GitConnections() {
   const providers = useQuery<{ github: boolean; google: boolean }>({
     queryKey: ["auth", "oauth-providers"],
     queryFn: () => api("/auth/oauth/providers"),
+  });
+  const app = useQuery<GitHubAppStatus>({
+    queryKey: ["system", "github-app"],
+    queryFn: () => api("/system/github-app"),
+    retry: false,
   });
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -392,17 +484,24 @@ function GitConnections() {
         )}
 
         <div className="flex flex-wrap items-center gap-2.5">
-          {providers.data?.github ? (
+          {app.data?.configured ? (
+            <a
+              href={`https://github.com/apps/${app.data.slug}/installations/new`}
+              className={btn("primary", "md")}
+            >
+              <Icon name="github" size={16} /> Install GitHub App on repositories
+            </a>
+          ) : providers.data?.github ? (
             <a href="/api/v1/git/connections/github/connect" className={btn("primary", "md")}>
               <Icon name="github" size={16} /> Connect GitHub
             </a>
           ) : (
             <p className="text-sm text-fg3">
-              Set up a GitHub OAuth app in{" "}
+              Create the GitHub App in{" "}
               <Link to="/settings/auth" className="text-accent hover:underline">
                 Users &amp; auth
               </Link>{" "}
-              for one-click connect.
+              for two-click connect.
             </p>
           )}
           <Button variant="ghost" onClick={() => setManualOpen((o) => !o)}>

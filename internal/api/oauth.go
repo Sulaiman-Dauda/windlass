@@ -59,22 +59,25 @@ func (a *API) handleSetOAuthConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "client_id and client_secret are required")
 		return
 	}
-	plain, _ := json.Marshal(cfg)
-	enc, err := a.Box.Encrypt(plain)
-	if err != nil {
-		a.internalError(w, "encrypt oauth config", err)
-		return
-	}
-	wrapped, _ := json.Marshal(map[string]string{"enc": hex.EncodeToString(enc)})
-	if err := a.Queries.SetSetting(r.Context(), db.SetSettingParams{
-		Key: oauthSettingPrefix + provider, Value: string(wrapped),
-	}); err != nil {
+	if err := a.saveOAuthConfig(r.Context(), provider, cfg); err != nil {
 		a.internalError(w, "save oauth config", err)
 		return
 	}
 	user, _ := auth.UserFrom(r.Context())
 	a.Audit.Write(r.Context(), user.ID, "oauth.configure", "provider", provider, remoteIP(r), nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) saveOAuthConfig(ctx context.Context, provider string, cfg auth.OAuthProviderConfig) error {
+	plain, _ := json.Marshal(cfg)
+	enc, err := a.Box.Encrypt(plain)
+	if err != nil {
+		return err
+	}
+	wrapped, _ := json.Marshal(map[string]string{"enc": hex.EncodeToString(enc)})
+	return a.Queries.SetSetting(ctx, db.SetSettingParams{
+		Key: oauthSettingPrefix + provider, Value: string(wrapped),
+	})
 }
 
 func (a *API) handleOAuthProviders(w http.ResponseWriter, r *http.Request) {

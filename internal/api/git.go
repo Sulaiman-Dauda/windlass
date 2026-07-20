@@ -24,6 +24,8 @@ func (a *API) gitRoutes(r chi.Router) {
 	r.Delete("/connections/{id}", a.handleDeleteGitConnection)
 	r.Get("/connections/{id}/repos", a.handleListGitConnectionRepos)
 	r.Get("/connections/github/connect", a.handleGitConnectStart)
+	// GitHub sends the admin's browser here after installing the app.
+	r.Get("/connections/github/setup", a.handleGitHubAppSetup)
 }
 
 // ---------------------------------------------------------------------------
