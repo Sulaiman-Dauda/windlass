@@ -229,12 +229,37 @@ function parseEnvBlock(input: string): { rows: EnvRow[]; errors: string[] } {
   return { rows: Array.from(values, ([key, value]) => ({ key, value })), errors };
 }
 
+// serializeEnvValue is the inverse of parseEnvBlock's value parsing: quote
+// only when needed for the round-trip to be lossless (leading/trailing
+// whitespace, or a value that would otherwise look quoted itself).
+function serializeEnvValue(value: string): string {
+  if (value === value.trim() && !/^['"]/.test(value)) return value;
+  const escaped = value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\t/g, "\\t");
+  return `"${escaped}"`;
+}
+
+function serializeEnvBlock(rows: EnvRow[]): string {
+  return rows
+    .filter((row) => row.key)
+    .map((row) => `${row.key}=${serializeEnvValue(row.value)}`)
+    .join("\n");
+}
+
 function EnvTab({ name }: { name: string }) {
   const env = useProjectEnv(name);
   const save = useSaveProjectEnv(name);
   const [rows, setRows] = useState<EnvRow[]>([]);
   const [dirty, setDirty] = useState(false);
-  const [bulkOpen, setBulkOpen] = useState(false);
+  // The bulk box is another view of the same rows, not a separate import
+  // tool: opening it seeds the current rows, and applying it replaces rows
+  // wholesale — including removing keys deleted from the pasted text — so
+  // the two views can never drift apart.
+  const [mode, setMode] = useState<"list" | "bulk">("list");
   const [bulkDraft, setBulkDraft] = useState("");
   const [bulkErrors, setBulkErrors] = useState<string[]>([]);
 
@@ -253,31 +278,46 @@ function EnvTab({ name }: { name: string }) {
     setRows((r) => r.map((row, j) => (j === i ? { ...row, ...patch } : row)));
   };
 
+  const openBulk = () => {
+    setBulkDraft(serializeEnvBlock(rows));
+    setBulkErrors([]);
+    setMode("bulk");
+  };
+
+  const applyBulk = () => {
+    const parsed = parseEnvBlock(bulkDraft);
+    if (parsed.errors.length > 0) { setBulkErrors(parsed.errors); return; }
+    setRows(parsed.rows.sort((a, b) => a.key.localeCompare(b.key)));
+    setDirty(true);
+    setBulkErrors([]);
+    setMode("list");
+  };
+
   return (
-    <div className="max-w-2xl">
+    <div className="w-full">
       <p className="text-sm leading-relaxed text-fg2">
         The project's standard <code className="font-mono text-fg">.env</code> file is the source of
         truth (server mode 0600). Windlass also keeps an encrypted SQLite cache for platform features.
       </p>
 
       <div className="mt-4">
-        <Button size="sm" onClick={() => { setBulkOpen((o) => !o); setBulkErrors([]); }}>
-          {bulkOpen ? "Cancel bulk paste" : "Paste .env variables"}
+        <Button size="sm" onClick={() => (mode === "bulk" ? setMode("list") : openBulk())}>
+          {mode === "bulk" ? "Back to list view" : "Edit as .env text"}
         </Button>
 
-        {bulkOpen && (
+        {mode === "bulk" && (
           <div className="mt-3 rounded-[13px] border border-hairline bg-surface2 p-3.5">
             <p className="mb-2 text-xs text-fg3">
-              Paste one <code className="font-mono">KEY=value</code> per line. Blank lines and lines
-              starting with <code className="font-mono">#</code> are ignored. Pasted values replace
-              matching keys; others stay unchanged.
+              One <code className="font-mono">KEY=value</code> per line — this always matches the list
+              below exactly, so paste a whole <code className="font-mono">.env</code> file to replace
+              everything, or delete a line to remove that variable.
             </p>
             <Textarea
               value={bulkDraft}
               onChange={(e) => { setBulkDraft(e.target.value); setBulkErrors([]); }}
               placeholder={"AP_ENVIRONMENT=prod\nAP_REDIS_HOST=redis\nAP_REDIS_PORT=6379"}
               spellCheck={false}
-              rows={10}
+              rows={12}
               className="font-mono text-sm"
             />
             {bulkErrors.length > 0 && (
@@ -285,58 +325,58 @@ function EnvTab({ name }: { name: string }) {
                 {bulkErrors.map((error) => <li key={error}>{error}</li>)}
               </ul>
             )}
-            <Button
-              variant="primary"
-              className="mt-2.5"
-              onClick={() => {
-                const parsed = parseEnvBlock(bulkDraft);
-                if (parsed.errors.length > 0) { setBulkErrors(parsed.errors); return; }
-                if (parsed.rows.length === 0) { setBulkErrors(["Paste at least one KEY=value line."]); return; }
-                const merged = new Map(rows.filter((row) => row.key).map((row) => [row.key, row.value]));
-                parsed.rows.forEach((row) => merged.set(row.key, row.value));
-                setRows(Array.from(merged, ([key, value]) => ({ key, value })).sort((a, b) => a.key.localeCompare(b.key)));
-                setDirty(true);
-                setBulkDraft("");
-                setBulkErrors([]);
-                setBulkOpen(false);
-              }}
-            >
-              Import into editor
-            </Button>
+            <div className="mt-2.5 flex gap-2">
+              <Button variant="primary" onClick={applyBulk}>Apply to list</Button>
+              <Button variant="ghost" onClick={() => { setBulkErrors([]); setMode("list"); }}>Cancel</Button>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="mt-4 space-y-2">
-        {rows.map((row, i) => (
-          <div key={i} className="flex gap-2">
-            <Input
-              value={row.key}
-              onChange={(e) => update(i, { key: e.target.value.toUpperCase() })}
-              placeholder="KEY"
-              className="w-56 font-mono text-sm"
-            />
-            <Input
-              value={row.value}
-              onChange={(e) => update(i, { value: e.target.value })}
-              placeholder="value"
-              className="flex-1 font-mono text-sm"
-            />
-            <button
-              onClick={() => { setDirty(true); setRows((r) => r.filter((_, j) => j !== i)); }}
-              className="grid w-9 flex-none place-items-center rounded-[9px] text-fg3 transition-colors hover:bg-err-soft hover:text-err"
-              title="Remove"
-            >
-              <Icon name="x" size={15} />
-            </button>
-          </div>
-        ))}
-      </div>
+      {mode === "list" && (
+        <div className="mt-4 space-y-2">
+          {rows.map((row, i) => (
+            <div key={i} className="flex gap-2">
+              {/* Width lives on these wrapper divs, not on Input's own
+                  className: Input's base style already includes w-full, and
+                  cn() does no Tailwind conflict resolution, so a width class
+                  passed directly to Input can lose to that w-full depending
+                  on generated CSS order. A wrapper with no competing width
+                  class sidesteps the ambiguity entirely. */}
+              <div className="w-56 flex-none">
+                <Input
+                  value={row.key}
+                  onChange={(e) => update(i, { key: e.target.value.toUpperCase() })}
+                  placeholder="KEY"
+                  className="font-mono text-sm"
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <Input
+                  value={row.value}
+                  onChange={(e) => update(i, { value: e.target.value })}
+                  placeholder="value"
+                  className="font-mono text-sm"
+                />
+              </div>
+              <button
+                onClick={() => { setDirty(true); setRows((r) => r.filter((_, j) => j !== i)); }}
+                className="grid w-9 flex-none place-items-center rounded-[9px] text-fg3 transition-colors hover:bg-err-soft hover:text-err"
+                title="Remove"
+              >
+                <Icon name="x" size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mt-3 flex items-center gap-3">
-        <Button size="sm" onClick={() => { setDirty(true); setRows((r) => [...r, { key: "", value: "" }]); }}>
-          <Icon name="plus" size={15} /> Add variable
-        </Button>
+        {mode === "list" && (
+          <Button size="sm" onClick={() => { setDirty(true); setRows((r) => [...r, { key: "", value: "" }]); }}>
+            <Icon name="plus" size={15} /> Add variable
+          </Button>
+        )}
         <Button
           variant="primary"
           onClick={() => {
@@ -344,7 +384,7 @@ function EnvTab({ name }: { name: string }) {
             for (const r of rows) if (r.key) vars[r.key] = r.value;
             save.mutate(vars, { onSuccess: () => setDirty(false) });
           }}
-          disabled={save.isPending || !dirty}
+          disabled={save.isPending || !dirty || mode === "bulk"}
         >
           {save.isPending ? "Saving…" : "Save changes"}
         </Button>
