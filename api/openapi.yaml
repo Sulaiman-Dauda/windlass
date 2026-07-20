@@ -444,7 +444,7 @@ paths:
       operationId: configureProjectGit
       security: [{ session: [] }]
       responses:
-        "200": { description: "{webhook_secret, webhook_url}" }
+        "200": { description: "{webhook_secret, webhook_url, webhook_registered}" }
 
   /projects/{name}/services:
     get:
@@ -605,6 +605,15 @@ paths:
       security: [{ session: [] }]
       responses:
         "204": { description: Deleted }
+
+  /git/connections/{id}/repos:
+    get:
+      summary: List repositories the connection's token can access (admin)
+      operationId: listGitConnectionRepos
+      security: [{ session: [] }]
+      responses:
+        "200": { description: "Array of {full_name, clone_url, default_branch, private}" }
+        "502": { description: Provider API unreachable or rejected the token }
 
   /git/connections/github/connect:
     get:

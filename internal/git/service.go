@@ -28,10 +28,11 @@ type Service struct {
 	q      *db.Queries
 	box    *secrets.Box
 	logger *slog.Logger
+	api    *providerAPI
 }
 
 func New(q *db.Queries, box *secrets.Box, logger *slog.Logger) *Service {
-	return &Service{q: q, box: box, logger: logger}
+	return &Service{q: q, box: box, logger: logger, api: newProviderAPI()}
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +123,44 @@ func (s *Service) Token(ctx context.Context, p db.Project) (string, error) {
 		return "", fmt.Errorf("decrypt token: %w", err)
 	}
 	return string(plain), nil
+}
+
+// connectionToken loads a connection and decrypts its token.
+func (s *Service) connectionToken(ctx context.Context, id int64) (provider, token string, err error) {
+	conn, err := s.q.GetGitConnection(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", ErrNotFound
+	}
+	if err != nil {
+		return "", "", err
+	}
+	plain, err := s.box.Decrypt(conn.TokenEnc)
+	if err != nil {
+		return "", "", fmt.Errorf("decrypt token: %w", err)
+	}
+	return conn.Provider, string(plain), nil
+}
+
+// ListRepos returns the repositories a connection's token can access, for
+// the frontend repository picker.
+func (s *Service) ListRepos(ctx context.Context, connectionID int64) ([]Repo, error) {
+	provider, token, err := s.connectionToken(ctx, connectionID)
+	if err != nil {
+		return nil, err
+	}
+	return s.api.ListRepos(ctx, provider, token)
+}
+
+// RegisterWebhook creates or updates the push webhook on the provider so the
+// user never has to paste the payload URL and secret by hand. origin is the
+// panel's external base URL (scheme://host).
+func (s *Service) RegisterWebhook(ctx context.Context, connectionID int64, repoURL, origin, project, secret string) error {
+	provider, token, err := s.connectionToken(ctx, connectionID)
+	if err != nil {
+		return err
+	}
+	hookURL := strings.TrimRight(origin, "/") + "/api/v1/webhooks/" + provider + "/" + project
+	return s.api.EnsureWebhook(ctx, provider, token, repoURL, hookURL, secret)
 }
 
 // ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ func (a *API) gitRoutes(r chi.Router) {
 	r.Get("/connections", a.handleListGitConnections)
 	r.Post("/connections", a.handleCreateGitConnection)
 	r.Delete("/connections/{id}", a.handleDeleteGitConnection)
+	r.Get("/connections/{id}/repos", a.handleListGitConnectionRepos)
 	r.Get("/connections/github/connect", a.handleGitConnectStart)
 }
 
@@ -135,6 +136,26 @@ func (a *API) handleCreateGitConnection(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusCreated, conn)
 }
 
+// handleListGitConnectionRepos powers the repository picker: the repos the
+// connection's token can reach, most recently active first.
+func (a *API) handleListGitConnectionRepos(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid id")
+		return
+	}
+	repos, err := a.Git.ListRepos(r.Context(), id)
+	if errors.Is(err, git.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "connection not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "provider_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, repos)
+}
+
 func (a *API) handleDeleteGitConnection(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
@@ -181,14 +202,31 @@ func (a *API) handleConfigureProjectGit(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// With a connection and auto-deploy on, register the webhook on the
+	// provider directly so nothing has to be pasted by hand. Failure is not
+	// fatal: the response still carries the secret for manual setup.
+	registered := false
+	if cfg.ConnectionID > 0 && cfg.AutoDeploy {
+		scheme := "http"
+		if isTLS(r) {
+			scheme = "https"
+		}
+		if err := a.Git.RegisterWebhook(r.Context(), cfg.ConnectionID, cfg.Repo,
+			scheme+"://"+r.Host, p.Name, secret); err != nil {
+			a.Logger.Warn("webhook auto-registration", "project", p.Name, "error", err)
+		} else {
+			registered = true
+		}
+	}
+
 	user, _ := auth.UserFrom(r.Context())
 	a.Audit.Write(r.Context(), user.ID, "project.git_configure", "project", p.Name, remoteIP(r),
-		map[string]string{"repo": cfg.Repo, "branch": cfg.Branch})
+		map[string]any{"repo": cfg.Repo, "branch": cfg.Branch, "webhook_registered": registered})
 
-	cfg.WebhookSecret = secret
-	writeJSON(w, http.StatusOK, map[string]string{
-		"webhook_secret": secret,
-		"webhook_url":    "/api/v1/webhooks/github/" + p.Name + " (or /webhooks/gitlab/...)",
+	writeJSON(w, http.StatusOK, map[string]any{
+		"webhook_secret":     secret,
+		"webhook_url":        "/api/v1/webhooks/github/" + p.Name + " (or /webhooks/gitlab/...)",
+		"webhook_registered": registered,
 	})
 }
 
