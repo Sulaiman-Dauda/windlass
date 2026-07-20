@@ -23,6 +23,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -92,11 +93,25 @@ func (s *Service) saveAppConfig(ctx context.Context, cfg AppConfig) error {
 // the admin clicks "Create GitHub App" for the app's credentials, and
 // stores them. Returns the stored config.
 func (s *Service) ConvertAppManifest(ctx context.Context, code string) (AppConfig, error) {
+	cfg, err := s.exchangeManifest(ctx, code)
+	if err != nil {
+		return AppConfig{}, err
+	}
+	if err := s.saveAppConfig(ctx, cfg); err != nil {
+		return AppConfig{}, err
+	}
+	return cfg, nil
+}
+
+// exchangeManifest performs the credential exchange with GitHub.
+func (s *Service) exchangeManifest(ctx context.Context, code string) (AppConfig, error) {
 	ctx, cancel := context.WithTimeout(ctx, providerTimeout)
 	defer cancel()
 
+	// Note the plural: /app-manifests/{code}/conversions. The singular form
+	// 404s, which reads like an expired code rather than a wrong path.
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		s.api.githubBase+"/app-manifest/"+code+"/conversions", nil)
+		s.api.githubBase+"/app-manifests/"+code+"/conversions", nil)
 	if err != nil {
 		return AppConfig{}, err
 	}
@@ -107,7 +122,11 @@ func (s *Service) ConvertAppManifest(ctx context.Context, code string) (AppConfi
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
-		return AppConfig{}, fmt.Errorf("manifest conversion failed (HTTP %d)", resp.StatusCode)
+		// GitHub explains the refusal in the body; without it every failure
+		// looks identical in the log.
+		detail, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return AppConfig{}, fmt.Errorf("manifest conversion failed (HTTP %d): %s",
+			resp.StatusCode, strings.TrimSpace(string(detail)))
 	}
 
 	var gh struct {
@@ -128,15 +147,11 @@ func (s *Service) ConvertAppManifest(ctx context.Context, code string) (AppConfi
 	if gh.ClientID == "" || gh.PEM == "" {
 		return AppConfig{}, errors.New("manifest conversion returned incomplete credentials")
 	}
-	cfg := AppConfig{
+	return AppConfig{
 		ID: gh.ID, Slug: gh.Slug, Owner: gh.Owner.Login, HTMLURL: gh.HTMLURL,
 		ClientID: gh.ClientID, ClientSecret: gh.ClientSecret,
 		WebhookSecret: gh.WebhookSecret, PEM: gh.PEM,
-	}
-	if err := s.saveAppConfig(ctx, cfg); err != nil {
-		return AppConfig{}, err
-	}
-	return cfg, nil
+	}, nil
 }
 
 // ---------------------------------------------------------------------------

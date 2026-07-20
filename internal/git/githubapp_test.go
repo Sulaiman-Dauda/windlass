@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -9,6 +10,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -61,6 +64,60 @@ func TestAppJWT(t *testing.T) {
 func TestAppJWTBadKey(t *testing.T) {
 	if _, err := appJWT(1, "not a pem"); err == nil {
 		t.Error("invalid PEM accepted")
+	}
+}
+
+// TestConvertAppManifestPath pins the conversion endpoint. The singular
+// /app-manifest/ 404s, and a 404 here is indistinguishable from an expired
+// code, so the flow failed silently at the last step once already.
+func TestConvertAppManifestPath(t *testing.T) {
+	var gotPath, gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": 42, "slug": "windlass-test", "client_id": "cid",
+			"client_secret": "csec", "webhook_secret": "whsec", "pem": "KEY",
+			"owner": map[string]string{"login": "acme"},
+		})
+	}))
+	defer srv.Close()
+
+	s, _ := testService(t)
+	s.api = &providerAPI{githubBase: srv.URL}
+	cfg, err := s.exchangeManifest(context.Background(), "tempcode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ClientID != "cid" || cfg.PEM != "KEY" || cfg.Owner != "acme" || cfg.ID != 42 {
+		t.Errorf("credentials not carried through: %+v", cfg)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/app-manifests/tempcode/conversions" {
+		t.Errorf("path = %q, want /app-manifests/tempcode/conversions", gotPath)
+	}
+}
+
+// TestConvertAppManifestReportsBody keeps GitHub's explanation in the error;
+// without it every refusal looks the same in the log.
+func TestConvertAppManifestReportsBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		w.Write([]byte(`{"message":"Code has expired"}`))
+	}))
+	defer srv.Close()
+
+	s, _ := testService(t)
+	s.api = &providerAPI{githubBase: srv.URL}
+	_, err := s.exchangeManifest(context.Background(), "stale")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "422") || !strings.Contains(err.Error(), "Code has expired") {
+		t.Errorf("error lost GitHub's detail: %v", err)
 	}
 }
 
