@@ -204,13 +204,31 @@ func (s *Service) ProxyStatus(ctx context.Context) (agent.ProxyInfo, error) {
 // ---------------------------------------------------------------------------
 // Route synchronization
 
+// Retry pacing for a failed sync. Sync failures mean the desired state is not
+// in Caddy, so they must converge on their own rather than wait for an event.
+const (
+	syncRetryBase = 3 * time.Second
+	syncRetryMax  = 2 * time.Minute
+)
+
 // Sync pushes the full desired state of all domains into Caddy. Upstreams
 // resolve to the current container IP of each domain's service.
+//
+// Sync is all-or-nothing with respect to application routes: if Docker cannot
+// be reached it returns an error and leaves the existing routes untouched,
+// because a partial route set would tear down routes for containers that are
+// still serving. The panel route is converged first and independently, so the
+// panel stays reachable during a Docker outage.
 func (s *Service) Sync(ctx context.Context) error {
 	info, err := s.agent.Proxy().Available(ctx)
-	if err != nil || !info.Available {
-		s.logger.Warn("proxy unavailable; skipping route sync")
-		return nil // degrade gracefully (plan: warn, don't fail)
+	if err != nil {
+		// Retryable, not terminal: Caddy is commonly still starting when we
+		// first sync at boot. Returning nil here would strand the desired
+		// state until the next deployment.
+		return fmt.Errorf("proxy unavailable: %w", err)
+	}
+	if !info.Available {
+		return errors.New("proxy unavailable")
 	}
 	panelDomain, err := s.PanelDomain(ctx)
 	if err != nil {
@@ -228,6 +246,15 @@ func (s *Service) Sync(ctx context.Context) error {
 	var routes []agent.Route
 	for _, d := range domains {
 		upstream, err := s.resolveUpstream(ctx, d.ProjectName, d.Service, d.ContainerPort)
+		if err != nil && !errors.Is(err, errNoRunningContainer) {
+			// Docker itself is unreachable, so we cannot tell which upstreams
+			// are live. Applying a partial desired state here would delete the
+			// routes of every still-running container (a Docker blip, or the
+			// socket proxy not being ready at boot, would black out every app).
+			// Abort instead and leave the existing Caddy routes in place; the
+			// caller retries.
+			return fmt.Errorf("resolve upstream for %s: %w", d.Hostname, err)
+		}
 		if err != nil {
 			s.logger.Info("domain has no live upstream yet", "hostname", d.Hostname, "reason", err)
 			continue
@@ -247,6 +274,11 @@ func (s *Service) Sync(ctx context.Context) error {
 	return nil
 }
 
+// errNoRunningContainer marks the legitimate "nothing deployed yet" case, as
+// opposed to an infrastructure failure that leaves upstreams unknown. Sync
+// distinguishes the two: the former drops one route, the latter aborts.
+var errNoRunningContainer = errors.New("no running container")
+
 func (s *Service) resolveUpstream(ctx context.Context, project, service string, port int64) (string, error) {
 	containers, err := s.agent.Docker().ListContainers(ctx, agent.ContainerFilter{ComposeProject: project})
 	if err != nil {
@@ -257,7 +289,7 @@ func (s *Service) resolveUpstream(ctx context.Context, project, service string, 
 			return fmt.Sprintf("%s:%d", c.IPAddress, port), nil
 		}
 	}
-	return "", fmt.Errorf("no running container for service %s", service)
+	return "", fmt.Errorf("%w for service %s", errNoRunningContainer, service)
 }
 
 // RequestSync schedules a debounced sync (coalesces bursts of events).
@@ -305,6 +337,7 @@ func (s *Service) Run(ctx context.Context) {
 		<-debounce.C
 	}
 	pending := false
+	backoff := syncRetryBase
 
 	for {
 		select {
@@ -325,10 +358,22 @@ func (s *Service) Run(ctx context.Context) {
 		case <-debounce.C:
 			pending = false
 			syncCtx, cancelSync := context.WithTimeout(ctx, 30*time.Second)
-			if err := s.Sync(syncCtx); err != nil {
-				s.logger.Error("route sync", "error", err)
-			}
+			err := s.Sync(syncCtx)
 			cancelSync()
+			if err == nil {
+				backoff = syncRetryBase
+				continue
+			}
+			// Keep retrying on our own schedule. Events cannot be relied on to
+			// prod us again: the Docker event stream is usually down for the
+			// same reason the sync just failed, so without this a boot-time
+			// failure would leave routes stale until the next deploy.
+			s.logger.Error("route sync; retrying", "error", err, "retry_in", backoff)
+			pending = true
+			debounce.Reset(backoff)
+			if backoff *= 2; backoff > syncRetryMax {
+				backoff = syncRetryMax
+			}
 		}
 	}
 }
