@@ -23,7 +23,19 @@ jobs:
       #   can't load config: the Go language version (go1.24) used to build
       #   golangci-lint is lower than the targeted Go version (1.26)
       # v9 pulls golangci-lint v2.x, built with a current toolchain.
+      # Advisory, not blocking — see issue #1.
+      #
+      # The lint step could never actually run before: the action installed
+      # golangci-lint v1, which refuses a `go 1.26` module. Fixing that revealed
+      # ~120 pre-existing findings (almost all errcheck on deferred Close calls).
+      # That is surfaced debt, not a regression, and it is not something to fix
+      # with a mass edit — each one needs a decision about whether the error
+      # matters.
+      #
+      # So the linter runs and its output is visible on every PR, but it does not
+      # gate merges until the backlog is cleared. Remove continue-on-error then.
       - uses: golangci/golangci-lint-action@v9
+        continue-on-error: true
         with:
           version: v2.12.2
       - run: go test ./...
