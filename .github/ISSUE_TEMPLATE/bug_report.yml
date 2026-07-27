@@ -1,0 +1,47 @@
+name: Bug report
+description: Something does not work as documented
+labels: ["type: bug", "status: needs repro"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report security vulnerabilities here.** Use
+        [Security → Report a vulnerability](../../security/advisories/new) so it stays private.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what actually happened.
+      placeholder: |
+        I deployed a stack from a Git repo and the domain returned 502.
+        I expected Caddy to route it to the container.
+    validations: { required: true }
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Ideally against a throwaway host, so someone else can follow them.
+    validations: { required: true }
+
+  - type: input
+    id: version
+    attributes:
+      label: Windlass version
+      description: From the panel footer, or `windlass --version`
+    validations: { required: true }
+
+  - type: input
+    id: host
+    attributes:
+      label: Host OS and Docker version
+      placeholder: "Ubuntu 24.04, Docker 27.3.1, Compose v2.29"
+    validations: { required: true }
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Windlass logs and, if useful, `docker compose logs`. Redact secrets.
+      render: shell

@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest something Windlass should do
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Windlass makes hard or impossible?
+    validations: { required: true }
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: Optional. The problem matters more than the proposed solution.
+
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Architectural fit
+      description: >
+        Windlass has a few non-negotiable rules (see CONTRIBUTING.md). Ideas that
+        break them are unlikely to land, however useful.
+      options:
+        - label: This keeps the project filesystem authoritative for application config
+        - label: Deployed containers would still survive Windlass being stopped

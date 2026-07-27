@@ -1,0 +1,12 @@
+# Ownership falls to the maintainer today. Branch protection does not require
+# code-owner review: GitHub will not let you approve your own PR, so requiring it
+# with a single maintainer deadlocks every merge. Turn it on when someone else
+# can approve.
+
+*                        @Sulaiman-Dauda
+
+# Where a mistake is expensive: the privileged agent, and anything that builds
+# or publishes.
+/internal/agent/         @Sulaiman-Dauda
+/.github/workflows/      @Sulaiman-Dauda
+/SECURITY.md             @Sulaiman-Dauda
