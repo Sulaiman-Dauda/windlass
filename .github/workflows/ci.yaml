@@ -18,9 +18,14 @@ jobs:
         with:
           go-version: stable
       - run: go vet ./...
-      - uses: golangci/golangci-lint-action@v6
+      # v6 of the action pulls golangci-lint v1.x, which is built with go1.24 and
+      # refuses to load a config for a `go 1.26` module:
+      #   can't load config: the Go language version (go1.24) used to build
+      #   golangci-lint is lower than the targeted Go version (1.26)
+      # v9 pulls golangci-lint v2.x, built with a current toolchain.
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.12.2
       - run: go test ./...
 
   frontend:
