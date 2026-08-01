@@ -13,8 +13,8 @@ jobs:
     name: Lint + unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - run: go vet ./...
@@ -47,15 +47,15 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: web/dist
@@ -65,11 +65,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: web-dist
           path: web/dist
@@ -92,7 +92,7 @@ jobs:
           echo "idle RSS: ${RSS_KB} kB"
           test "$RSS_KB" -lt 40960
           kill $PID
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries
           path: bin/
@@ -102,8 +102,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - name: Install Caddy
@@ -119,13 +119,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: binary
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: binaries
           path: bin
@@ -144,7 +144,7 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
           npx playwright test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-traces
@@ -155,8 +155,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: binary
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: binaries
           path: bin
