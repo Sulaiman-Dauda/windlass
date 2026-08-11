@@ -24,6 +24,7 @@ const TABS = [
   { value: "general", label: "General" },
   { value: "auth", label: "Users & auth" },
   { value: "git", label: "Git" },
+  { value: "registries", label: "Registries" },
   { value: "system", label: "System" },
 ] as const;
 
@@ -61,6 +62,7 @@ export default function Settings() {
           </>
         )}
         {tab === "git" && <GitConnections />}
+        {tab === "registries" && <RegistryCredentials />}
         {tab === "system" && (
           <>
             <UpdateSection />
@@ -550,6 +552,120 @@ function GitConnections() {
               </div>
             ))}
           </div>
+        )}
+      </Row>
+    </Group>
+  );
+}
+
+// ---------- Registries ----------
+
+interface RegistryCredential {
+  id: number;
+  host: string;
+  username: string;
+  updated_at: string;
+  verified_at?: string;
+}
+
+/**
+ * Container registry credentials.
+ *
+ * Applied to the host with a real `docker login`, not held inside Windlass, so
+ * `docker compose pull` keeps working with the panel stopped. That is the
+ * promise in docs/life-without-the-panel, and it is worth saying on the screen
+ * so nobody assumes the panel is doing something clever and unremovable.
+ */
+function RegistryCredentials() {
+  const qc = useQueryClient();
+  const creds = useQuery<RegistryCredential[]>({
+    queryKey: ["registries"],
+    queryFn: () => api("/registries"),
+  });
+
+  const [host, setHost] = useState("ghcr.io");
+  const [username, setUsername] = useState("");
+  const [secret, setSecret] = useState("");
+  const [warning, setWarning] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api<{ credential: RegistryCredential; warning?: string }>("/registries", {
+        method: "PUT",
+        body: JSON.stringify({ host, username, secret }),
+      }),
+    onSuccess: (res) => {
+      setSecret("");
+      // Stored but the login failed: worth saying, because the credential is
+      // saved and somebody would otherwise assume it works.
+      setWarning(res.warning ?? null);
+      qc.invalidateQueries({ queryKey: ["registries"] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: number) => api(`/registries/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["registries"] }),
+  });
+
+  return (
+    <Group title="Container registries">
+      <Row
+        title="Private image access"
+        desc="Applied to the host with docker login, so pulls keep working if Windlass is stopped or removed. Tokens are stored encrypted and never returned."
+        stack
+      >
+        {warning && (
+          <div className="mb-3">
+            <Notice tone="err" onClose={() => setWarning(null)}>
+              Saved, but signing in failed: {warning}
+            </Notice>
+          </div>
+        )}
+
+        <form
+          className="flex flex-wrap items-end gap-2.5"
+          onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
+        >
+          <Field label="Registry" className="w-[170px]">
+            <Input required value={host} onChange={(e) => setHost(e.target.value)} placeholder="ghcr.io" />
+          </Field>
+          <Field label="Username" className="w-[150px]">
+            <Input required value={username} onChange={(e) => setUsername(e.target.value)} placeholder="your-github-user" />
+          </Field>
+          <Field label="Token" className="min-w-[160px] flex-1">
+            <Input required type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="read:packages token" />
+          </Field>
+          <Button type="submit" variant="primary" disabled={save.isPending}>
+            {save.isPending ? "Signing in…" : "Save and sign in"}
+          </Button>
+        </form>
+        {save.isError && (
+          <p className="mt-2 text-sm text-err">{save.error instanceof Error ? save.error.message : "Failed"}</p>
+        )}
+
+        {creds.data && creds.data.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {creds.data.map((c) => (
+              <div key={c.id} className="flex items-center justify-between rounded-[10px] border border-hairline bg-surface2 px-4 py-2.5">
+                <div className="flex items-center gap-2.5 text-sm">
+                  <span className="font-mono font-medium">{c.host}</span>
+                  <span className="text-fg3">{c.username}</span>
+                  {c.verified_at ? (
+                    <StatusPill tone="ok">signed in</StatusPill>
+                  ) : (
+                    <StatusPill tone="err">never signed in</StatusPill>
+                  )}
+                </div>
+                <button onClick={() => remove.mutate(c.id)} className="text-xs text-fg3 hover:text-err">Remove</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {creds.data && creds.data.length === 0 && (
+          <p className="mt-3 text-sm text-fg3">
+            Nothing configured. A project pulling a private image will fail with
+            <span className="font-mono"> unauthorized</span> until one is added.
+          </p>
         )}
       </Row>
     </Group>
