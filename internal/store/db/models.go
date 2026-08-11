@@ -128,6 +128,16 @@ type Project struct {
 	WebhookSecretEnc []byte
 }
 
+type RegistryCredential struct {
+	ID         int64
+	Host       string
+	Username   string
+	SecretEnc  []byte
+	CreatedAt  string
+	UpdatedAt  string
+	VerifiedAt sql.NullString
+}
+
 type Session struct {
 	ID        string
 	UserID    int64

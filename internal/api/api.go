@@ -18,26 +18,28 @@ import (
 	"github.com/windlass-dev/windlass/internal/plugins"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
+	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/store/db"
 	"github.com/windlass-dev/windlass/internal/update"
 )
 
 type API struct {
-	Auth     *auth.Service
-	Audit    *audit.Log
-	Projects *projects.Service
-	Deploy   *deploy.Service
-	Proxy    *proxy.Service
-	Git      *git.Service
-	Backups  *backups.Service
-	Update   *update.Service
-	Plugins  *plugins.Service
-	Agent    agent.Agent
-	Bus      *events.Bus
-	Queries  *db.Queries
-	Box      *secrets.Box
-	Logger   *slog.Logger
+	Auth       *auth.Service
+	Audit      *audit.Log
+	Projects   *projects.Service
+	Deploy     *deploy.Service
+	Proxy      *proxy.Service
+	Git        *git.Service
+	Registries *registries.Service
+	Backups    *backups.Service
+	Update     *update.Service
+	Plugins    *plugins.Service
+	Agent      agent.Agent
+	Bus        *events.Bus
+	Queries    *db.Queries
+	Box        *secrets.Box
+	Logger     *slog.Logger
 
 	authLimiter *authRateLimiter
 }
@@ -80,6 +82,7 @@ func (a *API) Routes(r chi.Router) {
 			Get("/auth/oauth/github/callback/git", a.handleGitConnectCallback)
 		r.Route("/projects", a.projectRoutes)
 		r.Route("/git", a.gitRoutes)
+		r.Route("/registries", a.registryRoutes)
 		r.Route("/templates", a.templateRoutes)
 		r.Route("/plugins", a.pluginRoutes)
 		r.Route("/users", a.userRoutes)

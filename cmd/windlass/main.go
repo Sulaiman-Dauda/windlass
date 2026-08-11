@@ -25,6 +25,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/plugins"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
+	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/server"
 	"github.com/windlass-dev/windlass/internal/store"
@@ -101,8 +102,14 @@ func run() error {
 	}
 
 	gitSvc := git.New(queries, box, logger)
+	registrySvc := registries.New(queries, box, logger)
+	// Log the host in at boot as well as before each pull, so a box that was
+	// restarted can pull by hand without waiting for a deployment to run.
+	if err := registrySvc.Apply(ctx, ag.Docker()); err != nil {
+		logger.Warn("could not apply registry credentials at startup", "error", err)
+	}
 	runner := jobs.NewRunner(queries, logger)
-	deploySvc := deploy.New(queries, ag, projectSvc, gitSvc, runner, bus, logger)
+	deploySvc := deploy.New(queries, ag, projectSvc, gitSvc, registrySvc, runner, bus, logger)
 	go func() {
 		if err := runner.Run(ctx); err != nil {
 			logger.Error("job runner stopped", "error", err)
@@ -124,20 +131,21 @@ func run() error {
 	defer pluginSvc.StopAll()
 
 	a := &api.API{
-		Auth:     authSvc,
-		Audit:    audit.New(queries, logger),
-		Projects: projectSvc,
-		Deploy:   deploySvc,
-		Proxy:    proxySvc,
-		Git:      gitSvc,
-		Backups:  backupSvc,
-		Update:   updateSvc,
-		Plugins:  pluginSvc,
-		Agent:    ag,
-		Bus:      bus,
-		Queries:  queries,
-		Box:      box,
-		Logger:   logger,
+		Auth:       authSvc,
+		Audit:      audit.New(queries, logger),
+		Projects:   projectSvc,
+		Deploy:     deploySvc,
+		Proxy:      proxySvc,
+		Git:        gitSvc,
+		Registries: registrySvc,
+		Backups:    backupSvc,
+		Update:     updateSvc,
+		Plugins:    pluginSvc,
+		Agent:      ag,
+		Bus:        bus,
+		Queries:    queries,
+		Box:        box,
+		Logger:     logger,
 	}
 
 	handler, err := server.New(cfg, logger, a)

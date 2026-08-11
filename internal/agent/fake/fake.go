@@ -20,7 +20,9 @@ import (
 // before use and inspect Calls afterwards. Inject errors with Fail, keyed by
 // operation name ("compose.up", "fs.write", "proxy.apply", ...).
 type Fake struct {
-	mu sync.Mutex
+	// RegistryLogins records host -> username for each docker login performed.
+	RegistryLogins map[string]string
+	mu             sync.Mutex
 
 	Node agent.NodeInfo
 
@@ -503,4 +505,19 @@ func (h hostFake) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.L
 		commit = h.f.GitCommit
 	}
 	return agent.GitSyncResult{Commit: commit}, nil
+}
+
+// RegistryLogin records the login so a test can assert the host was
+// authenticated before a pull, without ever holding a real credential.
+func (d dockerFake) RegistryLogin(ctx context.Context, host, username, secret string) error {
+	if err := d.f.record("docker.registry_login", nil); err != nil {
+		return err
+	}
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	if d.f.RegistryLogins == nil {
+		d.f.RegistryLogins = map[string]string{}
+	}
+	d.f.RegistryLogins[host] = username
+	return nil
 }

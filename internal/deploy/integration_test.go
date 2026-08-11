@@ -1,7 +1,8 @@
 //go:build integration
 
 // Full-stack deployment against real Docker + docker compose. Runs in CI:
-//   go test -tags integration ./internal/deploy/
+//
+//	go test -tags integration ./internal/deploy/
 package deploy
 
 import (
@@ -20,6 +21,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/jobs"
 	"github.com/windlass-dev/windlass/internal/projects"
+	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/store"
 	"github.com/windlass-dev/windlass/internal/store/db"
@@ -55,7 +57,7 @@ func TestRealDeployEndToEnd(t *testing.T) {
 	proj := projects.New(q, ag, box, bus, logger)
 	gitSvc := git.New(q, box, logger)
 	runner := jobs.NewRunner(q, logger)
-	dep := New(q, ag, proj, gitSvc, runner, bus, logger)
+	dep := New(q, ag, proj, gitSvc, registries.New(q, box, logger), runner, bus, logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()

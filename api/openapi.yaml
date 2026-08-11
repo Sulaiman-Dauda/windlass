@@ -616,6 +616,34 @@ paths:
       responses:
         "204": { description: Saved }
 
+  /registries:
+    get:
+      summary: List container registry credentials (admin; secrets never returned)
+      operationId: listRegistryCredentials
+      security: [{ session: [] }]
+      responses:
+        "200": { description: Array of credentials }
+    put:
+      summary: >-
+        Store a registry credential and log the host in with it (admin).
+        Applied with a real docker login, so the host can pull whether or not
+        Windlass is running.
+      operationId: saveRegistryCredential
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: >-
+            Saved. Carries a warning when the credential was stored but the
+            login did not succeed.
+
+  /registries/{id}:
+    delete:
+      summary: Delete a registry credential (admin)
+      operationId: deleteRegistryCredential
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Deleted }
+
   /git/connections:
     get:
       summary: List git connections (admin)

@@ -22,6 +22,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/jobs"
 	"github.com/windlass-dev/windlass/internal/projects"
+	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/store/db"
 )
 
@@ -64,13 +65,14 @@ type Service struct {
 	agent    agent.Agent
 	projects *projects.Service
 	git      *git.Service
+	registry *registries.Service
 	runner   *jobs.Runner
 	bus      *events.Bus
 	logger   *slog.Logger
 }
 
-func New(q *db.Queries, ag agent.Agent, proj *projects.Service, gitSvc *git.Service, runner *jobs.Runner, bus *events.Bus, logger *slog.Logger) *Service {
-	s := &Service{q: q, agent: ag, projects: proj, git: gitSvc, runner: runner, bus: bus, logger: logger}
+func New(q *db.Queries, ag agent.Agent, proj *projects.Service, gitSvc *git.Service, reg *registries.Service, runner *jobs.Runner, bus *events.Bus, logger *slog.Logger) *Service {
+	s := &Service{q: q, agent: ag, projects: proj, git: gitSvc, registry: reg, runner: runner, bus: bus, logger: logger}
 	runner.Register(JobType, s.runJob)
 	return s
 }
@@ -354,6 +356,25 @@ func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pro
 		})
 
 	case stepPulling:
+		// Log the host in first. Without this a private image fails with a bare
+		// "unauthorized", which reads as a broken registry rather than a
+		// missing credential, and every project using one is undeployable.
+		//
+		// A login failure is reported and does not stop the step: a public
+		// image still pulls fine, and the pull itself gives a better error for
+		// the image that actually needed the credential.
+		if s.registry != nil {
+			if err := s.registry.Apply(ctx, s.agent.Docker()); err != nil {
+				s.event(ctx, d.ID, "warn", err.Error())
+			}
+			if images, err := s.pullableImages(ctx, project); err == nil {
+				if missing, err := s.registry.Missing(ctx, images); err == nil && len(missing) > 0 {
+					s.event(ctx, d.ID, "warn", fmt.Sprintf(
+						"no credential configured for %s; a private image there cannot be pulled",
+						strings.Join(missing, ", ")))
+				}
+			}
+		}
 		s.event(ctx, d.ID, "step", "pulling images")
 		return s.agent.Compose().Pull(ctx, project, sink)
 
@@ -539,4 +560,22 @@ func (s *Service) finish(ctx context.Context, d db.Deployment, status, errMsg st
 	}
 	s.event(ctx, d.ID, "done", status)
 	s.logger.Info("deployment finished", "deployment", d.ID, "status", status, "error", errMsg)
+}
+
+// pullableImages lists the images this project would pull, skipping anything
+// built locally: a service with a build stanza has nothing to fetch, so a
+// registry it names is not a missing credential.
+func (s *Service) pullableImages(ctx context.Context, project string) ([]string, error) {
+	cfg, err := s.agent.Compose().Config(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	var images []string
+	for _, svc := range cfg.Services {
+		if svc.Build || svc.Image == "" {
+			continue
+		}
+		images = append(images, svc.Image)
+	}
+	return images, nil
 }

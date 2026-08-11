@@ -25,6 +25,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/plugins"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
+	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/store"
 	"github.com/windlass-dev/windlass/internal/store/db"
@@ -89,26 +90,27 @@ func newTestEnv(t *testing.T) *testEnv {
 	projectSvc := projects.New(queries, ag, box, bus, logger)
 	gitSvc := git.New(queries, box, logger)
 	runner := jobs.NewRunner(queries, logger)
-	deploySvc := deploy.New(queries, ag, projectSvc, gitSvc, runner, bus, logger)
+	deploySvc := deploy.New(queries, ag, projectSvc, gitSvc, registries.New(queries, box, logger), runner, bus, logger)
 
 	runnerCtx, stopRunner := context.WithCancel(context.Background())
 	t.Cleanup(stopRunner)
 	go runner.Run(runnerCtx)
 
 	a := &api.API{
-		Auth:     authSvc,
-		Audit:    audit.New(queries, logger),
-		Projects: projectSvc,
-		Deploy:   deploySvc,
-		Proxy:    proxy.New(queries, ag, projectSvc, bus, logger),
-		Git:      gitSvc,
-		Backups:  backups.New(queries, ag, projectSvc, box, bus, logger),
-		Plugins:  plugins.New(queries, dir, logger),
-		Agent:    ag,
-		Bus:      bus,
-		Queries:  queries,
-		Box:      box,
-		Logger:   logger,
+		Auth:       authSvc,
+		Audit:      audit.New(queries, logger),
+		Projects:   projectSvc,
+		Deploy:     deploySvc,
+		Proxy:      proxy.New(queries, ag, projectSvc, bus, logger),
+		Git:        gitSvc,
+		Registries: registries.New(queries, box, logger),
+		Backups:    backups.New(queries, ag, projectSvc, box, bus, logger),
+		Plugins:    plugins.New(queries, dir, logger),
+		Agent:      ag,
+		Bus:        bus,
+		Queries:    queries,
+		Box:        box,
+		Logger:     logger,
 	}
 	h, err := New(config.Config{Addr: ":0", DataDir: dir}, logger, a)
 	if err != nil {

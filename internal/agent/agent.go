@@ -144,6 +144,13 @@ type DockerAgent interface {
 	PruneImages(ctx context.Context, req ImagePruneReq) (ImagePruneResult, error)
 	// Events streams Docker daemon events (health, restarts) until ctx ends.
 	Events(ctx context.Context, out func(DockerEvent)) error
+	// RegistryLogin authenticates the host to a container registry.
+	//
+	// A real `docker login`, so the credential lands in the host's Docker
+	// config and a plain `docker compose pull` works with Windlass stopped.
+	// Holding it only inside the panel would make the panel load-bearing for
+	// the application runtime, which is the one thing it promises not to be.
+	RegistryLogin(ctx context.Context, host, username, secret string) error
 }
 
 type ImageDiskUsage struct {

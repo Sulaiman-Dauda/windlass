@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -301,4 +302,37 @@ func (d dockerLocal) Events(ctx context.Context, out func(agent.DockerEvent)) er
 			})
 		}
 	}
+}
+
+// RegistryLogin authenticates the host to a container registry.
+//
+// Deliberately the `docker login` CLI rather than the SDK's registry login.
+// The SDK call only checks the credential against the registry; it does not
+// write the host's Docker config. Compose shells out to the same CLI, so this
+// is what makes `docker compose pull` work, and it keeps working with Windlass
+// stopped, which is the promise in docs/life-without-the-panel.md.
+//
+// The secret goes in on stdin. As an argument it would sit in the process list
+// for anybody with an account on the box to read.
+func (d dockerLocal) RegistryLogin(ctx context.Context, host, username, secret string) error {
+	if strings.TrimSpace(host) == "" || strings.TrimSpace(username) == "" || secret == "" {
+		return fmt.Errorf("registry host, username and secret are all required")
+	}
+	// A host is a registry name, never a flag. Without this a value beginning
+	// "--" would be read by docker as an option.
+	if strings.HasPrefix(host, "-") || strings.HasPrefix(username, "-") {
+		return fmt.Errorf("invalid registry host or username")
+	}
+
+	cmd := exec.CommandContext(ctx, d.l.cfg.DockerBin,
+		"login", host, "--username", username, "--password-stdin")
+	cmd.Stdin = strings.NewReader(secret)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// The daemon's own words are the useful part. "exit status 1" tells
+		// whoever is reading the deployment log nothing at all.
+		return fmt.Errorf("docker login %s: %w: %s",
+			host, err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }

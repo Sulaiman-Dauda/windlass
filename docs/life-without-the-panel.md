@@ -36,6 +36,42 @@ Files/Environment screens on their next read, and the next deployment uses it di
 manual `docker compose up -d` updates containers immediately; Windlass reads live container
 state rather than overwriting the file from SQLite on the next deployment.
 
+## Private images
+
+A project that pulls from a private registry needs the host authenticated, or
+`docker compose pull` fails with `unauthorized` whether or not Windlass is
+running.
+
+Windlass applies stored registry credentials with a real `docker login`, at
+startup and again before every pull, so the credential lives in the host's
+Docker config rather than inside the panel. That is deliberate: holding it only
+in Windlass would make the panel required to start your applications, which is
+the one thing it promises not to be.
+
+Set one in **Settings → Registries**, or by hand without the panel:
+
+```sh
+echo "$TOKEN" | sudo docker login ghcr.io --username <user> --password-stdin
+```
+
+Either way the credential ends up in the same place, and removing Windlass
+leaves it behind.
+
+### Check the promise holds
+
+With the panel stopped, a project must still pull and start:
+
+```sh
+sudo systemctl stop windlass
+cd /var/lib/windlass/projects/myapp
+sudo docker compose -p myapp pull
+sudo docker compose -p myapp up -d
+sudo systemctl start windlass
+```
+
+If the pull fails with `unauthorized`, the host has no credential for that
+registry and no deployment will succeed either.
+
 ## Rebuild the application index
 
 If `windlass.db` is replaced with a new database, create/claim a new administrator and choose

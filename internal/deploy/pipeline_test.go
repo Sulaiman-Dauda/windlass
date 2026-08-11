@@ -18,6 +18,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/jobs"
 	"github.com/windlass-dev/windlass/internal/projects"
+	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/store"
 	"github.com/windlass-dev/windlass/internal/store/db"
@@ -25,11 +26,12 @@ import (
 )
 
 type env struct {
-	q       *db.Queries
-	agent   *fake.Fake
-	deploy  *Service
-	runner  *jobs.Runner
-	project db.Project
+	q          *db.Queries
+	agent      *fake.Fake
+	deploy     *Service
+	runner     *jobs.Runner
+	project    db.Project
+	registries *registries.Service
 }
 
 func newEnv(t *testing.T) *env {
@@ -50,7 +52,8 @@ func newEnv(t *testing.T) *env {
 	proj := projects.New(q, ag, box, bus, logger)
 	gitSvc := git.New(q, box, logger)
 	runner := jobs.NewRunner(q, logger)
-	dep := New(q, ag, proj, gitSvc, runner, bus, logger)
+	reg := registries.New(q, box, logger)
+	dep := New(q, ag, proj, gitSvc, reg, runner, bus, logger)
 
 	p, err := proj.Create(context.Background(), projects.CreateReq{Name: "app"})
 	if err != nil {
@@ -63,7 +66,7 @@ func newEnv(t *testing.T) *env {
 		"web": {Image: "nginx:alpine"},
 	}}
 
-	return &env{q: q, agent: ag, deploy: dep, runner: runner, project: p}
+	return &env{q: q, agent: ag, deploy: dep, runner: runner, project: p, registries: reg}
 }
 
 // runUntilFinished drives the job runner until the deployment reaches a
@@ -318,3 +321,66 @@ func TestOneActiveDeploymentPerProject(t *testing.T) {
 }
 
 func itoa(v int64) string { return strconv.FormatInt(v, 10) }
+
+// The pull step must log the host in before pulling.
+//
+// Not a nicety. Without it a private image fails with a bare "unauthorized",
+// which reads as a broken registry rather than a missing credential, and every
+// project using one becomes undeployable. That was four projects out of five on
+// the first real installation, and it stayed hidden because the containers kept
+// running the image somebody had pulled by hand months earlier.
+func TestPullLogsTheHostInFirst(t *testing.T) {
+	e := newEnv(t)
+
+	if _, err := e.registries.Upsert(context.Background(), "ghcr.io", "someone", "token"); err != nil {
+		t.Fatalf("store a credential: %v", err)
+	}
+
+	d, err := e.deploy.Deploy(context.Background(), "app", "manual")
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	final := e.runUntilFinished(t, d.ID)
+	if final.Status != "succeeded" {
+		t.Fatalf("status = %s, error = %s", final.Status, final.Error.String)
+	}
+
+	if got := e.agent.RegistryLogins["ghcr.io"]; got != "someone" {
+		t.Fatalf("host not logged in to ghcr.io (logins: %v)", e.agent.RegistryLogins)
+	}
+
+	// Order matters: a login after the pull is no use to the pull.
+	loginAt, pullAt := -1, -1
+	for i, call := range e.agent.Calls {
+		if loginAt < 0 && call == "docker.registry_login" {
+			loginAt = i
+		}
+		if pullAt < 0 && strings.HasPrefix(call, "compose.pull") {
+			pullAt = i
+		}
+	}
+	if loginAt < 0 {
+		t.Fatalf("no registry login happened at all: %v", e.agent.Calls)
+	}
+	if pullAt < 0 || loginAt > pullAt {
+		t.Fatalf("login at %d, pull at %d: the login has to come first", loginAt, pullAt)
+	}
+}
+
+// Every installation before somebody adds a credential. Deployments of public
+// images must behave exactly as they did.
+func TestPullWithoutCredentialsIsUnchanged(t *testing.T) {
+	e := newEnv(t)
+
+	d, err := e.deploy.Deploy(context.Background(), "app", "manual")
+	if err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+	final := e.runUntilFinished(t, d.ID)
+	if final.Status != "succeeded" {
+		t.Fatalf("status = %s, error = %s", final.Status, final.Error.String)
+	}
+	if len(e.agent.RegistryLogins) != 0 {
+		t.Fatalf("logged in with nothing configured: %v", e.agent.RegistryLogins)
+	}
+}
