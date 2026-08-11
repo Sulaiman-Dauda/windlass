@@ -107,6 +107,60 @@ func TestWebhookAutoDeployDisabled(t *testing.T) {
 	}
 }
 
+func TestStoredGitConnectionRequiresAdminAndMatchingHost(t *testing.T) {
+	e := newTestEnv(t)
+	admin := e.login(t)
+	e.prepareDeployableProject(t, admin, "app")
+
+	rec := e.do(t, http.MethodPost, "/api/v1/git/connections", map[string]string{
+		"provider": "github", "name": "admin-github", "token": "secret-token",
+	}, admin)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create connection = %d: %s", rec.Code, rec.Body.String())
+	}
+	var conn struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&conn); err != nil || conn.ID == 0 {
+		t.Fatalf("decode connection: id=%d err=%v", conn.ID, err)
+	}
+
+	rec = e.do(t, http.MethodPost, "/api/v1/users", map[string]string{
+		"email": "member@example.com", "password": "memberpassword", "role": "member",
+	}, admin)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create member = %d: %s", rec.Code, rec.Body.String())
+	}
+	rec = e.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
+		"email": "member@example.com", "password": "memberpassword",
+	})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("member login = %d: %s", rec.Code, rec.Body.String())
+	}
+	member := sessionCookie(t, rec)
+
+	gitConfig := map[string]any{
+		"repo": "https://github.com/acme/app.git", "branch": "main",
+		"connection_id": conn.ID,
+	}
+	rec = e.do(t, http.MethodPut, "/api/v1/projects/app/git", gitConfig, member)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("member attached stored connection: %d: %s", rec.Code, rec.Body.String())
+	}
+
+	gitConfig["repo"] = "https://attacker.example/acme/app.git"
+	rec = e.do(t, http.MethodPut, "/api/v1/projects/app/git", gitConfig, admin)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("foreign host accepted for stored connection: %d: %s", rec.Code, rec.Body.String())
+	}
+
+	gitConfig["repo"] = "https://github.com/acme/app.git"
+	rec = e.do(t, http.MethodPut, "/api/v1/projects/app/git", gitConfig, admin)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin valid connection = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestRollbackAPI(t *testing.T) {
 	e := newTestEnv(t)
 	cookie := e.login(t)

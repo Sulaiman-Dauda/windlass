@@ -25,7 +25,9 @@ func TestArchiveRestoreRoundTrip(t *testing.T) {
 		}
 	}
 
-	info, err := f.ArchiveProject(ctx, "app")
+	info, err := f.ArchiveProject(ctx, "app", map[string][]byte{
+		".windlass/backup/db_dump.sql": []byte("database dump"),
+	})
 	if err != nil {
 		t.Fatalf("ArchiveProject: %v", err)
 	}
@@ -50,6 +52,9 @@ func TestArchiveRestoreRoundTrip(t *testing.T) {
 		if err != nil || string(got) != want {
 			t.Errorf("%s = %q, %v (want %q)", name, got, err, want)
 		}
+	}
+	if got, err := f.ReadFile(ctx, "app", ".windlass/backup/db_dump.sql"); err != nil || string(got) != "database dump" {
+		t.Errorf("injected dump = %q, %v", got, err)
 	}
 	// Files created after the backup are gone (full restore semantics).
 	if _, err := f.ReadFile(ctx, "app", "junk.txt"); err == nil {
@@ -77,7 +82,7 @@ func TestRemoveArchiveScoped(t *testing.T) {
 	if err := f.WriteFile(ctx, "app", "compose.yaml", []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	info, err := f.ArchiveProject(ctx, "app")
+	info, err := f.ArchiveProject(ctx, "app", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,5 +91,27 @@ func TestRemoveArchiveScoped(t *testing.T) {
 	}
 	if err := f.RemoveArchive(ctx, "/etc/passwd"); err == nil {
 		t.Error("RemoveArchive accepted a path outside the backups dir")
+	}
+}
+
+func TestArchiveNamesDoNotCollide(t *testing.T) {
+	f, _ := newFS(t)
+	ctx := context.Background()
+	if _, err := f.EnsureProject(ctx, "app"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.WriteFile(ctx, "app", "compose.yaml", []byte("services: {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first, err := f.ArchiveProject(ctx, "app", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.ArchiveProject(ctx, "app", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Path == second.Path {
+		t.Fatalf("consecutive backups collided at %s", first.Path)
 	}
 }

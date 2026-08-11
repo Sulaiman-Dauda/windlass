@@ -22,7 +22,7 @@ LIMIT 50;
 
 -- name: ListBackupsForPrune :many
 SELECT * FROM backups
-WHERE project_id = ? AND status = 'done' AND destination = 'local'
+WHERE project_id = ? AND status = 'done' AND destination = ?
 ORDER BY id DESC;
 
 -- name: DeleteBackup :exec

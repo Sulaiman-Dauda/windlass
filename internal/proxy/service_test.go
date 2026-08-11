@@ -121,3 +121,28 @@ func TestSyncErrorsWhenProxyUnavailable(t *testing.T) {
 		t.Fatal("Sync must report an error when Caddy is unavailable, so the caller retries")
 	}
 }
+
+func TestDeleteRestoresIndexWhenManifestWriteFails(t *testing.T) {
+	s, ag, q := newTestService(t)
+	seedRoutedDomain(t, s, ag, q)
+	ag.Files["shop"] = map[string][]byte{
+		"compose.yaml":   []byte("services: {}"),
+		".windlass.json": []byte(`{"version":1,"source":"manual","domains":[{"hostname":"shop.example.com","service":"web","container_port":3000}]}`),
+	}
+	ag.Fail["fs.write"] = errors.New("disk full")
+
+	if err := s.Delete(context.Background(), "shop", "shop.example.com"); err == nil {
+		t.Fatal("delete succeeded despite manifest write failure")
+	}
+	project, err := q.GetProjectByName(context.Background(), "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	domains, err := q.ListProjectDomains(context.Background(), project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(domains) != 1 || domains[0].Hostname != "shop.example.com" {
+		t.Fatalf("domain index was not restored: %+v", domains)
+	}
+}

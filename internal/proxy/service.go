@@ -142,6 +142,13 @@ func (s *Service) Delete(ctx context.Context, projectName, hostname string) erro
 		return err
 	}
 	if err := s.persistDomains(ctx, projectName, project.ID); err != nil {
+		if _, rollbackErr := s.q.CreateDomain(ctx, db.CreateDomainParams{
+			ProjectID: d.ProjectID, Hostname: d.Hostname, Service: d.Service,
+			ContainerPort: d.ContainerPort,
+		}); rollbackErr != nil {
+			s.logger.Error("restore domain index after manifest write failure",
+				"hostname", d.Hostname, "error", rollbackErr)
+		}
 		return err
 	}
 	s.RequestSync()

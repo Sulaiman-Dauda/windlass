@@ -51,7 +51,39 @@ func (f fsLocal) projectDir(project string) (string, error) {
 	if !agent.ValidProjectName(project) {
 		return "", fmt.Errorf("invalid project name %q", project)
 	}
-	return filepath.Join(f.l.cfg.ProjectsDir, project), nil
+	dir := filepath.Join(f.l.cfg.ProjectsDir, project)
+	if err := rejectSymlinkComponents(f.l.cfg.ProjectsDir, dir); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// rejectSymlinkComponents prevents a lexically safe project-relative path
+// from escaping through a symlink already present on disk. The projects root
+// itself is trusted configuration; every existing component below it is not.
+func rejectSymlinkComponents(root, target string) error {
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return err
+	}
+	if rel == "." {
+		return nil
+	}
+	current := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("path contains symlink %q", current)
+		}
+	}
+	return nil
 }
 
 // resolve validates rel and returns the absolute path, guaranteed to stay
@@ -74,6 +106,9 @@ func (f fsLocal) resolve(project, rel string) (string, error) {
 	abs := filepath.Join(dir, clean)
 	if abs != dir && !strings.HasPrefix(abs, dir+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid path %q", rel)
+	}
+	if err := rejectSymlinkComponents(f.l.cfg.ProjectsDir, abs); err != nil {
+		return "", fmt.Errorf("invalid path %q: %w", rel, err)
 	}
 	return abs, nil
 }

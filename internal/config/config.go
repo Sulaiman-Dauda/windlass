@@ -31,17 +31,21 @@ type Config struct {
 	// UpdateToken optionally authenticates release checks and downloads,
 	// required when UpdateRepo is private.
 	UpdateToken string
+	// TrustedProxies is a comma-separated list of IPs/CIDRs allowed to supply
+	// forwarding headers. Loopback covers the recommended local Caddy setup.
+	TrustedProxies string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Addr:          envOr("WINDLASS_ADDR", ":8080"),
-		DataDir:       envOr("WINDLASS_DATA", defaultDataDir()),
-		LogLevel:      slog.LevelInfo,
-		PanelUpstream: envOr("WINDLASS_PANEL_UPSTREAM", "127.0.0.1:8080"),
-		CaddyAdmin:    envOr("WINDLASS_CADDY_ADMIN", "http://127.0.0.1:2019"),
-		UpdateRepo:    envOr("WINDLASS_UPDATE_REPO", "windlass-dev/windlass"),
-		UpdateToken:   os.Getenv("WINDLASS_UPDATE_TOKEN"),
+		Addr:           envOr("WINDLASS_ADDR", ":8080"),
+		DataDir:        envOr("WINDLASS_DATA", defaultDataDir()),
+		LogLevel:       slog.LevelInfo,
+		PanelUpstream:  envOr("WINDLASS_PANEL_UPSTREAM", "127.0.0.1:8080"),
+		CaddyAdmin:     envOr("WINDLASS_CADDY_ADMIN", "http://127.0.0.1:2019"),
+		UpdateRepo:     envOr("WINDLASS_UPDATE_REPO", "windlass-dev/windlass"),
+		UpdateToken:    os.Getenv("WINDLASS_UPDATE_TOKEN"),
+		TrustedProxies: envOr("WINDLASS_TRUSTED_PROXIES", "127.0.0.0/8,::1/128"),
 	}
 
 	switch os.Getenv("WINDLASS_LOG_LEVEL") {

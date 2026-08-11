@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/windlass-dev/windlass/internal/agent"
@@ -21,21 +22,27 @@ import (
 	"github.com/windlass-dev/windlass/internal/store/db"
 )
 
-var ErrNotFound = errors.New("backup not found")
+var (
+	ErrNotFound         = errors.New("backup not found")
+	ErrBackupInProgress = errors.New("a backup is already running for this project")
+)
 
 const s3SettingKey = "backups.s3"
 
 type Service struct {
-	q        *db.Queries
-	agent    agent.Agent
-	projects *projects.Service
-	box      *secrets.Box
-	bus      *events.Bus
-	logger   *slog.Logger
+	q         *db.Queries
+	agent     agent.Agent
+	projects  *projects.Service
+	box       *secrets.Box
+	bus       *events.Bus
+	logger    *slog.Logger
+	runningMu sync.Mutex
+	running   map[string]bool
 }
 
 func New(q *db.Queries, ag agent.Agent, proj *projects.Service, box *secrets.Box, bus *events.Bus, logger *slog.Logger) *Service {
-	return &Service{q: q, agent: ag, projects: proj, box: box, bus: bus, logger: logger}
+	return &Service{q: q, agent: ag, projects: proj, box: box, bus: bus, logger: logger,
+		running: map[string]bool{}}
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +103,10 @@ func (s *Service) Run(ctx context.Context, projectName, kind, destination string
 	if err != nil {
 		return db.Backup{}, err
 	}
+	if !s.start(projectName) {
+		return db.Backup{}, ErrBackupInProgress
+	}
+	defer s.done(projectName)
 	if destination != "s3" {
 		destination = "local"
 	}
@@ -131,11 +142,31 @@ func (s *Service) Run(ctx context.Context, projectName, kind, destination string
 	return rec, nil
 }
 
-func (s *Service) execute(ctx context.Context, p db.Project, destination string) (string, int64, error) {
-	// Best-effort DB dump into the project dir so it lands in the archive.
-	s.dumpDatabase(ctx, p.Name)
+func (s *Service) start(project string) bool {
+	s.runningMu.Lock()
+	defer s.runningMu.Unlock()
+	if s.running[project] {
+		return false
+	}
+	s.running[project] = true
+	return true
+}
 
-	info, err := s.agent.FS().ArchiveProject(ctx, p.Name)
+func (s *Service) done(project string) {
+	s.runningMu.Lock()
+	delete(s.running, project)
+	s.runningMu.Unlock()
+}
+
+func (s *Service) execute(ctx context.Context, p db.Project, destination string) (string, int64, error) {
+	// Best-effort DB dump is injected into the archive without touching the
+	// live project, so a failed attempt can never reuse a stale dump file.
+	extra := map[string][]byte{}
+	if dump, ok := s.dumpDatabase(ctx, p.Name); ok {
+		extra[".windlass/backup/db_dump.sql"] = dump
+	}
+
+	info, err := s.agent.FS().ArchiveProject(ctx, p.Name, extra)
 	if err != nil {
 		return "", 0, fmt.Errorf("archive: %w", err)
 	}
@@ -205,37 +236,35 @@ func (s *Service) List(ctx context.Context, projectName string) ([]db.Backup, er
 // dumpDatabase writes a native dump into the project dir when the project
 // looks like a Windlass database template. Failure is non-fatal: the file
 // archive still captures compose + env.
-func (s *Service) dumpDatabase(ctx context.Context, project string) {
+func (s *Service) dumpDatabase(ctx context.Context, project string) ([]byte, bool) {
 	env, err := s.projects.GetEnv(ctx, project)
 	if err != nil {
-		return
+		return nil, false
 	}
 	var cmd []string
-	var outFile string
+	var engine string
 	switch {
 	case env["POSTGRES_USER"] != "":
-		cmd = []string{"sh", "-c", fmt.Sprintf("pg_dump -U %s %s", env["POSTGRES_USER"], env["POSTGRES_DB"])}
-		outFile = "db_dump.sql"
-	case env["MYSQL_ROOT_PASSWORD"] != "":
+		cmd = []string{"pg_dump", "-U", env["POSTGRES_USER"]}
+		if env["POSTGRES_DB"] != "" {
+			cmd = append(cmd, env["POSTGRES_DB"])
+		}
+		engine = "postgres"
+	case env["MYSQL_ROOT_PASSWORD"] != "" || env["DB_ROOT_PASSWORD"] != "":
 		cmd = []string{"sh", "-c", "mysqldump --all-databases -uroot -p\"$MYSQL_ROOT_PASSWORD\""}
-		outFile = "db_dump.sql"
+		engine = "mysql"
 	default:
-		return
+		return nil, false
 	}
 
 	containers, err := s.agent.Docker().ListContainers(ctx, agent.ContainerFilter{ComposeProject: project})
 	if err != nil {
-		return
+		return nil, false
 	}
-	var target string
-	for _, c := range containers {
-		if c.State == "running" {
-			target = c.ID
-			break
-		}
-	}
+	target := databaseContainer(containers, engine)
 	if target == "" {
-		return
+		s.logger.Warn("database container not running; skipping dump", "project", project, "engine", engine)
+		return nil, false
 	}
 
 	dumpCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
@@ -243,7 +272,7 @@ func (s *Service) dumpDatabase(ctx context.Context, project string) {
 	sess, err := s.agent.Exec().Start(dumpCtx, agent.ExecReq{ContainerID: target, Cmd: cmd})
 	if err != nil {
 		s.logger.Warn("db dump exec", "project", project, "error", err)
-		return
+		return nil, false
 	}
 	defer sess.Close()
 
@@ -252,16 +281,35 @@ func (s *Service) dumpDatabase(ctx context.Context, project string) {
 		out.Write(chunk)
 		if out.Len() > 1<<30 {
 			s.logger.Warn("db dump too large; skipping", "project", project)
-			return
+			return nil, false
 		}
 	}
 	if code, err := sess.Wait(); err != nil || code != 0 {
 		s.logger.Warn("db dump failed", "project", project, "exit", code, "error", err)
-		return
+		return nil, false
 	}
-	if err := s.agent.FS().WriteFile(ctx, project, outFile, []byte(out.String()), 0o600); err != nil {
-		s.logger.Warn("db dump write", "project", project, "error", err)
+	return []byte(out.String()), true
+}
+
+func databaseContainer(containers []agent.Container, engine string) string {
+	for _, c := range containers {
+		if c.State != "running" {
+			continue
+		}
+		service, image := strings.ToLower(c.ComposeService), strings.ToLower(c.Image)
+		switch engine {
+		case "postgres":
+			if service == "postgres" || strings.Contains(image, "postgres") {
+				return c.ID
+			}
+		case "mysql":
+			if service == "mysql" || service == "mariadb" ||
+				strings.Contains(image, "mysql") || strings.Contains(image, "mariadb") {
+				return c.ID
+			}
+		}
 	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -342,21 +390,40 @@ func (s *Service) tick(ctx context.Context) {
 		if _, err := s.Run(ctx, sched.ProjectName, "scheduled", sched.Destination); err != nil {
 			continue // already logged
 		}
-		s.prune(ctx, sched.ProjectID, sched.RetentionCount)
+		s.prune(ctx, sched.ProjectID, sched.Destination, sched.RetentionCount)
 	}
 }
 
-// prune keeps the newest N local backups per project.
-func (s *Service) prune(ctx context.Context, projectID, keep int64) {
-	rows, err := s.q.ListBackupsForPrune(ctx, projectID)
+// prune keeps the newest N completed backups for one destination. Data is
+// deleted before its record so a transient storage failure remains retryable.
+func (s *Service) prune(ctx context.Context, projectID int64, destination string, keep int64) {
+	rows, err := s.q.ListBackupsForPrune(ctx, db.ListBackupsForPruneParams{
+		ProjectID: projectID, Destination: destination,
+	})
 	if err != nil || int64(len(rows)) <= keep {
 		return
 	}
+	var remote *s3Client
+	if destination == "s3" {
+		cfg, err := s.s3Config(ctx)
+		if err != nil || !cfg.Configured() {
+			s.logger.Warn("prune S3 backups", "error", err)
+			return
+		}
+		remote = newS3(cfg)
+	}
 	for _, old := range rows[keep:] {
-		if err := s.q.DeleteBackup(ctx, old.ID); err == nil {
-			if err := s.agent.FS().RemoveArchive(ctx, old.Path); err != nil {
-				s.logger.Warn("prune archive", "path", old.Path, "error", err)
+		if remote != nil {
+			if err := remote.DeleteObject(ctx, old.Path); err != nil {
+				s.logger.Warn("prune S3 object", "path", old.Path, "error", err)
+				continue
 			}
+		} else if err := s.agent.FS().RemoveArchive(ctx, old.Path); err != nil {
+			s.logger.Warn("prune archive", "path", old.Path, "error", err)
+			continue
+		}
+		if err := s.q.DeleteBackup(ctx, old.ID); err != nil {
+			s.logger.Warn("prune backup record", "backup", old.ID, "error", err)
 		}
 	}
 }

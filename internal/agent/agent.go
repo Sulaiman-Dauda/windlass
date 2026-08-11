@@ -262,8 +262,9 @@ type FSAgent interface {
 	EnsureProject(ctx context.Context, project string) (string, error)
 	RemoveProject(ctx context.Context, project string) error
 	// ArchiveProject writes a tar.gz of the project directory into the
-	// node's backups dir and returns its absolute path and size.
-	ArchiveProject(ctx context.Context, project string) (ArchiveInfo, error)
+	// node's backups dir and returns its absolute path and size. Extra files
+	// are injected into the archive without modifying the live project.
+	ArchiveProject(ctx context.Context, project string, extraFiles map[string][]byte) (ArchiveInfo, error)
 	// RestoreProject replaces the project directory contents with the
 	// archive's (which must have been produced by ArchiveProject).
 	RestoreProject(ctx context.Context, project, archivePath string) error

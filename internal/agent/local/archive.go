@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -40,7 +42,7 @@ func (f fsLocal) RemoveArchive(ctx context.Context, archivePath string) error {
 	return err
 }
 
-func (f fsLocal) ArchiveProject(ctx context.Context, project string) (agent.ArchiveInfo, error) {
+func (f fsLocal) ArchiveProject(ctx context.Context, project string, extraFiles map[string][]byte) (agent.ArchiveInfo, error) {
 	dir, err := f.projectDir(project)
 	if err != nil {
 		return agent.ArchiveInfo{}, err
@@ -53,7 +55,11 @@ func (f fsLocal) ArchiveProject(ctx context.Context, project string) (agent.Arch
 	if err := os.MkdirAll(backups, 0o700); err != nil {
 		return agent.ArchiveInfo{}, err
 	}
-	name := fmt.Sprintf("%s-%s.tar.gz", project, time.Now().UTC().Format("20060102-150405"))
+	nonce := make([]byte, 6)
+	if _, err := rand.Read(nonce); err != nil {
+		return agent.ArchiveInfo{}, fmt.Errorf("backup filename: %w", err)
+	}
+	name := fmt.Sprintf("%s-%s-%s.tar.gz", project, time.Now().UTC().Format("20060102-150405"), hex.EncodeToString(nonce))
 	dest := filepath.Join(backups, name)
 
 	out, err := os.CreateTemp(backups, ".windlass-*")
@@ -80,6 +86,9 @@ func (f fsLocal) ArchiveProject(ctx context.Context, project string) (agent.Arch
 		if rel == "." {
 			return nil
 		}
+		if _, replaced := extraFiles[filepath.ToSlash(rel)]; replaced {
+			return nil
+		}
 		// Skip git internals: backups capture the deployable state, and a
 		// git project re-syncs its history from the remote.
 		if info.IsDir() && info.Name() == ".git" {
@@ -104,6 +113,28 @@ func (f fsLocal) ArchiveProject(ctx context.Context, project string) (agent.Arch
 		}
 		return nil
 	})
+	if walkErr == nil {
+		for name, data := range extraFiles {
+			clean := filepath.Clean(filepath.FromSlash(name))
+			if filepath.IsAbs(clean) || clean == "." || clean == ".." ||
+				strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				walkErr = fmt.Errorf("invalid extra archive path %q", name)
+				break
+			}
+			hdr := &tar.Header{
+				Name: filepath.ToSlash(clean), Mode: 0o600, Size: int64(len(data)),
+				ModTime: time.Now().UTC(), Typeflag: tar.TypeReg,
+			}
+			if err := tw.WriteHeader(hdr); err != nil {
+				walkErr = err
+				break
+			}
+			if _, err := tw.Write(data); err != nil {
+				walkErr = err
+				break
+			}
+		}
+	}
 
 	if err := tw.Close(); err != nil && walkErr == nil {
 		walkErr = err

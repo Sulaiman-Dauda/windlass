@@ -50,6 +50,10 @@ func agentUpReq(project string) agent.ComposeUpReq {
 }
 
 func (a *API) Routes(r chi.Router) {
+	// Bound every API request before any JSON decoder or webhook verifier can
+	// allocate from it. Credential bodies have a much smaller nested limit.
+	r.Use(limitRequestBody(6 << 20))
+
 	// 20 credential attempts per IP per minute.
 	a.authLimiter = newAuthRateLimiter(20, time.Minute)
 
@@ -57,8 +61,8 @@ func (a *API) Routes(r chi.Router) {
 	r.Get("/system/health", handleHealth)
 	r.Get("/openapi.yaml", handleOpenAPI)
 	r.Get("/auth/status", a.handleAuthStatus)
-	r.Post("/auth/setup", a.limitAuth(a.handleSetup))
-	r.Post("/auth/login", a.limitAuth(a.handleLogin))
+	r.With(limitRequestBody(64<<10)).Post("/auth/setup", a.limitAuth(a.handleSetup))
+	r.With(limitRequestBody(64<<10)).Post("/auth/login", a.limitAuth(a.handleLogin))
 	r.Post("/auth/logout", a.handleLogout)
 	r.Get("/auth/oauth/providers", a.handleOAuthProviders)
 	r.Get("/auth/oauth/{provider}/start", a.handleOAuthStart)

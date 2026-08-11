@@ -83,6 +83,47 @@ func TestFSPathTraversalBlocked(t *testing.T) {
 	}
 }
 
+func TestFSSymlinkTraversalBlocked(t *testing.T) {
+	f, root := newFS(t)
+	ctx := context.Background()
+	if _, err := f.EnsureProject(ctx, "crm"); err != nil {
+		t.Fatal(err)
+	}
+
+	outside := t.TempDir()
+	sentinel := filepath.Join(outside, "secret.json")
+	if err := os.WriteFile(sentinel, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(root, "crm")
+	if err := os.Symlink(sentinel, filepath.Join(project, "leak.json")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(project, "escape")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.ReadFile(ctx, "crm", "leak.json"); err == nil {
+		t.Error("ReadFile followed a symlink outside the project")
+	}
+	if _, err := f.List(ctx, "crm", "escape"); err == nil {
+		t.Error("List followed a symlink outside the project")
+	}
+	if err := f.WriteFile(ctx, "crm", "escape/config.json", []byte("escaped"), 0o600); err == nil {
+		t.Error("WriteFile followed a parent symlink outside the project")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "config.json")); !os.IsNotExist(err) {
+		t.Errorf("outside file was created: %v", err)
+	}
+
+	if err := os.Symlink(outside, filepath.Join(root, "linked-project")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.EnsureProject(ctx, "linked-project"); err == nil {
+		t.Error("EnsureProject accepted a symlinked project directory")
+	}
+}
+
 func TestFSAtomicWriteReplaces(t *testing.T) {
 	f, _ := newFS(t)
 	ctx := context.Background()

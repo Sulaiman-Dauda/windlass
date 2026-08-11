@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -30,7 +32,11 @@ func New(cfg config.Config, logger *slog.Logger, a *api.API) (http.Handler, erro
 		return nil, err
 	}
 
-	r.Use(middleware.RealIP)
+	trustedProxies, err := parseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		return nil, err
+	}
+	r.Use(trustedRealIP(trustedProxies))
 	r.Use(securityHeaders(inlineScriptHashes(dist)))
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
@@ -40,6 +46,72 @@ func New(cfg config.Config, logger *slog.Logger, a *api.API) (http.Handler, erro
 	r.NotFound(spaHandler(dist))
 
 	return r, nil
+}
+
+func parseTrustedProxies(value string) ([]*net.IPNet, error) {
+	if strings.TrimSpace(value) == "" {
+		value = "127.0.0.0/8,::1/128"
+	}
+	var out []*net.IPNet
+	for _, raw := range strings.Split(value, ",") {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		if ip := net.ParseIP(raw); ip != nil {
+			bits := 128
+			if ip.To4() != nil {
+				ip, bits = ip.To4(), 32
+			}
+			out = append(out, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+			continue
+		}
+		_, network, err := net.ParseCIDR(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted proxy %q", raw)
+		}
+		out = append(out, network)
+	}
+	return out, nil
+}
+
+func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
+	contains := func(ip net.IP) bool {
+		for _, network := range trusted {
+			if network.Contains(ip) {
+				return true
+			}
+		}
+		return false
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			peer := r.RemoteAddr
+			if host, _, err := net.SplitHostPort(peer); err == nil {
+				peer = host
+			}
+			if !contains(net.ParseIP(strings.Trim(peer, "[]"))) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Walk right-to-left: a trusted proxy appends the address it saw,
+			// while any client-supplied spoof is farther left.
+			forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+			for i := len(forwarded) - 1; i >= 0; i-- {
+				ip := net.ParseIP(strings.TrimSpace(forwarded[i]))
+				if ip != nil && !contains(ip) {
+					r.RemoteAddr = ip.String()
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+			if ip := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); ip != nil {
+				r.RemoteAddr = ip.String()
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 var inlineScriptRE = regexp.MustCompile(`(?is)<script(?:\s[^>]*)?>(.*?)</script>`)

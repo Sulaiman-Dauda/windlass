@@ -118,6 +118,25 @@ func (c *s3Client) GetFile(ctx context.Context, key, path string) error {
 	return err
 }
 
+// DeleteObject removes a retained backup after a newer backup has completed.
+func (c *s3Client) DeleteObject(ctx context.Context, key string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.objectURL(key), nil)
+	if err != nil {
+		return err
+	}
+	c.sign(req, emptyPayloadHash)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("s3 delete: %s: %s", resp.Status, body)
+	}
+	return nil
+}
+
 const emptyPayloadHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 // sign implements AWS Signature Version 4 for a request with a known

@@ -189,6 +189,11 @@ func (a *API) handleConfigureProjectGit(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
 		return
 	}
+	user, _ := auth.UserFrom(r.Context())
+	if cfg.ConnectionID > 0 && user.Role != "admin" {
+		writeError(w, http.StatusForbidden, "forbidden", "stored Git connections require an admin")
+		return
+	}
 
 	secret, err := a.Git.Configure(r.Context(), p, cfg)
 	if err != nil {
@@ -221,7 +226,6 @@ func (a *API) handleConfigureProjectGit(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	user, _ := auth.UserFrom(r.Context())
 	a.Audit.Write(r.Context(), user.ID, "project.git_configure", "project", p.Name, remoteIP(r),
 		map[string]any{"repo": cfg.Repo, "branch": cfg.Branch, "webhook_registered": registered})
 

@@ -208,6 +208,18 @@ func (s *Service) Configure(ctx context.Context, p db.Project, cfg ProjectConfig
 	if cfg.Branch == "" {
 		cfg.Branch = "main"
 	}
+	if cfg.ConnectionID > 0 {
+		conn, err := s.q.GetGitConnection(ctx, cfg.ConnectionID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		if err != nil {
+			return "", err
+		}
+		if _, err := repoPath(conn.Provider, cfg.Repo); err != nil {
+			return "", err
+		}
+	}
 
 	buf := make([]byte, 20)
 	if _, err := rand.Read(buf); err != nil {

@@ -71,6 +71,10 @@ func (a *API) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "project not found")
 		return
 	}
+	if errors.Is(err, backups.ErrBackupInProgress) {
+		writeError(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
 	if err != nil {
 		// The row records the failure; surface both.
 		writeJSON(w, http.StatusBadGateway, toBackupDTO(b))

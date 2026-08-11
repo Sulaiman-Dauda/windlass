@@ -23,7 +23,7 @@ export default function Setup() {
         }}
       >
         <div className="mb-7 flex flex-col items-center text-center">
-          <Logo size={46} />
+          <Logo size={46} className="text-accent" />
           <h1 className="mt-3.5 text-2xl font-bold tracking-[-0.02em]">Welcome to Windlass</h1>
           <p className="mt-1 max-w-[320px] text-sm text-fg3">
             Create the admin account. Your setup token is printed in the server log at first start.

@@ -52,11 +52,15 @@ export function Wordmark({
         height,
         alignItems: "center",
         flex: "none",
-        gap: height * 0.08,
         whiteSpace: "nowrap",
       }}
     >
-      <WindlassMark size={height} />
+      <span
+        aria-hidden="true"
+        style={{ display: "inline-flex", marginRight: -height * 0.04 }}
+      >
+        <WindlassMark size={height} />
+      </span>
       <span
         aria-hidden="true"
         style={{

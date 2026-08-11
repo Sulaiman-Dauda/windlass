@@ -124,12 +124,17 @@ func (q *Queries) GetBackupSchedule(ctx context.Context, projectID int64) (Backu
 
 const listBackupsForPrune = `-- name: ListBackupsForPrune :many
 SELECT id, project_id, kind, destination, path, size, status, error, created_at, finished_at FROM backups
-WHERE project_id = ? AND status = 'done' AND destination = 'local'
+WHERE project_id = ? AND status = 'done' AND destination = ?
 ORDER BY id DESC
 `
 
-func (q *Queries) ListBackupsForPrune(ctx context.Context, projectID int64) ([]Backup, error) {
-	rows, err := q.db.QueryContext(ctx, listBackupsForPrune, projectID)
+type ListBackupsForPruneParams struct {
+	ProjectID   int64
+	Destination string
+}
+
+func (q *Queries) ListBackupsForPrune(ctx context.Context, arg ListBackupsForPruneParams) ([]Backup, error) {
+	rows, err := q.db.QueryContext(ctx, listBackupsForPrune, arg.ProjectID, arg.Destination)
 	if err != nil {
 		return nil, err
 	}

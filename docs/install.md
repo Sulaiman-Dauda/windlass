@@ -55,6 +55,7 @@ After the HTTPS hostname works, firewall public port 8080 or add a systemd overr
 | `WINDLASS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 | `WINDLASS_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy admin API used for targeted route updates |
 | `WINDLASS_PANEL_UPSTREAM` | `127.0.0.1:8080` | Address Caddy dials for the Settings-managed panel route |
+| `WINDLASS_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128` | Proxy IPs/CIDRs allowed to supply client forwarding headers |
 | `WINDLASS_NO_SELF_UPDATE` | unset | Disable binary self-update when set |
 | `DOCKER_HOST` | Docker client default | Installer sets `tcp://127.0.0.1:2375` in systemd |
 

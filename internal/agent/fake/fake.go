@@ -363,7 +363,7 @@ func (s fsFake) EnsureProject(ctx context.Context, project string) (string, erro
 	return "/fake/projects/" + project, nil
 }
 
-func (s fsFake) ArchiveProject(ctx context.Context, project string) (agent.ArchiveInfo, error) {
+func (s fsFake) ArchiveProject(ctx context.Context, project string, extraFiles map[string][]byte) (agent.ArchiveInfo, error) {
 	if err := s.f.record(fmt.Sprintf("fs.archive(%s)", project), nil); err != nil {
 		return agent.ArchiveInfo{}, err
 	}
@@ -376,6 +376,10 @@ func (s fsFake) ArchiveProject(ctx context.Context, project string) (agent.Archi
 	snapshot := map[string][]byte{}
 	var size int64
 	for name, data := range files {
+		snapshot[name] = append([]byte(nil), data...)
+		size += int64(len(data))
+	}
+	for name, data := range extraFiles {
 		snapshot[name] = append([]byte(nil), data...)
 		size += int64(len(data))
 	}
