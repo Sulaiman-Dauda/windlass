@@ -1,19 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <!--
-    The w from the wordmark, and nothing else.
-
-    Three attempts at drawing the mechanism failed the only test that matters:
-    at 16 pixels a drum with cable on it resolved into a snail, then a battery.
-    A favicon gets a silhouette, so it has to be a shape that survives being
-    almost illegible, and the brief was that the name is the logo. This is the
-    wordmark's own w, so the small mark and the word are the same drawing
-    rather than two ideas sitting next to each other.
-
-    The cable stays as the rule beneath, which is the one thing that reads at
-    any size and ties it to the full lockup.
-  -->
-  <g fill="none" stroke="#0d6f97" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M4.5 7 L10 22.5 L16 12.5 L22 22.5 L27.5 7" stroke-width="4.2"/>
-    <path d="M4.5 27.5 H27.5" stroke-width="2.8"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>Windlass</title>
+  <g fill="#0d6f97">
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M2.75 5h5.1l3.55 15.9 2.76-10.3h3.68l2.76 10.3L24.15 5h5.1L24.1 27h-5.2L16 17.3 13.1 27H7.9L2.75 5Zm6.08 8.3.61 2.75h13.12l.61-2.75H8.83Z"/>
+    <circle cx="16" cy="14.675" r="1.55"/>
   </g>
 </svg>
