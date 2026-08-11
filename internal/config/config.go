@@ -43,7 +43,7 @@ func Load() (Config, error) {
 		LogLevel:       slog.LevelInfo,
 		PanelUpstream:  envOr("WINDLASS_PANEL_UPSTREAM", "127.0.0.1:8080"),
 		CaddyAdmin:     envOr("WINDLASS_CADDY_ADMIN", "http://127.0.0.1:2019"),
-		UpdateRepo:     envOr("WINDLASS_UPDATE_REPO", "windlass-dev/windlass"),
+		UpdateRepo:     envOr("WINDLASS_UPDATE_REPO", "Sulaiman-Dauda/windlass"),
 		UpdateToken:    os.Getenv("WINDLASS_UPDATE_TOKEN"),
 		TrustedProxies: envOr("WINDLASS_TRUSTED_PROXIES", "127.0.0.0/8,::1/128"),
 	}

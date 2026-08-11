@@ -1,5 +1,5 @@
 #!/bin/sh
-# Windlass installer — https://github.com/windlass-dev/windlass
+# Windlass installer — https://github.com/Sulaiman-Dauda/windlass
 #
 #   curl -fsSL https://get.windlass.sh | sh
 #
@@ -11,7 +11,7 @@
 #   --binary PATH    install a local binary instead of downloading (CI/testing)
 set -eu
 
-REPO="windlass-dev/windlass"
+REPO="Sulaiman-Dauda/windlass"
 DATA_DIR="/var/lib/windlass"
 BIN="/usr/local/bin/windlass"
 ASSUME_YES=0

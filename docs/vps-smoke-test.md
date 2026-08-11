@@ -6,7 +6,7 @@ server: one for Windlass and one for a test application.
 ## 1. Install and claim
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/windlass-dev/windlass/main/install/install.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/Sulaiman-Dauda/windlass/main/install/install.sh | sudo sh
 sudo systemctl is-active docker caddy windlass-docker-proxy windlass
 sudo journalctl -u windlass | grep setup_token
 curl -fsS http://127.0.0.1:8080/api/v1/system/health

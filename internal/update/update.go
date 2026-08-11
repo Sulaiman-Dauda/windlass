@@ -24,7 +24,7 @@ import (
 )
 
 // Repo is the GitHub repository releases are fetched from.
-var Repo = "windlass-dev/windlass"
+var Repo = "Sulaiman-Dauda/windlass"
 
 // Token optionally authenticates GitHub API requests. Required when Repo is
 // private; a fine-grained PAT with read access to the repository contents is

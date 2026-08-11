@@ -62,5 +62,5 @@ jobs:
           build-args: |
             VERSION=${{ github.ref_name }}
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/sulaiman-dauda/windlass:latest
+            ghcr.io/sulaiman-dauda/windlass:${{ github.ref_name }}

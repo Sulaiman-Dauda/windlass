@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/windlass-dev/windlass/internal/agent/fake"
 	"github.com/windlass-dev/windlass/internal/api"
@@ -200,6 +201,42 @@ func TestSPAFallback(t *testing.T) {
 		if !strings.Contains(strings.ToLower(rec.Body.String()), "<!doctype html>") {
 			t.Errorf("GET %s did not return HTML", path)
 		}
+	}
+}
+
+func TestSPACachePolicyRefreshesFrontendAfterUpdate(t *testing.T) {
+	dist := fstest.MapFS{
+		"index.html":             {Data: []byte(`<!doctype html><script src="/assets/index-abc123.js"></script>`)},
+		"assets/index-abc123.js": {Data: []byte(`console.log("current")`)},
+		"favicon.svg":            {Data: []byte(`<svg/>`)},
+	}
+	handler := spaHandler(dist)
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec
+	}
+	for _, path := range []string{"/", "/projects/foo"} {
+		rec := get(path)
+		if got := rec.Header().Get("Cache-Control"); got != "no-cache, no-store, must-revalidate" {
+			t.Errorf("GET %s Cache-Control = %q", path, got)
+		}
+	}
+
+	asset := get("/assets/index-abc123.js")
+	if asset.Code != http.StatusOK {
+		t.Fatalf("asset status = %d", asset.Code)
+	}
+	if got := asset.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Errorf("asset Cache-Control = %q", got)
+	}
+	if got := get("/favicon.svg").Header().Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("favicon Cache-Control = %q", got)
+	}
+
+	missing := get("/assets/index-from-previous-release.js")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing stale asset = %d, want 404", missing.Code)
 	}
 }
 

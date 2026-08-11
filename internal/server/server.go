@@ -174,11 +174,27 @@ func spaHandler(dist fs.FS) http.HandlerFunc {
 		path := strings.TrimPrefix(r.URL.Path, "/")
 		if path != "" {
 			if _, err := fs.Stat(dist, path); err == nil {
+				if strings.HasPrefix(path, "assets/") {
+					// Vite fingerprints production assets in their filenames, so
+					// they can be retained forever without serving stale code.
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				} else {
+					w.Header().Set("Cache-Control", "no-cache")
+				}
 				fileServer.ServeHTTP(w, r)
+				return
+			}
+			// A stale index may request an asset removed by a newer release.
+			// Do not answer with index.html under a JavaScript or CSS URL.
+			if strings.HasPrefix(path, "assets/") {
+				http.NotFound(w, r)
 				return
 			}
 		}
 		// Client-side route: serve the SPA entrypoint.
+		// It must be revalidated after every binary update so the browser
+		// discovers the new fingerprinted asset names immediately.
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	}

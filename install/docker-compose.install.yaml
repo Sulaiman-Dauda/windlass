@@ -35,7 +35,7 @@ services:
     networks: [control]
 
   windlass:
-    image: ghcr.io/windlass-dev/windlass:latest
+    image: ghcr.io/sulaiman-dauda/windlass:latest
     restart: unless-stopped
     ports:
       - "8080:8080"

@@ -5,7 +5,7 @@
 Run on a Linux x86_64 or arm64 server:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/windlass-dev/windlass/main/install/install.sh | sudo sh
+curl -fsSL https://raw.githubusercontent.com/Sulaiman-Dauda/windlass/main/install/install.sh | sudo sh
 ```
 
 The installer:
@@ -64,7 +64,7 @@ The Caddy admin API and Docker proxy must not be exposed publicly.
 ## Container installation
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/windlass-dev/windlass/main/install/docker-compose.install.yaml
+curl -fsSLO https://raw.githubusercontent.com/Sulaiman-Dauda/windlass/main/install/docker-compose.install.yaml
 docker compose -f docker-compose.install.yaml up -d
 ```
 
@@ -87,7 +87,7 @@ recreating the Windlass container.
 ## Bare binary
 
 ```sh
-wget https://github.com/windlass-dev/windlass/releases/latest/download/windlass-linux-amd64
+wget https://github.com/Sulaiman-Dauda/windlass/releases/latest/download/windlass-linux-amd64
 chmod +x windlass-linux-amd64
 sudo WINDLASS_DATA=/var/lib/windlass ./windlass-linux-amd64
 ```
