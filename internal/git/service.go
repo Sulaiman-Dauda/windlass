@@ -141,6 +141,18 @@ func (s *Service) connectionToken(ctx context.Context, id int64) (provider, toke
 	return conn.Provider, string(plain), nil
 }
 
+// ConnectionToken exposes a stored token to callers that need to reuse the same
+// authorisation for something else.
+//
+// The one caller is deriving a ghcr.io registry credential: GitHub's registry
+// takes a GitHub token as the password, so an operator who has already
+// connected their account should not have to find a second token for the same
+// thing. Exported deliberately and narrowly rather than left to a caller
+// reaching into the box itself.
+func (s *Service) ConnectionToken(ctx context.Context, id int64) (provider, token string, err error) {
+	return s.connectionToken(ctx, id)
+}
+
 // ListRepos returns the repositories a connection's token can access, for
 // the frontend repository picker.
 func (s *Service) ListRepos(ctx context.Context, connectionID int64) ([]Repo, error) {

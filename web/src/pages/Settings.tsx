@@ -582,6 +582,15 @@ function RegistryCredentials() {
     queryKey: ["registries"],
     queryFn: () => api("/registries"),
   });
+  // GitHub's registry takes a GitHub token, so an account that is already
+  // connected saves finding a second one. Offered rather than applied on
+  // connect: copying a repo-scoped token into the registry store without
+  // asking would leave a wider secret about than the job needs.
+  const gitConns = useQuery<Connection[]>({
+    queryKey: ["git", "connections"],
+    queryFn: () => api("/git/connections"),
+  });
+  const github = gitConns.data?.find((c) => c.provider === "github");
 
   const [host, setHost] = useState("ghcr.io");
   const [username, setUsername] = useState("");
@@ -606,6 +615,18 @@ function RegistryCredentials() {
     mutationFn: (id: number) => api(`/registries/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["registries"] }),
   });
+  const fromGit = useMutation({
+    mutationFn: (id: number) =>
+      api<{ credential: RegistryCredential | null }>(`/registries/from-git/${id}`, { method: "POST" }),
+    onSuccess: (res) => {
+      setWarning(
+        res.credential && !res.credential.verified_at
+          ? "Stored, but that connection's token cannot pull packages. Add read:packages to it, or enter a registry token below."
+          : null,
+      );
+      qc.invalidateQueries({ queryKey: ["registries"] });
+    },
+  });
 
   return (
     <Group title="Container registries">
@@ -619,6 +640,22 @@ function RegistryCredentials() {
             <Notice tone="err" onClose={() => setWarning(null)}>
               Saved, but signing in failed: {warning}
             </Notice>
+          </div>
+        )}
+
+        {github && (
+          <div className="mb-4 flex flex-wrap items-center gap-2.5">
+            <Button
+              variant="primary"
+              disabled={fromGit.isPending}
+              onClick={() => fromGit.mutate(github.id)}
+            >
+              <Icon name="github" size={16} />
+              {fromGit.isPending ? "Signing in…" : `Use ${github.name} for ghcr.io`}
+            </Button>
+            <span className="text-sm text-fg3">
+              Uses the GitHub connection you already have. Needs read:packages on that token.
+            </span>
           </div>
         )}
 

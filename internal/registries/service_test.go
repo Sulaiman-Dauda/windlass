@@ -238,3 +238,86 @@ func indexOf(haystack, needle string) int {
 	}
 	return -1
 }
+
+// FillFrom is what makes connecting a repository enough to pull its images.
+func TestFillFromStoresAndSignsIn(t *testing.T) {
+	s := testService(t)
+	docker := &recordingDocker{}
+
+	if err := s.FillFrom(context.Background(), "ghcr.io", "sulaiman", "gh-token", docker); err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	creds, _ := s.List(context.Background())
+	if len(creds) != 1 || creds[0].Username != "sulaiman" {
+		t.Fatalf("credential not stored: %+v", creds)
+	}
+	if creds[0].VerifiedAt == "" {
+		t.Error("a successful sign-in was not recorded")
+	}
+	if len(docker.logins) != 1 {
+		t.Errorf("host not signed in: %v", docker.logins)
+	}
+}
+
+// A connection token usually carries repo and not read:packages. The credential
+// is still stored so the screen can show "never signed in", which somebody can
+// act on; storing nothing looks like the feature never ran.
+func TestFillFromKeepsACredentialThatCannotSignIn(t *testing.T) {
+	s := testService(t)
+	docker := &recordingDocker{fail: errors.New("denied: read:packages scope required")}
+
+	if err := s.FillFrom(context.Background(), "ghcr.io", "sulaiman", "repo-only", docker); err != nil {
+		t.Fatalf("fill must not fail the connection: %v", err)
+	}
+
+	creds, _ := s.List(context.Background())
+	if len(creds) != 1 {
+		t.Fatalf("credential was not stored: %+v", creds)
+	}
+	if creds[0].VerifiedAt != "" {
+		t.Error("a failed sign-in was recorded as verified")
+	}
+}
+
+// The rule that stops a convenience becoming an outage: a derived token with the
+// wrong scope must never replace one somebody set by hand that works.
+func TestFillFromWillNotClobberAWorkingCredential(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+	docker := &recordingDocker{}
+
+	if _, err := s.Upsert(ctx, "ghcr.io", "deliberate", "good-token"); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := s.Apply(ctx, docker); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if err := s.FillFrom(ctx, "ghcr.io", "derived", "repo-only", docker); err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	creds, _ := s.List(ctx)
+	if creds[0].Username != "deliberate" {
+		t.Errorf("a working credential was replaced by a derived one: %+v", creds[0])
+	}
+}
+
+// One that never worked is fair game: it is not protecting anything.
+func TestFillFromReplacesACredentialThatNeverWorked(t *testing.T) {
+	s := testService(t)
+	ctx := context.Background()
+
+	if _, err := s.Upsert(ctx, "ghcr.io", "stale", "old"); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := s.FillFrom(ctx, "ghcr.io", "fresh", "new", &recordingDocker{}); err != nil {
+		t.Fatalf("fill: %v", err)
+	}
+
+	creds, _ := s.List(ctx)
+	if creds[0].Username != "fresh" {
+		t.Errorf("username = %q, want fresh", creds[0].Username)
+	}
+}

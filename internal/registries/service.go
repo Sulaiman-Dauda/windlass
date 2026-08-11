@@ -141,6 +141,41 @@ func (s *Service) Apply(ctx context.Context, docker Registrar) error {
 	return nil
 }
 
+// FillFrom stores a credential derived from something else the operator has
+// already connected, and signs the host in with it.
+//
+// A GitHub connection is already most of a ghcr.io credential: the registry
+// takes a GitHub token as the password. Asking somebody to paste a second token
+// for the same account is friction with nothing behind it.
+//
+// It refuses to overwrite a credential that has actually worked. A connection
+// token usually carries `repo` and not `read:packages`, so deriving one can
+// easily produce a credential that cannot pull, and replacing a working one
+// with that would turn a convenience into an outage.
+//
+// A derived credential that fails to sign in is still stored, deliberately. The
+// screen shows "never signed in" against it, which is a visible thing somebody
+// can fix, where storing nothing looks like the feature never ran.
+func (s *Service) FillFrom(ctx context.Context, host, username, secret string, docker Registrar) error {
+	host = NormaliseHost(host)
+	existing, err := s.q.GetRegistryCredential(ctx, host)
+	if err == nil && existing.VerifiedAt.Valid {
+		return nil
+	}
+
+	if _, err := s.Upsert(ctx, host, username, secret); err != nil {
+		return err
+	}
+	// Reported, not returned: connecting a repository must not fail because the
+	// token happens not to carry read:packages.
+	if err := docker.RegistryLogin(ctx, host, username, secret); err != nil {
+		s.logger.Info("derived registry credential cannot sign in yet",
+			"host", host, "error", err)
+		return nil
+	}
+	return s.q.MarkRegistryVerified(ctx, host)
+}
+
 // Missing reports registries an image list needs that have no credential.
 //
 // Used to say "this project pulls from ghcr.io and nothing here can log in"

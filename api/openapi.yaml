@@ -636,6 +636,20 @@ paths:
             Saved. Carries a warning when the credential was stored but the
             login did not succeed.
 
+  /registries/from-git/{id}:
+    post:
+      summary: >-
+        Fill in a ghcr.io credential from an existing GitHub connection (admin).
+        An explicit action, not something that happens when a repository is
+        connected.
+      operationId: registryCredentialFromGit
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: >-
+            Stored. verified_at is empty when the connection's token cannot pull
+            packages, which the screen shows as never signed in.
+
   /registries/{id}:
     delete:
       summary: Delete a registry credential (admin)

@@ -15,6 +15,61 @@ func (a *API) registryRoutes(r chi.Router) {
 	r.Get("/", a.handleListRegistryCredentials)
 	r.Put("/", a.handleSaveRegistryCredential)
 	r.Delete("/{id}", a.handleDeleteRegistryCredential)
+	r.Post("/from-git/{id}", a.handleRegistryFromGit)
+}
+
+// handleRegistryFromGit fills in a ghcr.io credential from an existing GitHub
+// connection.
+//
+// Deliberately an action somebody takes, not something that happens when a
+// repository is connected. Silently copying a repo-scoped token into the
+// registry store would leave a wider secret lying about than the job needs, in
+// a second place, drifting out of date the moment the original is rotated. One
+// click with the account already filled in is the convenience; doing it behind
+// somebody's back is not.
+func (a *API) handleRegistryFromGit(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid id")
+		return
+	}
+
+	provider, token, err := a.Git.ConnectionToken(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "connection not found")
+		return
+	}
+	if provider != "github" {
+		writeError(w, http.StatusBadRequest, "unsupported",
+			"only a GitHub connection can be used for ghcr.io")
+		return
+	}
+
+	login, err := auth.GitHubLogin(r.Context(), token)
+	if err != nil || login == "" {
+		writeError(w, http.StatusBadGateway, "provider_error",
+			"could not read the GitHub account for this connection")
+		return
+	}
+
+	if err := a.Registries.FillFrom(r.Context(), "ghcr.io", login, token, a.Agent.Docker()); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+
+	user, _ := auth.UserFrom(r.Context())
+	a.Audit.Write(r.Context(), user.ID, "registry.credential_from_git", "registry", "ghcr.io", remoteIP(r), nil)
+
+	creds, _ := a.Registries.List(r.Context())
+	for _, c := range creds {
+		if c.Host == "ghcr.io" {
+			// verified_at empty means the token cannot pull packages, which the
+			// screen shows as "never signed in" rather than pretending it worked.
+			writeJSON(w, http.StatusOK, map[string]any{"credential": c})
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"credential": nil})
 }
 
 func (a *API) handleListRegistryCredentials(w http.ResponseWriter, r *http.Request) {
