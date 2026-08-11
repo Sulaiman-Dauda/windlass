@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
 import { useLogin } from "../api/auth";
-import { Logo } from "../ui/Logo";
+import { Wordmark } from "../ui/Logo";
 import { Button, btn } from "../ui/Button";
 import { Input, Field } from "../ui/Field";
 import { Icon } from "../ui/Icon";
@@ -33,8 +33,7 @@ export default function Login() {
         }}
       >
         <div className="mb-7 flex flex-col items-center text-center">
-          <Logo size={46} />
-          <h1 className="mt-3.5 text-2xl font-bold tracking-[-0.02em]">Windlass</h1>
+          <Wordmark height={34} className="text-accent" />
           <p className="mt-1 text-sm text-fg3">Sign in to your server</p>
         </div>
 

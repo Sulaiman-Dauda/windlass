@@ -2,7 +2,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useLogout, type User } from "../api/auth";
-import { Logo } from "../ui/Logo";
+import { Wordmark } from "../ui/Logo";
 import { Icon, type IconName } from "../ui/Icon";
 import { ThemeToggle } from "../ui/ThemeToggle";
 import { cn } from "../ui/cn";
@@ -32,8 +32,7 @@ export default function Layout({ user }: { user: User }) {
     <div className="flex min-h-screen bg-canvas text-fg">
       <aside className="sticky top-0 flex h-screen w-[244px] flex-none flex-col border-r border-chrome-edge bg-chrome p-3 backdrop-blur-xl">
         <div className="flex items-center gap-2.5 px-2 pb-1 pt-2">
-          <Logo size={30} />
-          <span className="text-md font-bold tracking-[-0.02em]">Windlass</span>
+          <Wordmark height={19} className="text-fg" />
         </div>
 
         <nav className="mt-5 flex flex-1 flex-col gap-0.5">
