@@ -28,7 +28,7 @@ func TestDeleteObjectSignsAndDeletesRequestedKey(t *testing.T) {
 	if method != http.MethodDelete {
 		t.Fatalf("method = %q, want DELETE", method)
 	}
-	if path != "/backups/windlass%2Fproject%2Farchive%20name.tar.gz" {
+	if path != "/backups/windlass/project/archive%20name.tar.gz" {
 		t.Fatalf("escaped path = %q", path)
 	}
 	if !strings.HasPrefix(authorization, "AWS4-HMAC-SHA256 Credential=access/") {

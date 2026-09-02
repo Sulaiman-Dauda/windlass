@@ -46,7 +46,18 @@ func newS3(cfg S3Config) *s3Client {
 }
 
 func (c *s3Client) objectURL(key string) string {
-	return strings.TrimSuffix(c.cfg.Endpoint, "/") + "/" + c.cfg.Bucket + "/" + url.PathEscape(c.cfg.KeyPrefix+key)
+	return strings.TrimSuffix(c.cfg.Endpoint, "/") + "/" + c.cfg.Bucket + "/" + escapeS3Key(c.cfg.KeyPrefix+key)
+}
+
+// escapeS3Key encodes each path segment individually so that the / separators
+// are preserved. url.PathEscape encodes the slash itself, which breaks SigV4
+// signing against S3-compatible backends.
+func escapeS3Key(key string) string {
+	escaped := strings.Split(key, "/")
+	for i, part := range escaped {
+		escaped[i] = url.PathEscape(part)
+	}
+	return strings.Join(escaped, "/")
 }
 
 // PutFile uploads a local file.
