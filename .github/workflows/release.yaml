@@ -52,6 +52,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Only the runtime stage's apk install needs emulation now.
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v4
       - name: Build and push image
         uses: docker/build-push-action@v7
@@ -61,6 +63,7 @@ jobs:
           push: true
           build-args: |
             VERSION=${{ github.ref_name }}
+            BINARY_STAGE=prebuilt
           tags: |
             ghcr.io/sulaiman-dauda/windlass:latest
             ghcr.io/sulaiman-dauda/windlass:${{ github.ref_name }}
