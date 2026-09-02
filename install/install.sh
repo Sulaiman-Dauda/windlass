@@ -176,7 +176,9 @@ Requires=docker.service
 [Service]
 Type=simple
 ExecStartPre=-/usr/bin/docker rm -f windlass-docker-proxy
+ExecStartPre=-/usr/bin/docker pull ghcr.io/tecnativa/docker-socket-proxy:v0.4.2
 ExecStart=/usr/bin/docker run --rm --name windlass-docker-proxy --cap-drop=ALL --security-opt=no-new-privileges -p 127.0.0.1:2375:2375 -v /var/run/docker.sock:/var/run/docker.sock:ro -e POST=1 -e BUILD=1 -e CONTAINERS=1 -e ALLOW_START=1 -e ALLOW_STOP=1 -e ALLOW_RESTARTS=1 -e EVENTS=1 -e EXEC=1 -e IMAGES=1 -e INFO=1 -e NETWORKS=1 -e SYSTEM=1 -e VERSION=1 -e VOLUMES=1 ghcr.io/tecnativa/docker-socket-proxy:v0.4.2
+ExecStartPost=/bin/sh -c 'timeout 90 sh -c "until /usr/bin/docker -H tcp://127.0.0.1:2375 version >/dev/null 2>&1; do sleep 1; done"'
 ExecStop=-/usr/bin/docker stop -t 10 windlass-docker-proxy
 Restart=always
 RestartSec=2

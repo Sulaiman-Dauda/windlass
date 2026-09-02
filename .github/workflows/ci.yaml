@@ -166,7 +166,11 @@ jobs:
           sudo sh install/install.sh --yes --no-caddy --binary bin/windlass-linux-amd64
       - name: Verify service and first-run flow
         run: |
-          sleep 2
+          # The proxy unit pulls its image on first start, so the port is not
+          # up the instant systemd calls the unit active. Wait for the API to
+          # answer instead of sleeping a fixed 2 seconds.
+          timeout 120 sh -c 'until curl -fsS -o /dev/null http://127.0.0.1:2375/version; do sleep 1; done'
+          timeout 60 sh -c 'until curl -fsS -o /dev/null http://localhost:8080/api/v1/system/health; do sleep 1; done'
           sudo systemctl is-active windlass-docker-proxy
           sudo systemctl is-active windlass
           curl -fsS http://127.0.0.1:2375/version | grep -q ApiVersion
