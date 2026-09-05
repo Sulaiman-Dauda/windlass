@@ -1,7 +1,7 @@
 #!/bin/sh
 # Windlass installer — https://github.com/Sulaiman-Dauda/windlass
 #
-#   curl -fsSL https://get.windlass.sh | sh
+#   curl -fsSL https://get.windlass.run | sudo sh
 #
 # Flags:
 #   --yes            non-interactive (assume yes)

@@ -5,7 +5,7 @@
 Run on a Linux x86_64 or arm64 server:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Sulaiman-Dauda/windlass/main/install/install.sh | sudo sh
+curl -fsSL https://get.windlass.run | sudo sh
 ```
 
 The installer:

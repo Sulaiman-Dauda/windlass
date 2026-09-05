@@ -62,7 +62,8 @@ jobs:
             --title "Windlass $VERSION" \
             --notes "Automated release from ${GITHUB_SHA::7}: $(git log -1 --pretty=%s)" \
             --latest \
-            dist/windlass-linux-amd64 dist/windlass-linux-arm64 dist/checksums.txt
+            dist/windlass-linux-amd64 dist/windlass-linux-arm64 dist/checksums.txt \
+            install/install.sh
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
