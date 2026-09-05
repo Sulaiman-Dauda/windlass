@@ -1,4 +1,4 @@
-// Package local is the in-process implementation of agent.Agent — the only
+// Package local is the in-process implementation of agent.Agent, the only
 // package in Windlass allowed to touch Docker, Caddy, or the projects
 // filesystem directly (enforced by depguard). When the node agent is split
 // into its own binary, this package becomes its core and a gRPC/mTLS client

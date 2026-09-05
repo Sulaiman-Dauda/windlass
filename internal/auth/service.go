@@ -62,7 +62,7 @@ func NewService(ctx context.Context, q *db.Queries, key []byte, box SecretBox, l
 		s.setupToken = hex.EncodeToString(buf)
 		// Printed to the log on purpose: reading the server log proves host
 		// access, which is the trust anchor for claiming a fresh instance.
-		logger.Info("no users exist yet — claim this instance in the web UI",
+		logger.Info("no users exist yet; claim this instance in the web UI",
 			"setup_token", s.setupToken)
 	}
 	return s, nil

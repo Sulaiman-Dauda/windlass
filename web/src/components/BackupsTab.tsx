@@ -51,7 +51,7 @@ export default function BackupsTab({ project }: { project: string }) {
     <div className="max-w-3xl">
       <div className="flex items-start justify-between gap-4">
         <p className="text-sm leading-relaxed text-fg2">
-          Backups archive the project directory (compose, env, configs — plus
+          Backups archive the project directory (compose, env, configs, plus
           a database dump for template databases). Restore replaces the
           directory; deploy afterwards to apply it.
         </p>

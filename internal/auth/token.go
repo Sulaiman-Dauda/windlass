@@ -17,7 +17,7 @@ import (
 // only claim of substance is the session id; every request still hits the
 // sessions table, so deleting the row kills the session immediately. The JWT
 // layer exists to make cookies self-authenticating (tamper-evident) before
-// the database is consulted. HMAC is hand-rolled on stdlib per principle 10 —
+// the database is consulted. HMAC is hand-rolled on stdlib per principle 10,
 // a JWT dependency isn't justified for sign+verify of one claim shape.
 
 type Claims struct {

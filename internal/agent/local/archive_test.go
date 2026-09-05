@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Real tar.gz round trip on the actual filesystem — pure Go, runs anywhere.
+// Real tar.gz round trip on the actual filesystem, pure Go, runs anywhere.
 func TestArchiveRestoreRoundTrip(t *testing.T) {
 	f, _ := newFS(t)
 	ctx := context.Background()

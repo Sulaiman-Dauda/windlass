@@ -1,6 +1,6 @@
 // Package plugins runs optional extensions as external processes. A plugin
 // is a directory under DATA_DIR/plugins/<name>/ containing plugin.json and
-// an executable. Disabled plugins are simply not running — zero RAM, zero
+// an executable. Disabled plugins are simply not running, zero RAM, zero
 // goroutines (principle: everything optional costs nothing when off).
 //
 // Contract: Windlass starts the executable with WINDLASS_PLUGIN_ADDR set to

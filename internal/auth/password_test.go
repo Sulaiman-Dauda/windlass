@@ -26,7 +26,7 @@ func TestHashesAreSalted(t *testing.T) {
 	a, _ := HashPassword("same")
 	b, _ := HashPassword("same")
 	if a == b {
-		t.Error("identical hashes for identical passwords — missing salt")
+		t.Error("identical hashes for identical passwords, missing salt")
 	}
 }
 

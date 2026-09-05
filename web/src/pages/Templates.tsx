@@ -39,7 +39,7 @@ export default function Templates() {
     <Page title="Templates" subtitle="one-click apps & databases">
       <p className="mb-6 max-w-[68ch] text-sm leading-relaxed text-fg2">
         Each template becomes an ordinary Compose project with generated credentials in its
-        Environment tab — no proprietary formats, nothing to lock you in. Apps are served over
+        Environment tab. No proprietary formats, nothing to lock you in. Apps are served over
         HTTPS on a domain you choose.
       </p>
 

@@ -1,7 +1,7 @@
 {
   "key": "pocketbase",
   "name": "PocketBase",
-  "description": "Open-source backend in one file — auth, database, and file storage — served over HTTPS on your domain",
+  "description": "Open-source backend in one file: auth, database, and file storage, served over HTTPS on your domain",
   "default_port": 0,
   "route": { "service": "pocketbase", "container_port": 8090 },
   "env": []

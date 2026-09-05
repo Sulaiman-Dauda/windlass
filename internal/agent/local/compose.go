@@ -184,7 +184,7 @@ func (c composeLocal) Config(ctx context.Context, project string) (agent.Resolve
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		// compose config failing means the file is invalid — surface its
+		// compose config failing means the file is invalid, surface its
 		// message, which is the useful part.
 		return agent.ResolvedConfig{}, fmt.Errorf("compose file invalid: %s", strings.TrimSpace(stderr.String()))
 	}

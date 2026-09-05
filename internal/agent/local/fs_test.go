@@ -68,10 +68,10 @@ func TestFSPathTraversalBlocked(t *testing.T) {
 	}
 	for _, rel := range bad {
 		if _, err := f.ReadFile(ctx, "crm", rel); err == nil {
-			t.Errorf("ReadFile(%q) succeeded — traversal not blocked", rel)
+			t.Errorf("ReadFile(%q) succeeded, traversal not blocked", rel)
 		}
 		if err := f.WriteFile(ctx, "crm", rel, []byte("x"), 0o644); err == nil {
-			t.Errorf("WriteFile(%q) succeeded — traversal not blocked", rel)
+			t.Errorf("WriteFile(%q) succeeded, traversal not blocked", rel)
 		}
 	}
 

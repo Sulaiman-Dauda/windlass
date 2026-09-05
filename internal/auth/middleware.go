@@ -15,7 +15,7 @@ const (
 )
 
 // Middleware resolves the session cookie (if any) and stores the user in the
-// request context. It never rejects — RequireAuth does that — so public
+// request context. It never rejects, RequireAuth does that, so public
 // endpoints can still see who is asking.
 func Middleware(s *Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

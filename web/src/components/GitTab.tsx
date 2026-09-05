@@ -142,7 +142,7 @@ export default function GitTab({ project }: { project: string }) {
         )}
         {connectionId > 0 && repos.isError && (
           <p className="text-xs text-fg3">
-            Could not list repositories for this connection — enter the clone
+            Could not list repositories for this connection. Enter the clone
             URL below.
           </p>
         )}
@@ -192,7 +192,7 @@ export default function GitTab({ project }: { project: string }) {
         <div className="mt-6 rounded-[10px] bg-ok-soft px-4 py-3.5 text-sm text-ok">
           <p className="font-semibold">Auto-deploy is live</p>
           <p className="mt-1.5">
-            The webhook was registered on the repository for you — every push
+            The webhook was registered on the repository for you. Every push
             to <span className="font-mono text-xs">{branch}</span> now deploys
             automatically. Nothing else to set up.
           </p>
@@ -211,7 +211,7 @@ export default function GitTab({ project }: { project: string }) {
             </div>
             <div>
               <dt className="text-xs font-semibold text-fg3">
-                Secret (shown once — GitHub: webhook secret · GitLab: secret token)
+                Secret (shown once. GitHub: webhook secret · GitLab: secret token)
               </dt>
               <dd className="font-mono text-xs text-fg2 break-all">
                 {result.webhook_secret}
