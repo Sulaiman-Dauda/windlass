@@ -4,6 +4,19 @@ Windlass is a lightweight, self-hosted Docker Compose control plane. It provides
 Git deployments, domains with HTTPS, logs, terminals, metrics, backups, templates, users,
 and updates without replacing Docker Compose with a proprietary runtime.
 
+![The Windlass dashboard](docs/screenshots/dashboard-light.png)
+
+Stop Windlass and your sites keep serving. The containers are ordinary Compose containers
+with a restart policy, and Caddy keeps the routes it already has. There is nothing to
+migrate off if you change your mind: see [life without the panel](docs/life-without-the-panel.md).
+
+```sh
+curl -fsSL https://get.windlass.run | sudo sh
+```
+
+More screens in [docs/screenshots](docs/screenshots/), and the full guides at
+[windlass.run](https://windlass.run).
+
 ## Source-of-truth model
 
 Application configuration lives under the projects directory:
