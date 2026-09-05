@@ -50,9 +50,9 @@ docker compose up -d db
 docker compose exec -T db psql -U postgres < dump.sql
 ```
 
-This is the conservative reading of what a restore button should do. Silently replaying a
-dump over a live database is the kind of convenience that eventually destroys someone's
-production data, so Windlass restores the files and leaves the decision with you.
+This is deliberate. A restore that replayed a dump automatically would overwrite whatever
+the database currently holds, with no way to inspect it first, so Windlass restores the
+files and leaves that step to you.
 
 ## What is not in a project backup
 

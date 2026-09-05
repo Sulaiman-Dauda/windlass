@@ -30,6 +30,8 @@ When it finishes it prints the URL to open, which is the server's IP on port 808
 
 ## 2. Claim the instance
 
+![The Windlass dashboard, showing host CPU, memory and disk above the project list](./screenshots/dashboard-light.png)
+
 Open that URL. The first visit asks you to create the first account, and only the first
 visit: once an account exists the setup route stops responding, so an instance cannot be
 claimed twice by whoever finds it next.
@@ -82,7 +84,7 @@ left exactly as they are. See [Domains and HTTPS](./domains-and-https.md).
 
 ## 6. Prove it does not depend on the panel
 
-This is the part worth doing once, on your own server, so you believe it later:
+Worth doing once on your own server, because it is the claim everything else rests on:
 
 ```sh
 sudo systemctl stop windlass

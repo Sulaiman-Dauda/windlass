@@ -4,6 +4,8 @@ Where to look first, and the failures that are most often misread.
 
 ## Reading the logs
 
+![The Logs tab, streaming container output](./screenshots/logs-light.png)
+
 ```sh
 sudo journalctl -u windlass -f
 sudo journalctl -u windlass -n 200 --no-pager
@@ -55,8 +57,7 @@ your server, which is its own configuration question.
 
 ## The panel is unreachable but the sites are fine
 
-Working as designed, and worth recognising rather than panicking about. The panel is one
-process. Your containers are ordinary Compose containers with a restart policy, and Caddy
+This is expected. The panel is one process. Your containers are ordinary Compose containers with a restart policy, and Caddy
 serves the routes it already has.
 
 ```sh

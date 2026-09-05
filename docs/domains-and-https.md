@@ -6,6 +6,8 @@ to remember.
 
 ## Adding a domain
 
+![The Domains tab: a hostname, service and port form above an active route](./screenshots/domains-light.png)
+
 In the project's Domains tab, enter the hostname and choose the service and container port
 to route to. The route is live as soon as it is written; the certificate follows within a
 few seconds of the first request to that hostname.

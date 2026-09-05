@@ -13,6 +13,8 @@ Windlass follows from it.
 The default projects directory is `/var/lib/windlass/projects`, which you can move with
 `WINDLASS_PROJECTS`. See the [configuration reference](./configuration.md).
 
+![A project overview: services with state, health, image and resource limits](./screenshots/project-light.png)
+
 ## The filesystem wins
 
 Windlass runs the real `docker compose` CLI in that directory. It does not parse your
@@ -91,6 +93,8 @@ A deployment is only reported succeeded once these pass. See
 [Deployments](./deployments.md) for how that fits into the sequence.
 
 ## Templates
+
+![The Templates screen: one-click apps and databases](./screenshots/templates-light.png)
 
 Templates create ordinary projects. A template writes a normal `compose.yaml` and a normal
 `.env` with generated credentials, then gets out of the way. The generated file even says
