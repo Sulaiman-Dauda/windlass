@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -49,15 +48,27 @@ func (c *s3Client) objectURL(key string) string {
 	return strings.TrimSuffix(c.cfg.Endpoint, "/") + "/" + c.cfg.Bucket + "/" + escapeS3Key(c.cfg.KeyPrefix+key)
 }
 
-// escapeS3Key encodes each path segment individually so that the / separators
-// are preserved. url.PathEscape encodes the slash itself, which breaks SigV4
-// signing against S3-compatible backends.
+// escapeS3Key percent-encodes an S3 object key for use in a request URL while
+// keeping "/" as a literal path separator. SigV4 canonicalisation requires every
+// byte outside A-Za-z0-9-_.~ to be percent-encoded; url.PathEscape leaves
+// sub-delims such as "&", "=", and "+" alone, which produces SignatureDoesNotMatch
+// against S3-compatible backends when those characters appear in a key (or key_prefix).
 func escapeS3Key(key string) string {
-	escaped := strings.Split(key, "/")
-	for i, part := range escaped {
-		escaped[i] = url.PathEscape(part)
+	var b strings.Builder
+	b.Grow(len(key) + 8)
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		switch {
+		case c == '/':
+			b.WriteByte(c)
+		case (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '.' || c == '~':
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
 	}
-	return strings.Join(escaped, "/")
+	return b.String()
 }
 
 // PutFile uploads a local file.
