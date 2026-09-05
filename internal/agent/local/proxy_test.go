@@ -260,18 +260,19 @@ func TestInstallHandlesServerWithoutRoutesArray(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name     string
-		routes   string // what GET .../routes returns
-		wantPath string
-		wantList bool // body is the whole array rather than one route
+		name       string
+		routes     string // what GET .../routes returns
+		wantMethod string
+		wantPath   string
+		wantList   bool // body is the whole array rather than one route
 	}{
-		{"no routes key", "null", "/config/apps/http/servers/tlssrv/routes", true},
-		{"empty routes array", "[]", "/config/apps/http/servers/tlssrv/routes/0", false},
-		{"existing routes", `[{"@id":"user"}]`, "/config/apps/http/servers/tlssrv/routes/0", false},
+		{"no routes key", "null", http.MethodPut, "/config/apps/http/servers/tlssrv/routes", true},
+		{"empty routes array", "[]", http.MethodPost, "/config/apps/http/servers/tlssrv/routes", false},
+		{"existing routes", `[{"@id":"user"}]`, http.MethodPut, "/config/apps/http/servers/tlssrv/routes/0", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var gotPath string
+			var gotMethod, gotPath string
 			var gotBody []byte
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
@@ -283,8 +284,8 @@ func TestInstallHandlesServerWithoutRoutesArray(t *testing.T) {
 					io.WriteString(w, tc.routes)
 				case r.Method == http.MethodGet:
 					io.WriteString(w, "{}")
-				case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/servers/tlssrv/routes"):
-					gotPath = r.URL.Path
+				case (r.Method == http.MethodPut || r.Method == http.MethodPost) && strings.Contains(r.URL.Path, "/servers/tlssrv/routes"):
+					gotMethod, gotPath = r.Method, r.URL.Path
 					gotBody, _ = io.ReadAll(r.Body)
 					w.WriteHeader(http.StatusOK)
 				default:
@@ -300,8 +301,8 @@ func TestInstallHandlesServerWithoutRoutesArray(t *testing.T) {
 			if err := p.install(context.Background(), obj); err != nil {
 				t.Fatal(err)
 			}
-			if gotPath != tc.wantPath {
-				t.Errorf("wrote to %q, want %q", gotPath, tc.wantPath)
+			if gotMethod != tc.wantMethod || gotPath != tc.wantPath {
+				t.Errorf("wrote %s %q, want %s %q", gotMethod, gotPath, tc.wantMethod, tc.wantPath)
 			}
 			isList := len(bytes.TrimSpace(gotBody)) > 0 && bytes.TrimSpace(gotBody)[0] == '['
 			if isList != tc.wantList {
