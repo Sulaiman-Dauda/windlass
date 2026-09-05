@@ -10,6 +10,8 @@ env render -> validate -> sync -> pull -> build -> up -> verify
 The log streams to the Deployments tab as it goes, and is kept afterwards, so a
 deployment that failed last Tuesday still has its output.
 
+![The Deployments tab: numbered history down the left, streaming deployment log on the right](./screenshots/deployments-light.png)
+
 ## The steps
 
 **env render** writes `.env` from stored values. **validate** runs `docker compose config`

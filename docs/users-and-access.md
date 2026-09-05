@@ -6,8 +6,8 @@ The first visit to a new install creates the first account. After that the setup
 stops responding, so an instance cannot be claimed a second time by whoever reaches it
 next.
 
-If you install Windlass and leave it, claim it immediately. An unclaimed panel on a public
-IP is an open invitation.
+Claim a new install immediately. Until the first account exists, anyone who reaches the
+panel can create it.
 
 ## Roles
 
@@ -26,14 +26,15 @@ control is not a permission and cannot be worked around by sending the request d
 Deleting a project requires re-entering your password, unless the account signs in only
 through OAuth.
 
+![The Settings screen, where accounts, sign-in and platform options are managed](./screenshots/settings-light.png)
+
 ## Two-factor authentication
 
 TOTP is available to every account and set up from Settings: scan the QR code, confirm a
 code, done. It is standard RFC 6238, so any authenticator works.
 
-Turn it on for administrators on any panel reachable from the internet. It is not forced,
-because forcing it on a single-operator install on a private network is friction with no
-attacker to stop.
+Turn it on for administrators on any panel reachable from the internet. It is not
+mandatory, because a single-operator install on a private network gains little from it.
 
 ## Signing in with GitHub
 
@@ -53,6 +54,7 @@ someone out actually ends their session rather than waiting for a token to expir
 Give the panel a hostname under Settings so it is served over HTTPS rather than on
 `:8080`. See [Domains and HTTPS](./domains-and-https.md).
 
-Windlass reaches Docker through a restricted socket proxy on loopback and its service user
-is deliberately not in the `docker` group. That boundary is the reason a panel compromise
-is not automatically a root compromise, so do not "simplify" it away.
+Windlass reaches Docker through a restricted socket proxy on loopback, and its service
+user is deliberately not in the `docker` group. Membership of that group is equivalent to
+root, so the proxy is what keeps a compromise of the panel from becoming a compromise of
+the host. Adding the user to the group removes that separation.
