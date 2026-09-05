@@ -65,7 +65,7 @@ services:
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Sulaiman-Dauda/windlass/main/install/install.sh | sudo sh
+curl -fsSL https://get.windlass.run | sudo sh
 ```
 
 Claim the instance using the one-time token in `journalctl -u windlass`, then open
