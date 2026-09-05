@@ -473,6 +473,12 @@ func (p proxyLocal) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {
 	var out []agent.Route
 	for _, h := range obj.Handle {
 		for _, r := range h.Routes {
+			// The HTTP->HTTPS redirect is an internal child of the subroute, not
+			// a domain Windlass is routing. Callers count these to decide what
+			// is installed, so reporting it would overstate the set by one.
+			if r.ID == httpsRedirectID {
+				continue
+			}
 			route := agent.Route{ID: r.ID, TLS: true}
 			if len(r.Match) > 0 && len(r.Match[0].Host) > 0 {
 				route.Hostname = r.Match[0].Host[0]
