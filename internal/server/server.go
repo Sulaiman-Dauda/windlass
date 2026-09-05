@@ -118,7 +118,7 @@ var inlineScriptRE = regexp.MustCompile(`(?is)<script(?:\s[^>]*)?>(.*?)</script>
 
 // inlineScriptHashes returns 'sha256-…' sources for every inline script in
 // index.html. The SPA runs one before first paint to apply the saved theme,
-// and script-src 'self' alone blocks it — hashing what is actually served
+// and script-src 'self' alone blocks it, hashing what is actually served
 // keeps the policy strict without the hash drifting when the script changes.
 func inlineScriptHashes(dist fs.FS) []string {
 	index, err := fs.ReadFile(dist, "index.html")

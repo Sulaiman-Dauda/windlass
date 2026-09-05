@@ -113,7 +113,7 @@ func (a *API) handleGitHubAppCreate(w http.ResponseWriter, r *http.Request) {
 
 	// This one response needs what the global policy forbids: an inline
 	// script (to auto-submit) and a cross-origin form POST (to GitHub).
-	// Override the policy here rather than loosening it panel-wide — the
+	// Override the policy here rather than loosening it panel-wide, the
 	// script is pinned to a per-response nonce and the form target to
 	// github.com, so nothing else gains permission.
 	nonceBuf := make([]byte, 16)

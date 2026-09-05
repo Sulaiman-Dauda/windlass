@@ -74,6 +74,6 @@ func TestUniqueNonces(t *testing.T) {
 	a, _ := box.Encrypt([]byte("same"))
 	b, _ := box.Encrypt([]byte("same"))
 	if bytes.Equal(a, b) {
-		t.Error("identical ciphertexts for identical plaintexts — nonce reuse")
+		t.Error("identical ciphertexts for identical plaintexts, nonce reuse")
 	}
 }

@@ -1,7 +1,7 @@
 package auth
 
 // OAuth sign-in for GitHub and Google, hand-rolled on net/http: the flow is
-// three requests (authorize redirect, token exchange, profile fetch) — an
+// three requests (authorize redirect, token exchange, profile fetch), an
 // OAuth library is not justified (principle 10).
 //
 // Policy: OAuth only signs in EXISTING users, matched by verified email.

@@ -353,7 +353,7 @@ func (s *Service) Run(ctx context.Context) {
 		case ev := <-busCh:
 			switch ev.Type {
 			case "deployment.created", "deployment.step":
-				// mid-deploy noise — the final sync happens on done
+				// mid-deploy noise, the final sync happens on done
 			default:
 				s.RequestSync()
 			}

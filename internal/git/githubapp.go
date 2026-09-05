@@ -3,7 +3,7 @@ package git
 // GitHub App support: the two-click manifest flow creates an app whose
 // credentials arrive by API instead of copy-paste, installations act as git
 // connections (repo access scoped to what the user picked), and the app's
-// own webhook delivers push events for every covered repo — no per-repo
+// own webhook delivers push events for every covered repo, no per-repo
 // webhook registration at all.
 //
 // Hand-rolled on net/http + crypto like the rest of the git/auth code: the

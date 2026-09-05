@@ -121,7 +121,7 @@ func (a *API) handleDeploymentEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// Project actions (start/stop/restart) — direct compose operations, no
+// Project actions (start/stop/restart), direct compose operations, no
 // deployment record; these don't change what is deployed, only whether it
 // runs.
 
@@ -168,7 +168,7 @@ func (a *API) handleProjectServices(w http.ResponseWriter, r *http.Request) {
 	}
 	statuses, err := a.Agent.Compose().PS(r.Context(), name)
 	if err != nil {
-		// Compose unavailable or never deployed — an empty list with a note
+		// Compose unavailable or never deployed, an empty list with a note
 		// beats a 500 (graceful degradation).
 		writeJSON(w, http.StatusOK, map[string]any{"services": []any{}, "note": err.Error()})
 		return

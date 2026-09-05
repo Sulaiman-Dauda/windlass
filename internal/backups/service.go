@@ -189,7 +189,7 @@ func (s *Service) execute(ctx context.Context, p db.Project, destination string)
 }
 
 // Restore replaces the project directory with a backup's contents and
-// redeploys nothing — the user chooses when to deploy the restored state.
+// redeploys nothing, the user chooses when to deploy the restored state.
 func (s *Service) Restore(ctx context.Context, projectName string, backupID int64) error {
 	b, err := s.q.GetBackup(ctx, db.GetBackupParams{Name: projectName, ID: backupID})
 	if errors.Is(err, sql.ErrNoRows) {

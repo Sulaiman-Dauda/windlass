@@ -281,9 +281,9 @@ interface GitHubAppStatus {
 }
 
 const githubAppErrors: Record<string, string> = {
-  state_mismatch: "The creation state did not match — try again.",
-  missing_code: "GitHub did not return a creation code — try again.",
-  conversion_failed: "GitHub rejected the app manifest exchange — try again.",
+  state_mismatch: "The creation state did not match. Try again.",
+  missing_code: "GitHub did not return a creation code. Try again.",
+  conversion_failed: "GitHub rejected the app manifest exchange. Try again.",
 };
 
 function GitHubAppSection() {
@@ -304,7 +304,7 @@ function GitHubAppSection() {
     <Group title="GitHub App">
       <Row
         title="Connect GitHub in two clicks"
-        desc="Windlass sends GitHub a pre-filled app manifest; you confirm once and the credentials come back automatically — repository access and push auto-deploys, no copying."
+        desc="Windlass sends GitHub a pre-filled app manifest; you confirm once and the credentials come back automatically, repository access and push auto-deploys, no copying."
         stack
       >
         {created && (
@@ -316,7 +316,7 @@ function GitHubAppSection() {
                 Settings → Git
               </Link>
               . To also sign in with GitHub, add the “Email addresses: read” account permission on
-              GitHub — manifests cannot request it.
+              GitHub, manifests cannot request it.
             </Notice>
           </div>
         )}
@@ -431,10 +431,10 @@ function OAuthAppsSection() {
 
 const gitErrorMessages: Record<string, string> = {
   not_configured: "The GitHub OAuth app is not configured.",
-  state_mismatch: "The authorization state did not match — try connecting again.",
-  exchange_failed: "GitHub rejected the authorization code — try connecting again.",
+  state_mismatch: "The authorization state did not match. Try connecting again.",
+  exchange_failed: "GitHub rejected the authorization code. Try connecting again.",
   profile_failed: "Connected, but the GitHub profile could not be read.",
-  app_install_failed: "The GitHub App installation could not be linked — try again.",
+  app_install_failed: "The GitHub App installation could not be linked. Try again.",
 };
 
 function GitConnections() {
@@ -894,7 +894,7 @@ function UpdateSection() {
         {(apply.isSuccess || apply.isError) && (
           <Row stack>
             {apply.isSuccess && (
-              <p className="text-sm text-ok">Updating — the panel restarts in a few seconds. Deployed apps are unaffected.</p>
+              <p className="text-sm text-ok">Updating. The panel restarts in a few seconds. Deployed apps are unaffected.</p>
             )}
             {apply.isError && (
               <p className="text-sm text-err">{apply.error instanceof Error ? apply.error.message : "Update failed"}</p>
