@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/windlass-dev/windlass/internal/agent"
@@ -382,8 +383,20 @@ func (p proxyLocal) install(ctx context.Context, obj caddyRoute) error {
 	}
 
 	// Insert at index 0 so a catch-all site in the user's Caddyfile can't
-	// shadow Windlass domains.
-	r, err := p.do(ctx, http.MethodPut, "/config/apps/http/servers/"+target+"/routes/0", obj)
+	// shadow Windlass domains. A server with no routes key at all has no array
+	// to insert into, and Caddy rejects the index rather than creating one, so
+	// that case writes the whole array instead.
+	path := "/config/apps/http/servers/" + target + "/routes/0"
+	var body any = obj
+	has, err := p.hasRoutes(ctx, target)
+	if err != nil {
+		return err
+	}
+	if !has {
+		path = "/config/apps/http/servers/" + target + "/routes"
+		body = []any{obj}
+	}
+	r, err := p.do(ctx, http.MethodPut, path, body)
 	if err != nil {
 		return err
 	}
@@ -393,6 +406,25 @@ func (p proxyLocal) install(ctx context.Context, obj caddyRoute) error {
 		return fmt.Errorf("install caddy routes: %s: %s", r.Status, msg)
 	}
 	return nil
+}
+
+// hasRoutes reports whether the server already has a routes array. Caddy
+// returns a JSON null for a key that is not set, which is the case that cannot
+// take an indexed insert.
+func (p proxyLocal) hasRoutes(ctx context.Context, target string) (bool, error) {
+	r, err := p.do(ctx, http.MethodGet, "/config/apps/http/servers/"+target+"/routes", nil)
+	if err != nil {
+		return false, err
+	}
+	defer r.Body.Close()
+	if r.StatusCode >= 300 {
+		return false, nil
+	}
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(raw)) != "null", nil
 }
 
 func (p proxyLocal) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {
