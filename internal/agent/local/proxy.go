@@ -382,8 +382,27 @@ func (p proxyLocal) install(ctx context.Context, obj caddyRoute) error {
 	}
 
 	// Insert at index 0 so a catch-all site in the user's Caddyfile can't
-	// shadow Windlass domains.
-	r, err := p.do(ctx, http.MethodPut, "/config/apps/http/servers/"+target+"/routes/0", obj)
+	// shadow Windlass domains. A server with no routes key at all has no array
+	// to insert into, and Caddy rejects the index rather than creating one, so
+	// that case writes the whole array instead.
+	base := "/config/apps/http/servers/" + target + "/routes"
+	state, err := p.routesState(ctx, target)
+	if err != nil {
+		return err
+	}
+	method, path := http.MethodPut, base+"/0"
+	var body any = obj
+	switch state {
+	case routesAbsent:
+		// No array to index into, so write the whole array.
+		path, body = base, []any{obj}
+	case routesEmpty:
+		// Caddy before 2.11 rejects index 0 on an empty array, and PUT on the
+		// array itself is a conflict because the key exists. Append: with no
+		// other routes present there is no ordering to get wrong.
+		method, path = http.MethodPost, base
+	}
+	r, err := p.do(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
@@ -393,6 +412,48 @@ func (p proxyLocal) install(ctx context.Context, obj caddyRoute) error {
 		return fmt.Errorf("install caddy routes: %s: %s", r.Status, msg)
 	}
 	return nil
+}
+
+// Caddy's admin API accepts a different call for each of these, and which
+// calls work has changed between releases, so they are distinguished rather
+// than guessed at. See installRoutes for the matrix.
+type routesShape int
+
+const (
+	routesAbsent routesShape = iota
+	routesEmpty
+	routesPopulated
+)
+
+// routesState reports whether the server's routes array is missing, present but
+// empty, or already holds routes. Caddy returns a JSON null for a key that is
+// not set.
+func (p proxyLocal) routesState(ctx context.Context, target string) (routesShape, error) {
+	r, err := p.do(ctx, http.MethodGet, "/config/apps/http/servers/"+target+"/routes", nil)
+	if err != nil {
+		return routesAbsent, err
+	}
+	defer r.Body.Close()
+	if r.StatusCode >= 300 {
+		return routesAbsent, nil
+	}
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return routesAbsent, err
+	}
+	var routes []json.RawMessage
+	if err := json.Unmarshal(raw, &routes); err != nil {
+		// null, or anything else that is not an array: treat as absent so the
+		// array gets written rather than indexed into.
+		return routesAbsent, nil
+	}
+	if routes == nil {
+		return routesAbsent, nil
+	}
+	if len(routes) == 0 {
+		return routesEmpty, nil
+	}
+	return routesPopulated, nil
 }
 
 func (p proxyLocal) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {
@@ -412,6 +473,12 @@ func (p proxyLocal) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {
 	var out []agent.Route
 	for _, h := range obj.Handle {
 		for _, r := range h.Routes {
+			// The HTTP->HTTPS redirect is an internal child of the subroute, not
+			// a domain Windlass is routing. Callers count these to decide what
+			// is installed, so reporting it would overstate the set by one.
+			if r.ID == httpsRedirectID {
+				continue
+			}
 			route := agent.Route{ID: r.ID, TLS: true}
 			if len(r.Match) > 0 && len(r.Match[0].Host) > 0 {
 				route.Hostname = r.Match[0].Host[0]
