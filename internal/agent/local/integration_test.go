@@ -26,10 +26,10 @@ func TestPingRealDocker(t *testing.T) {
 		t.Fatalf("Ping: %v", err)
 	}
 	if info.DockerVersion == "" {
-		t.Error("docker version empty — daemon not reachable")
+		t.Error("docker version empty, daemon not reachable")
 	}
 	if info.ComposeVersion == "" {
-		t.Error("compose version empty — docker compose plugin missing")
+		t.Error("compose version empty, docker compose plugin missing")
 	}
 	t.Logf("node: %+v", info)
 }

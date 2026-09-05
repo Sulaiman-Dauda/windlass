@@ -153,7 +153,7 @@ func decodeRepoPage(provider string, resp *http.Response) ([]Repo, error) {
 }
 
 // repoPath extracts "owner/name" from an https clone URL and checks the host
-// matches the provider's hosted service — webhooks can only be registered
+// matches the provider's hosted service, webhooks can only be registered
 // where the token is valid.
 func repoPath(provider, repoURL string) (string, error) {
 	u, err := url.Parse(repoURL)

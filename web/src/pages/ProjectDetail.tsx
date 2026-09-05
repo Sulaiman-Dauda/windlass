@@ -257,7 +257,7 @@ function EnvTab({ name }: { name: string }) {
   const [dirty, setDirty] = useState(false);
   // The bulk box is another view of the same rows, not a separate import
   // tool: opening it seeds the current rows, and applying it replaces rows
-  // wholesale — including removing keys deleted from the pasted text — so
+  // wholesale, including removing keys deleted from the pasted text, so
   // the two views can never drift apart.
   const [mode, setMode] = useState<"list" | "bulk">("list");
   const [bulkDraft, setBulkDraft] = useState("");
@@ -308,7 +308,7 @@ function EnvTab({ name }: { name: string }) {
         {mode === "bulk" && (
           <div className="mt-3 rounded-[13px] border border-hairline bg-surface2 p-3.5">
             <p className="mb-2 text-xs text-fg3">
-              One <code className="font-mono">KEY=value</code> per line — this always matches the list
+              One <code className="font-mono">KEY=value</code> per line. This always matches the list
               below exactly, so paste a whole <code className="font-mono">.env</code> file to replace
               everything, or delete a line to remove that variable.
             </p>

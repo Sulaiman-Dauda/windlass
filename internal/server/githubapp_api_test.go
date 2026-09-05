@@ -10,8 +10,8 @@ import (
 
 // TestGitHubAppManifestPage covers the browser-facing start of the two-click
 // GitHub App flow. The manifest page is the one response that must escape the
-// panel's global CSP — it auto-submits an inline script and POSTs
-// cross-origin to github.com — so the scoped override is asserted here; the
+// panel's global CSP, it auto-submits an inline script and POSTs
+// cross-origin to github.com, so the scoped override is asserted here; the
 // global policy blocks both and silently broke this page once already.
 func TestGitHubAppManifestPage(t *testing.T) {
 	e := newTestEnv(t)

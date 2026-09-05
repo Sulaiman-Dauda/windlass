@@ -79,13 +79,13 @@ func TestWebhookTriggersDeploy(t *testing.T) {
 	}
 
 	// While nothing is running, a second push deploys again; but during an
-	// active deployment it's skipped with 202 — simulate by hanging the
+	// active deployment it's skipped with 202, simulate by hanging the
 	// project's deployment in queued state via a direct second call race:
 	// simpler: fire two pushes back-to-back.
 	rec = postWebhook(e, "app", githubSign(secret, body), body)
 	rec2 := postWebhook(e, "app", githubSign(secret, body), body)
 	if rec.Code == http.StatusCreated && rec2.Code == http.StatusCreated {
-		// Both created only if the first finished before the second landed —
+		// Both created only if the first finished before the second landed,
 		// acceptable; otherwise the second must be 202 skipped.
 		return
 	}

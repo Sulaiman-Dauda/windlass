@@ -15,7 +15,7 @@ import (
 
 // Windlass owns exactly one object in Caddy's config: a route tagged
 // "@id": "windlass_routes" whose subroute holds one route per domain.
-// It is addressed only via targeted /id/ operations — never POST /load —
+// It is addressed only via targeted /id/ operations, never POST /load,
 // so hand-written Caddy configuration is never touched (plan risk #2).
 const (
 	routesID        = "windlass_routes"
@@ -134,7 +134,7 @@ func (p proxyLocal) do(ctx context.Context, method, path string, body any) (*htt
 func (p proxyLocal) ApplyRoutes(ctx context.Context, routes []agent.Route) error {
 	obj := buildRoutesObject(routes)
 
-	// Fast path: the object exists — PATCH it in place (zero-downtime).
+	// Fast path: the object exists, PATCH it in place (zero-downtime).
 	resp, err := p.do(ctx, http.MethodPatch, "/id/"+routesID, obj)
 	if err != nil {
 		return fmt.Errorf("caddy admin unreachable: %w", err)

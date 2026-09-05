@@ -237,7 +237,7 @@ func TestDeployApplicationHealthCheckFailure(t *testing.T) {
 
 // TestResumeAfterCrash simulates a process that died after checkpointing the
 // "applying" step: the job row is 'running' with step=applying. On restart
-// the runner reclaims it and the pipeline resumes at applying — without
+// the runner reclaims it and the pipeline resumes at applying, without
 // re-running sync or pull.
 func TestResumeAfterCrash(t *testing.T) {
 	e := newEnv(t)
