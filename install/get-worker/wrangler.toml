@@ -1,0 +1,7 @@
+# The vanity install URL. Deployed to the personal Cloudflare account and routed
+# at get.windlass.run; the site itself is Cloudflare Pages on the apex.
+name = "windlass-get"
+main = "worker.js"
+compatibility_date = "2026-09-05"
+
+routes = [{ pattern = "get.windlass.run/*", zone_name = "windlass.run" }]
