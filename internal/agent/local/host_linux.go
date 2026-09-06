@@ -14,7 +14,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/agent"
 )
 
-// readHostMetrics samples /proc directly — a metrics dependency is not
+// readHostMetrics samples /proc directly, a metrics dependency is not
 // justified for five numbers (principle 10).
 func readHostMetrics(ctx context.Context, diskPath string) (agent.HostMetrics, error) {
 	var m agent.HostMetrics

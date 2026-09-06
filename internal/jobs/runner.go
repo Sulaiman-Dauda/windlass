@@ -3,7 +3,7 @@
 // checkpoints are persisted, and on startup any job that was running is
 // re-queued and resumed from its last checkpoint.
 //
-// It is deliberately not a distributed queue — one process, one worker loop,
+// It is deliberately not a distributed queue, one process, one worker loop,
 // no extra services (principle 5).
 package jobs
 
@@ -155,7 +155,7 @@ func (r *Runner) execute(parent context.Context, job db.Job) {
 		r.finish(parent, job.ID, "dead")
 	case errors.Is(err, context.Canceled):
 		// Cancelled on purpose (user cancel or shutdown). Shutdown-interrupted
-		// jobs are reclaimed at next startup via their 'running' status —
+		// jobs are reclaimed at next startup via their 'running' status,
 		// leave the row as-is only for shutdown; explicit cancels finish.
 		if parent.Err() != nil {
 			return // shutting down: keep status=running for reclaim

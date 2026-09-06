@@ -189,7 +189,7 @@ paths:
 
   /auth/oauth/{provider}/callback:
     get:
-      summary: OAuth callback — signs in EXISTING users by verified email
+      summary: OAuth callback, signs in EXISTING users by verified email
       operationId: oauthCallback
       responses:
         "302": { description: Redirect to the app (or /?oauth_error=...) }
@@ -242,7 +242,7 @@ paths:
 
   /webhooks/github-app:
     post:
-      summary: GitHub App push webhook — fans out to all matching projects (public, signature-verified)
+      summary: GitHub App push webhook, fans out to all matching projects (public, signature-verified)
       operationId: githubAppWebhook
       responses:
         "200": { description: "{result, deployed[]}" }
@@ -382,7 +382,7 @@ paths:
         "200": { description: Project }
         "404": { description: Not found }
     delete:
-      summary: Delete a project — containers stopped, directory removed (member; requires password re-entry unless the account is OAuth-only)
+      summary: Delete a project, containers stopped, directory removed (member; requires password re-entry unless the account is OAuth-only)
       operationId: deleteProject
       security: [{ session: [] }]
       requestBody:
@@ -464,7 +464,7 @@ paths:
 
   /system/github-app/callback:
     get:
-      summary: Manifest conversion callback — stores app credentials and enables sign-in (admin)
+      summary: Manifest conversion callback, stores app credentials and enables sign-in (admin)
       operationId: githubAppCallback
       security: [{ session: [] }]
       responses:
@@ -565,7 +565,7 @@ paths:
       responses:
         "200": { description: Array of domains }
     post:
-      summary: Add a domain (member) — Caddy routes + automatic HTTPS
+      summary: Add a domain (member), Caddy routes + automatic HTTPS
       operationId: createDomain
       security: [{ session: [] }]
       responses:
@@ -588,7 +588,7 @@ paths:
       responses:
         "200": { description: Array of backups }
     post:
-      summary: Back up now (member) — archive + best-effort DB dump
+      summary: Back up now (member), archive + best-effort DB dump
       operationId: createBackup
       security: [{ session: [] }]
       responses:
@@ -691,7 +691,7 @@ paths:
 
   /git/connections/github/setup:
     get:
-      summary: GitHub App installation landing — turns the installation into a git connection (admin)
+      summary: GitHub App installation landing, turns the installation into a git connection (admin)
       operationId: githubAppSetup
       security: [{ session: [] }]
       responses:

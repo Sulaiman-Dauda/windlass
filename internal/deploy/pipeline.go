@@ -455,7 +455,7 @@ func (s *Service) verify(ctx context.Context, deploymentID int64, project string
 			case st.State == "running" && (st.Health == "" || st.Health == "healthy"):
 				// good
 			case st.State == "exited" && st.ExitCode == 0:
-				// one-shot service (e.g. migrations) — fine
+				// one-shot service (e.g. migrations), fine
 			default:
 				allGood = false
 			}

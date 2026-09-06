@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-// Line-icon set (24×24, 1.7 stroke, currentColor). Kept intentionally small —
+// Line-icon set (24×24, 1.7 stroke, currentColor). Kept intentionally small , 
 // only what the app actually uses.
 const P: Record<string, ReactNode> = {
   dashboard: <><path d="M3 13a9 9 0 0 1 18 0" /><path d="M12 13l4-3" /><circle cx="12" cy="13" r="1.4" fill="currentColor" stroke="none" /></>,

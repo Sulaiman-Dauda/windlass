@@ -218,7 +218,7 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 		t.Fatalf("panel HTTPS route body = %q", panelBody)
 	}
 
-	// The user's own route still works — Windlass didn't clobber it.
+	// The user's own route still works, Windlass didn't clobber it.
 	req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://127.0.0.1:18080/", nil)
 	req2.Host = "user-owned.example.com"
 	resp2, err := http.DefaultClient.Do(req2)

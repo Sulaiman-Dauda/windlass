@@ -26,8 +26,8 @@ var (
 	ErrAlreadyExists = errors.New("project already exists")
 )
 
-const starterCompose = `# This file is yours. Windlass deploys exactly what is written here —
-# edit it in the UI or directly on the server; both stay in sync.
+const starterCompose = `# This file is yours. Windlass deploys exactly what is written here.
+# Edit it in the UI or directly on the server; both stay in sync.
 services:
   web:
     image: nginx:alpine

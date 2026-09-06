@@ -76,7 +76,7 @@ func seedRoutedDomain(t *testing.T, s *Service, ag *fake.Fake, q *db.Queries) {
 
 // The regression that took production down: Docker was briefly unreachable at
 // boot, every upstream failed to resolve, and Sync applied an empty route set
-// — deleting the routes of containers that were still serving traffic.
+// , deleting the routes of containers that were still serving traffic.
 func TestSyncKeepsRoutesWhenDockerUnreachable(t *testing.T) {
 	s, ag, q := newTestService(t)
 	seedRoutedDomain(t, s, ag, q)

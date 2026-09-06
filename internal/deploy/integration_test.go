@@ -120,7 +120,7 @@ func TestRealDeployEndToEnd(t *testing.T) {
 		t.Fatalf("artifacts = %+v, %v", arts, err)
 	}
 
-	// Principle 7: stop the panel (runner) — the app keeps running.
+	// Principle 7: stop the panel (runner), the app keeps running.
 	stopRunner()
 	time.Sleep(time.Second)
 	out, err = exec.CommandContext(ctx, "docker", "ps", "--filter",

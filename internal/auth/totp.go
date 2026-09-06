@@ -1,6 +1,6 @@
 package auth
 
-// RFC 6238 TOTP on the standard library — 40 lines beats a dependency
+// RFC 6238 TOTP on the standard library, 40 lines beats a dependency
 // (principle 10). SHA-1, 6 digits, 30-second steps: the parameters every
 // authenticator app supports.
 
