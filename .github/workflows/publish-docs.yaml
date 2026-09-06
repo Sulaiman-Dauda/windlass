@@ -10,6 +10,9 @@ on:
     paths:
       - "docs/**"
       - "README.md"
+  # So the build can be started by hand, to test the hook or to republish after
+  # a site-side change that this repository knows nothing about.
+  workflow_dispatch:
 
 permissions: {}
 
