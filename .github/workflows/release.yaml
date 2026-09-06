@@ -7,6 +7,8 @@ on:
 permissions:
   contents: write
   packages: write
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -37,6 +39,23 @@ jobs:
         working-directory: dist
         run: sha256sum windlass-linux-* > checksums.txt
 
+
+      # A checksums file published in the same release as the binaries proves
+      # very little: whoever can write the release can rewrite both. This asks
+      # GitHub to sign a statement tying these exact bytes to this workflow and
+      # commit, stored outside the release where a release write cannot reach.
+      # It matters here more than most projects, because the documented install
+      # path is `curl -fsSL https://get.windlass.run | sudo sh`.
+      #
+      # Verify a download with:
+      #   gh attestation verify windlass-linux-amd64 --repo Sulaiman-Dauda/windlass
+      - name: Attest binary provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/windlass-linux-amd64
+            dist/windlass-linux-arm64
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -56,6 +75,7 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v4
       - name: Build and push image
+        id: image
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -67,3 +87,15 @@ jobs:
           tags: |
             ghcr.io/sulaiman-dauda/windlass:latest
             ghcr.io/sulaiman-dauda/windlass:${{ github.ref_name }}
+
+      # The image is a second distribution path and needs its own attestation,
+      # addressed by digest rather than by a mutable tag.
+      #
+      #   gh attestation verify oci://ghcr.io/sulaiman-dauda/windlass:latest \
+      #     --repo Sulaiman-Dauda/windlass
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/sulaiman-dauda/windlass
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
