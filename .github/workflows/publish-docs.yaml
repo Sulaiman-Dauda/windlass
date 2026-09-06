@@ -1,0 +1,37 @@
+# The website builds its guides by cloning this repository, so a documentation
+# change here is not live until the site rebuilds. Nothing connected the two,
+# and merged pages sat unpublished until someone pushed the site repository for
+# an unrelated reason.
+name: Publish docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "README.md"
+  # So the build can be started by hand, to test the hook or to republish after
+  # a site-side change that this repository knows nothing about.
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  rebuild-site:
+    name: Rebuild windlass.run
+    runs-on: ubuntu-latest
+    steps:
+      # A Cloudflare Pages deploy hook starts one build for the project it
+      # belongs to and can do nothing else, which makes it a far smaller thing
+      # to hold than an API token.
+      - name: Trigger the Pages build
+        env:
+          HOOK: ${{ secrets.PAGES_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "PAGES_DEPLOY_HOOK is not set; nothing to trigger."
+            exit 1
+          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$HOOK")
+          echo "Pages deploy hook returned $code"
+          [ "$code" = "200" ] || exit 1
