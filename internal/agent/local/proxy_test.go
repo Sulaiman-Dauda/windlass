@@ -1,12 +1,14 @@
 package local
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/windlass-dev/windlass/internal/agent"
@@ -246,5 +248,66 @@ func TestBuildRoutesObjectEmpty(t *testing.T) {
 	want := `{"@id":"windlass_routes","handle":[{"handler":"subroute"}]}`
 	if string(got) != want {
 		t.Errorf("empty object = %s", got)
+	}
+}
+
+// A server that already exists but has no routes key cannot take an indexed
+// insert: Caddy rejects PUT .../routes/0 rather than creating the array, which
+// left installs failing with a 500 the operator could do nothing about. When
+// the array is absent the whole array is written instead, and when it exists
+// the route still goes in at index 0 so a user catch-all cannot shadow it.
+func TestInstallHandlesServerWithoutRoutesArray(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		routes     string // what GET .../routes returns
+		wantMethod string
+		wantPath   string
+		wantList   bool // body is the whole array rather than one route
+	}{
+		{"no routes key", "null", http.MethodPut, "/config/apps/http/servers/tlssrv/routes", true},
+		{"empty routes array", "[]", http.MethodPost, "/config/apps/http/servers/tlssrv/routes", false},
+		{"existing routes", `[{"@id":"user"}]`, http.MethodPut, "/config/apps/http/servers/tlssrv/routes/0", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var gotMethod, gotPath string
+			var gotBody []byte
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/servers"):
+					// One existing server that terminates TLS, so install grafts
+					// onto it rather than creating its own.
+					io.WriteString(w, `{"tlssrv":{"listen":[":443"],"tls_connection_policies":[{}]}}`)
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/routes"):
+					io.WriteString(w, tc.routes)
+				case r.Method == http.MethodGet:
+					io.WriteString(w, "{}")
+				case (r.Method == http.MethodPut || r.Method == http.MethodPost) && strings.Contains(r.URL.Path, "/servers/tlssrv/routes"):
+					gotMethod, gotPath = r.Method, r.URL.Path
+					gotBody, _ = io.ReadAll(r.Body)
+					w.WriteHeader(http.StatusOK)
+				default:
+					w.WriteHeader(http.StatusOK)
+				}
+			}))
+			defer srv.Close()
+
+			p := proxyLocal{l: &Local{cfg: Config{CaddyAdmin: srv.URL}}}
+			obj := buildRoutesObject([]agent.Route{
+				{ID: "windlass_route_app.example.com", Hostname: "app.example.com", Upstream: "10.0.0.2:3001", TLS: true},
+			})
+			if err := p.install(context.Background(), obj); err != nil {
+				t.Fatal(err)
+			}
+			if gotMethod != tc.wantMethod || gotPath != tc.wantPath {
+				t.Errorf("wrote %s %q, want %s %q", gotMethod, gotPath, tc.wantMethod, tc.wantPath)
+			}
+			isList := len(bytes.TrimSpace(gotBody)) > 0 && bytes.TrimSpace(gotBody)[0] == '['
+			if isList != tc.wantList {
+				t.Errorf("body is array = %v, want %v: %s", isList, tc.wantList, gotBody)
+			}
+		})
 	}
 }
