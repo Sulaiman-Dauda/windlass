@@ -155,6 +155,85 @@ func (s *Service) exchangeManifest(ctx context.Context, code string) (AppConfig,
 }
 
 // ---------------------------------------------------------------------------
+// App identity refresh
+//
+// The slug, owner and page URL are copied from GitHub once, when the app is
+// created. They change underneath us when the app is renamed or transferred to
+// an organisation, and the stale slug then sends the Install button to a page
+// that no longer exists. GitHub keys installations and tokens on the numeric
+// ID, so only these three display fields ever go stale.
+
+type appIdentity struct {
+	Slug  string `json:"slug"`
+	Owner struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+	HTMLURL string `json:"html_url"`
+}
+
+// fetchAppIdentity asks GitHub who the app is now.
+func (s *Service) fetchAppIdentity(ctx context.Context, cfg AppConfig) (appIdentity, error) {
+	ctx, cancel := context.WithTimeout(ctx, providerTimeout)
+	defer cancel()
+	jwt, err := appJWT(cfg.ID, cfg.PEM)
+	if err != nil {
+		return appIdentity{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.api.githubBase+"/app", nil)
+	if err != nil {
+		return appIdentity{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return appIdentity{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return appIdentity{}, fmt.Errorf("app lookup failed (HTTP %d)", resp.StatusCode)
+	}
+	var id appIdentity
+	if err := json.NewDecoder(resp.Body).Decode(&id); err != nil {
+		return appIdentity{}, err
+	}
+	if id.Slug == "" {
+		return appIdentity{}, errors.New("app lookup returned no slug")
+	}
+	return id, nil
+}
+
+// withIdentity returns cfg with GitHub's current display fields, and whether
+// anything changed. Credentials are never touched.
+func withIdentity(cfg AppConfig, id appIdentity) (AppConfig, bool) {
+	next := cfg
+	next.Slug, next.Owner, next.HTMLURL = id.Slug, id.Owner.Login, id.HTMLURL
+	return next, next != cfg
+}
+
+// RefreshAppIdentity updates the stored slug, owner and page URL from GitHub
+// and returns the current config. If GitHub cannot be reached, the stored
+// config is returned with the error so callers can still render it.
+func (s *Service) RefreshAppIdentity(ctx context.Context) (AppConfig, error) {
+	cfg, err := s.AppConfig(ctx)
+	if err != nil {
+		return AppConfig{}, err
+	}
+	id, err := s.fetchAppIdentity(ctx, cfg)
+	if err != nil {
+		return cfg, err
+	}
+	next, changed := withIdentity(cfg, id)
+	if !changed {
+		return cfg, nil
+	}
+	if err := s.saveAppConfig(ctx, next); err != nil {
+		return cfg, err
+	}
+	return next, nil
+}
+
+// ---------------------------------------------------------------------------
 // App JWT and installation tokens
 
 // appJWT builds the short-lived RS256 JWT GitHub Apps authenticate with.

@@ -134,3 +134,86 @@ func TestInstallationSentinel(t *testing.T) {
 		t.Error("plain token misidentified as installation")
 	}
 }
+
+func testAppKey(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{
+		Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key),
+	}))
+}
+
+// TestFetchAppIdentity reads the app's current name and owner, which change
+// when the app is renamed or transferred to an organisation.
+func TestFetchAppIdentity(t *testing.T) {
+	var gotPath, gotMethod, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod, gotAuth = r.URL.Path, r.Method, r.Header.Get("Authorization")
+		json.NewEncoder(w).Encode(map[string]any{
+			"slug": "acme-windlass", "html_url": "https://github.com/apps/acme-windlass",
+			"owner": map[string]string{"login": "acme-org"},
+		})
+	}))
+	defer srv.Close()
+
+	s, _ := testService(t)
+	s.api = &providerAPI{githubBase: srv.URL}
+	id, err := s.fetchAppIdentity(context.Background(), AppConfig{ID: 7, PEM: testAppKey(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodGet || gotPath != "/app" {
+		t.Errorf("request = %s %s, want GET /app", gotMethod, gotPath)
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer ") || strings.Count(gotAuth, ".") != 2 {
+		t.Errorf("app JWT not sent: %q", gotAuth)
+	}
+	if id.Slug != "acme-windlass" || id.Owner.Login != "acme-org" ||
+		id.HTMLURL != "https://github.com/apps/acme-windlass" {
+		t.Errorf("identity not parsed: %+v", id)
+	}
+}
+
+func TestFetchAppIdentityRefused(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	s, _ := testService(t)
+	s.api = &providerAPI{githubBase: srv.URL}
+	if _, err := s.fetchAppIdentity(context.Background(), AppConfig{ID: 7, PEM: testAppKey(t)}); err == nil ||
+		!strings.Contains(err.Error(), "401") {
+		t.Errorf("expected a 401 error, got %v", err)
+	}
+}
+
+// TestWithIdentity updates only the display fields, and reports no change
+// when GitHub agrees with what is stored so nothing is rewritten.
+func TestWithIdentity(t *testing.T) {
+	stored := AppConfig{
+		ID: 7, Slug: "old-name", Owner: "someone", HTMLURL: "https://github.com/apps/old-name",
+		ClientID: "cid", ClientSecret: "csec", WebhookSecret: "whsec", PEM: "KEY",
+	}
+	var id appIdentity
+	id.Slug, id.Owner.Login, id.HTMLURL = "new-name", "acme-org", "https://github.com/apps/new-name"
+
+	next, changed := withIdentity(stored, id)
+	if !changed {
+		t.Error("rename not detected")
+	}
+	if next.Slug != "new-name" || next.Owner != "acme-org" || next.HTMLURL != "https://github.com/apps/new-name" {
+		t.Errorf("display fields not updated: %+v", next)
+	}
+	if next.ID != 7 || next.ClientID != "cid" || next.ClientSecret != "csec" ||
+		next.WebhookSecret != "whsec" || next.PEM != "KEY" {
+		t.Errorf("credentials changed: %+v", next)
+	}
+
+	if _, changed := withIdentity(next, id); changed {
+		t.Error("unchanged identity reported as a change")
+	}
+}

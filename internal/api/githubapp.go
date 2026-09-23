@@ -36,14 +36,19 @@ func (a *API) requestOrigin(r *http.Request) string {
 }
 
 func (a *API) handleGitHubAppStatus(w http.ResponseWriter, r *http.Request) {
-	cfg, err := a.Git.AppConfig(r.Context())
+	cfg, err := a.Git.RefreshAppIdentity(r.Context())
 	if errors.Is(err, git.ErrNoApp) {
 		writeJSON(w, http.StatusOK, map[string]any{"configured": false})
 		return
 	}
-	if err != nil {
+	if err != nil && cfg.ID == 0 {
 		a.internalError(w, "load github app", err)
 		return
+	}
+	if err != nil {
+		// GitHub unreachable or refused: show what is stored rather than
+		// failing the settings page.
+		a.Logger.Warn("github app identity refresh", "error", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"configured": true,
