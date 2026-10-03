@@ -17,6 +17,16 @@ view is shot in both themes so pages can pair them to the reader's preference.
 These are real deployments, not mockups: five Compose projects running nginx, PostgreSQL,
 Uptime Kuma, linkding and n8n, with Caddy in front and three domains routed.
 
+## Recordings
+
+| What it shows | File |
+| --- | --- |
+| Creating a project, saving its Compose file, deploying it and watching the log until nginx reports healthy | `deploy.gif` |
+
+Recorded on a local instance at 1280x900 and scaled to 960 px wide. The script asserts the deploy
+log reports success, the service shows running and healthy, and the container answers HTTP 200
+before the recording is kept.
+
 ## Recapturing
 
 Screens drift. When one does, reshoot the affected pair rather than editing the image.

@@ -6,6 +6,8 @@ and updates without replacing Docker Compose with a proprietary runtime.
 
 ![The Windlass dashboard](docs/screenshots/dashboard-light.png)
 
+![Creating a project in Windlass, deploying it, and watching the log stream until nginx reports healthy](docs/screenshots/deploy.gif)
+
 Stop Windlass and your sites keep serving. The containers are ordinary Compose containers
 with a restart policy, and Caddy keeps the routes it already has. There is nothing to
 migrate off if you change your mind: see [life without the panel](docs/life-without-the-panel.md).
