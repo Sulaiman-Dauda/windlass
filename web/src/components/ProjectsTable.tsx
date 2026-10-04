@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import type { Project } from "../api/projects";
 import { useDeployments, useServices, summariseServices, deploymentTone, isActive } from "../api/deployments";
 import { useDomains } from "../api/domains";

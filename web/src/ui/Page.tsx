@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { cn } from "./cn";
 import { Icon, type IconName } from "./Icon";
 import { IconButton } from "./Button";

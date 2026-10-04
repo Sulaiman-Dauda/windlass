@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { useCan, useLogout, type Role } from "../api/auth";
 import { useProjects } from "../api/projects";
 import { Icon, type IconName } from "../ui/Icon";

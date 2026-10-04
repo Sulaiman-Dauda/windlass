@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { useCan } from "../api/auth";
 import { useProjects } from "../api/projects";
 import { useMetrics } from "../api/system";

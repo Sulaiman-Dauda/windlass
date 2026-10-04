@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route } from "react-router";
 import { useAuthStatus } from "./api/auth";
 import Login from "./pages/Login";
 import Setup from "./pages/Setup";

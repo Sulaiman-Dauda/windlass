@@ -1,5 +1,5 @@
 import { useState, lazy, Suspense } from "react";
-import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router";
 import { useCan } from "../api/auth";
 import { useProject } from "../api/projects";
 import {
@@ -34,6 +34,9 @@ import { timeAgo } from "../ui/format";
 
 const TerminalTab = lazy(() => import("../components/TerminalTab"));
 
+// Segments under /projects/:name. The links are built absolute: inside a splat
+// route React Router 7 resolves a relative link against the whole URL, so
+// "deployments" clicked on /logs would land on /logs/deployments.
 const TABS: (TabItem & { member?: boolean })[] = [
   { to: "", label: "Overview", end: true },
   { to: "deployments", label: "Deployments" },
@@ -196,7 +199,15 @@ export default function ProjectDetail() {
           </>
         )
       }
-      tabs={<RouteTabs label="Project sections" items={TABS.filter((t) => !t.member || can("member"))} />}
+      tabs={
+        <RouteTabs
+          label="Project sections"
+          items={TABS.filter((t) => !t.member || can("member")).map((t) => ({
+            ...t,
+            to: t.to ? `/projects/${name}/${t.to}` : `/projects/${name}`,
+          }))}
+        />
+      }
     >
       {confirmingDelete && (
         <DeleteProjectDialog
