@@ -153,16 +153,23 @@ export interface ServicesSummary {
   total: number;
 }
 
+/** A container that ran to the end and exited 0, such as a migration job. */
+export function isCompleted(s: ServiceStatus): boolean {
+  return s.state === "exited" && s.exit_code === 0;
+}
+
 /** One status for a whole project, from its compose ps rows. */
 export function summariseServices(services: ServiceStatus[] | undefined): ServicesSummary | null {
   if (!services) return null;
-  const total = services.length;
   const running = services.filter((s) => s.state === "running").length;
   const unhealthy = services.some((s) => s.health === "unhealthy" || s.state === "restarting" || s.state === "dead");
-  if (total === 0) return { tone: "idle", label: "Not running", running, total };
-  if (unhealthy) return { tone: "err", label: "Unhealthy", running, total };
+  if (services.length === 0) return { tone: "idle", label: "Not running", running, total: 0 };
+  if (unhealthy) return { tone: "err", label: "Unhealthy", running, total: services.length };
+  if (running === 0) return { tone: "idle", label: "Stopped", running, total: services.length };
+  // A run-once job that finished cleanly has done its work, so it is left
+  // out of the count rather than read as a service that is down.
+  const total = services.filter((s) => !isCompleted(s)).length;
   if (running === total) return { tone: "ok", label: "Running", running, total };
-  if (running === 0) return { tone: "idle", label: "Stopped", running, total };
   return { tone: "warn", label: "Partial", running, total };
 }
 

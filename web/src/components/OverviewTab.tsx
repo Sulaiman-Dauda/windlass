@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useProject } from "../api/projects";
-import { useDeployments, useServices, deploymentTone, isActive } from "../api/deployments";
+import { useDeployments, useServices, deploymentTone, isActive, isCompleted } from "../api/deployments";
 import { useDomains } from "../api/domains";
 import { Card, CardHeader, CardFooter } from "../ui/Card";
 import { StatusPill, StatusDot, type Tone } from "../ui/Badge";
@@ -74,7 +74,8 @@ export default function OverviewTab({ project }: { project: string }) {
                     </tr>
                   ))}
                 {list.map((s) => {
-                  const st = stateTone(s.state);
+                  const done = isCompleted(s);
+                  const st = done ? { tone: "ok" as const } : stateTone(s.state);
                   return (
                     <tr key={s.name} className="transition-colors hover:bg-surface2">
                       <td className="px-5 py-3">
@@ -85,7 +86,7 @@ export default function OverviewTab({ project }: { project: string }) {
                       </td>
                       <td className="px-4 py-3">
                         <StatusPill tone={st.tone} live={st.live}>
-                          {s.state}
+                          {done ? "completed" : s.state}
                           {s.state === "exited" && s.exit_code !== 0 && (
                             <span className="font-medium opacity-75">({s.exit_code})</span>
                           )}

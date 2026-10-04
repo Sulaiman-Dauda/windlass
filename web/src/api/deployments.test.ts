@@ -46,21 +46,33 @@ describe("stageStates", () => {
 });
 
 describe("summariseServices", () => {
-  const svc = (state: string, health = ""): ServiceStatus => ({
+  const svc = (state: string, health = "", exit_code = 0): ServiceStatus => ({
     service: "web",
     name: "p-web-1",
     state,
     health,
-    exit_code: 0,
+    exit_code,
     image: "nginx",
   });
 
   it("summarises", () => {
     expect(summariseServices([svc("running"), svc("running")])).toMatchObject({ tone: "ok", label: "Running", running: 2, total: 2 });
-    expect(summariseServices([svc("running"), svc("exited")])).toMatchObject({ tone: "warn", label: "Partial" });
+    expect(summariseServices([svc("running"), svc("exited", "", 137)])).toMatchObject({ tone: "warn", label: "Partial" });
     expect(summariseServices([svc("exited")])).toMatchObject({ tone: "idle", label: "Stopped" });
     expect(summariseServices([svc("running", "unhealthy")])).toMatchObject({ tone: "err", label: "Unhealthy" });
     expect(summariseServices([])).toMatchObject({ label: "Not running" });
     expect(summariseServices(undefined)).toBeNull();
+  });
+
+  it("leaves a run-once job that finished cleanly out of the count", () => {
+    const migrate = svc("exited");
+    expect(summariseServices([svc("running", "healthy"), svc("running", "healthy"), migrate])).toMatchObject({
+      tone: "ok",
+      label: "Running",
+      running: 2,
+      total: 2,
+    });
+    expect(summariseServices([svc("running"), svc("exited", "", 1)])).toMatchObject({ tone: "warn", label: "Partial", running: 1, total: 2 });
+    expect(summariseServices([migrate, migrate])).toMatchObject({ tone: "idle", label: "Stopped", running: 0, total: 2 });
   });
 });
