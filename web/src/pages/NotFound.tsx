@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Page, EmptyState } from "../ui/Page";
 import { btn } from "../ui/Button";
 

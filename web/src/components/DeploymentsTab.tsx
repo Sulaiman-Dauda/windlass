@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router";
 import { useCan } from "../api/auth";
 import {
   PIPELINE,

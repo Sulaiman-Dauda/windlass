@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { useProject } from "../api/projects";
 import { useDeployments, useServices, deploymentTone, isActive } from "../api/deployments";
 import { useDomains } from "../api/domains";
@@ -126,7 +126,7 @@ export default function OverviewTab({ project }: { project: string }) {
               <>
                 Limits come from <code className="font-mono text-fg2">mem_limit</code> and{" "}
                 <code className="font-mono text-fg2">cpus</code> in{" "}
-                <Link className="text-accent hover:underline" to="files">
+                <Link className="text-accent hover:underline" to={`/projects/${project}/files`}>
                   compose.yaml
                 </Link>
                 . Gate readiness with the labels <code className="font-mono text-fg2">windlass.health.url</code>,{" "}
@@ -177,7 +177,7 @@ function LatestDeployment({ project }: { project: string }) {
   }
   const ms = elapsed(d.started_at || d.created_at, d.finished_at);
   return (
-    <SideCard title="Latest deployment" link={{ to: `deployments?d=${d.number}`, label: "View log" }}>
+    <SideCard title="Latest deployment" link={{ to: `/projects/${project}/deployments?d=${d.number}`, label: "View log" }}>
       <div className="flex items-center justify-between gap-3">
         <span className="text-md font-semibold text-fg">#{d.number}</span>
         <StatusPill tone={deploymentTone(d.status)} busy={isActive(d.status)}>
@@ -212,7 +212,7 @@ function LatestDeployment({ project }: { project: string }) {
 function DomainsSummary({ project }: { project: string }) {
   const domains = useDomains(project);
   return (
-    <SideCard title="Domains" link={{ to: "domains", label: "Manage" }}>
+    <SideCard title="Domains" link={{ to: `/projects/${project}/domains`, label: "Manage" }}>
       {!domains.data ? (
         <Skeleton className="h-5 w-2/3" />
       ) : domains.data.length === 0 ? (
@@ -244,7 +244,7 @@ function DomainsSummary({ project }: { project: string }) {
 function SourceSummary({ project }: { project: string }) {
   const p = useProject(project).data;
   return (
-    <SideCard title="Source" link={{ to: "git", label: "Configure" }}>
+    <SideCard title="Source" link={{ to: `/projects/${project}/git`, label: "Configure" }}>
       {!p ? (
         <Skeleton className="h-5 w-2/3" />
       ) : p.git_repo ? (
@@ -261,7 +261,7 @@ function SourceSummary({ project }: { project: string }) {
       ) : (
         <p className="text-sm text-fg3">
           Compose files on disk. Edit them in{" "}
-          <Link to="files" className="text-accent hover:underline">
+          <Link to={`/projects/${project}/files`} className="text-accent hover:underline">
             Files
           </Link>
           , or connect a repository to deploy on push.

@@ -10,7 +10,7 @@ import {
   type Ref,
 } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { Icon, type IconName } from "./Icon";
 import { cn } from "./cn";
 

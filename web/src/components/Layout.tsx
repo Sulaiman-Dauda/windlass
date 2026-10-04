@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, NavLink, Outlet, useLocation, useMatch } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useMatch } from "react-router";
 import { useCan, useLogout, type User } from "../api/auth";
 import { useProjects } from "../api/projects";
 import { useMetrics, useUpdateCheck } from "../api/system";

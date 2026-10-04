@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router";
 import { useCan } from "../api/auth";
 import { useCreateProject, useProjects, useScanProjects } from "../api/projects";
 import { Page, EmptyState, FormError } from "../ui/Page";
