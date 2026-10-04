@@ -46,3 +46,32 @@ export function useLogout() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["auth"] }),
   });
 }
+
+export type Role = User["role"];
+
+const rank: Record<Role, number> = { viewer: 0, member: 1, admin: 2 };
+
+export function useCurrentUser(): User | undefined {
+  return useAuthStatus().data?.user;
+}
+
+/**
+ * Whether the signed-in user holds at least `role`. This only decides what is
+ * rendered: every handler enforces the same rule on the server.
+ */
+export function useCan(): (role: Role) => boolean {
+  const user = useCurrentUser();
+  return (role) => Boolean(user && rank[user.role] >= rank[role]);
+}
+
+export interface Me {
+  id: number;
+  email: string;
+  role: Role;
+  totp_enabled: boolean;
+  has_password: boolean;
+}
+
+export function useMe() {
+  return useQuery<Me>({ queryKey: ["auth", "me"], queryFn: () => api<Me>("/auth/me") });
+}

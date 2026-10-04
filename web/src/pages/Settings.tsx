@@ -1,16 +1,22 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, NavLink, Navigate, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { Page } from "../ui/Page";
-import { Card } from "../ui/Card";
-import { Button, btn } from "../ui/Button";
+import { useMe, useCan } from "../api/auth";
+import { useUpdateCheck } from "../api/system";
+import { Page, Callout, FormError } from "../ui/Page";
+import { Card, CardHeader, CardFooter } from "../ui/Card";
+import { Button, IconButton, btn } from "../ui/Button";
 import { Input, Select, Field } from "../ui/Field";
-import { StatusPill, Chip } from "../ui/Badge";
-import { Icon } from "../ui/Icon";
+import { StatusPill, Tag } from "../ui/Badge";
+import { Icon, type IconName } from "../ui/Icon";
 import { Segmented } from "../ui/Segmented";
-import { ThemeToggle } from "../ui/ThemeToggle";
+import { CopyField } from "../ui/Copy";
+import { useTheme, type ThemeMode } from "../ui/theme";
+import { useConfirm } from "../ui/Modal";
+import { useToast, errorText } from "../ui/Toast";
 import { cn } from "../ui/cn";
+import { formatBytes } from "../ui/format";
 
 interface Connection {
   id: number;
@@ -20,55 +26,81 @@ interface Connection {
 
 // Each tab is a real route (/settings/<tab>) so sections are addressable:
 // the sidebar update alert links to system, and OAuth redirects land on git.
-const TABS = [
-  { value: "general", label: "General" },
-  { value: "auth", label: "Users & auth" },
-  { value: "git", label: "Git" },
-  { value: "registries", label: "Registries" },
-  { value: "system", label: "System" },
-] as const;
-
-type Tab = (typeof TABS)[number]["value"];
+// Admin tabs mirror the server, where /git, /registries and /system/* are admin-only.
+const TABS: { value: string; label: string; icon: IconName; admin?: boolean }[] = [
+  { value: "general", label: "General", icon: "settings" },
+  { value: "auth", label: "Users and sign-in", icon: "users" },
+  { value: "git", label: "Git", icon: "gitBranch", admin: true },
+  { value: "registries", label: "Registries", icon: "package", admin: true },
+  { value: "system", label: "System", icon: "server", admin: true },
+];
 
 export default function Settings() {
   const { tab } = useParams();
-  const navigate = useNavigate();
+  const can = useCan();
+  const tabs = TABS.filter((t) => !t.admin || can("admin"));
+  const current = tabs.find((t) => t.value === tab);
 
-  if (!TABS.some((t) => t.value === tab)) {
+  if (!current) {
     return <Navigate to="/settings/general" replace />;
   }
 
   return (
-    <Page title="Settings">
-      <div className="w-full">
-        <Segmented
-          className="mb-6 w-full"
-          options={[...TABS]}
-          value={tab as Tab}
-          onChange={(v) => navigate(`/settings/${v}`)}
-        />
-        {tab === "general" && (
-          <>
-            <AppearanceSection />
-            <PanelDomainSection />
-          </>
-        )}
-        {tab === "auth" && (
-          <>
-            <UsersSection />
-            <SecuritySection />
-            <GitHubAppSection />
-            <OAuthAppsSection />
-          </>
-        )}
-        {tab === "git" && <GitConnections />}
-        {tab === "registries" && <RegistryCredentials />}
-        {tab === "system" && (
-          <>
-            <UpdateSection />
-            <DockerStorageSection />
-          </>
-        )}
+    <Page
+      title="Settings"
+      crumbs={[{ label: "Settings", to: "/settings/general" }, { label: current.label }]}
+      description="Server-wide configuration. Changes here apply to every project."
+    >
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[208px_minmax(0,1fr)] lg:gap-10">
+        <nav
+          aria-label="Settings sections"
+          className="-mx-1 flex gap-1 overflow-x-auto px-1 [scrollbar-width:none] lg:sticky lg:top-16 lg:h-fit lg:flex-col lg:overflow-visible"
+        >
+          {tabs.map((t) => (
+            <NavLink
+              key={t.value}
+              to={`/settings/${t.value}`}
+              className={({ isActive }) =>
+                cn(
+                  "flex h-8 flex-none items-center gap-2.5 rounded-control px-2.5 text-sm transition-colors",
+                  isActive ? "bg-sunken font-semibold text-fg" : "font-medium text-fg2 hover:bg-sunken hover:text-fg",
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <Icon name={t.icon} size={16} className={isActive ? "text-accent" : "text-fg3"} />
+                  {t.label}
+                </>
+              )}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="min-w-0 space-y-6">
+          {tab === "general" && (
+            <>
+              <AppearanceSection />
+              {can("admin") && <PanelDomainSection />}
+            </>
+          )}
+          {tab === "auth" && (
+            <>
+              <UsersSection />
+              <SecuritySection />
+              <GitHubAppSection />
+              <OAuthAppsSection />
+            </>
+          )}
+          {tab === "git" && <GitConnections />}
+          {tab === "registries" && <RegistryCredentials />}
+          {tab === "system" && (
+            <>
+              <UpdateSection />
+              <DockerStorageSection />
+            </>
+          )}
+        </div>
       </div>
     </Page>
   );
@@ -76,68 +108,50 @@ export default function Settings() {
 
 // ---------- Layout helpers ----------
 
-function Group({ title, children }: { title: string; children: ReactNode }) {
+/** A labelled row inside a settings card: text on the left, control on the right. */
+function Row({ title, desc, children }: { title: ReactNode; desc?: ReactNode; children?: ReactNode }) {
   return (
-    <section className="mb-7">
-      <div className="mb-2 px-1 text-xs font-semibold uppercase tracking-[0.03em] text-fg3">{title}</div>
-      <Card className="overflow-hidden p-0">
-        <div className="divide-y divide-hairline">{children}</div>
-      </Card>
-    </section>
-  );
-}
-
-function Row({
-  title,
-  desc,
-  children,
-  stack,
-}: {
-  title?: ReactNode;
-  desc?: ReactNode;
-  children?: ReactNode;
-  stack?: boolean;
-}) {
-  return (
-    <div className={cn("flex gap-4 px-5 py-4", stack ? "flex-col items-stretch" : "items-center")}>
-      {(title || desc) && (
-        <div className="min-w-0 flex-1">
-          {title && <div className="text-md font-semibold">{title}</div>}
-          {desc && <div className="mt-0.5 text-sm leading-normal text-fg3">{desc}</div>}
-        </div>
-      )}
-      {children && <div className={cn(stack ? "" : "flex flex-none items-center gap-2.5")}>{children}</div>}
+    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 px-5 py-4">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold text-fg">{title}</div>
+        {desc && <div className="mt-0.5 text-sm text-fg3">{desc}</div>}
+      </div>
+      {children && <div className="flex flex-none flex-wrap items-center gap-2.5">{children}</div>}
     </div>
   );
 }
 
-function Notice({ tone, children, onClose }: { tone: "ok" | "err"; children: ReactNode; onClose?: () => void }) {
+function ListRow({ children, onRemove, removeLabel }: { children: ReactNode; onRemove?: () => void; removeLabel: string }) {
   return (
-    <div
-      className={cn(
-        "flex items-center gap-2 rounded-[10px] px-3.5 py-2.5 text-sm",
-        tone === "ok" ? "bg-ok-soft text-ok" : "bg-err-soft text-err",
+    <li className="flex items-center justify-between gap-3 px-5 py-3">
+      <div className="flex min-w-0 flex-wrap items-center gap-2.5 text-sm">{children}</div>
+      {onRemove && (
+        <IconButton icon="trash" label={removeLabel} className="hover:bg-err-soft hover:text-err" onClick={onRemove} />
       )}
-    >
-      <span className="flex-1">{children}</span>
-      {onClose && (
-        <button onClick={onClose} className="opacity-70 hover:opacity-100" aria-label="Dismiss">
-          <Icon name="x" size={15} />
-        </button>
-      )}
-    </div>
+    </li>
   );
 }
 
 // ---------- Appearance ----------
 
 function AppearanceSection() {
+  const { mode, setMode } = useTheme();
   return (
-    <Group title="Appearance">
-      <Row title="Theme" desc="Auto matches your system between light and dark automatically.">
-        <ThemeToggle />
+    <Card>
+      <CardHeader title="Appearance" description="Applies to this browser only." />
+      <Row title="Theme" desc="Match system follows your device between light and dark.">
+        <Segmented<ThemeMode>
+          label="Theme"
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: "light", label: "Light", icon: <Icon name="sun" size={15} /> },
+            { value: "system", label: "Match system", icon: <Icon name="monitor" size={15} /> },
+            { value: "dark", label: "Dark", icon: <Icon name="moon" size={15} /> },
+          ]}
+        />
       </Row>
-    </Group>
+    </Card>
   );
 }
 
@@ -152,6 +166,7 @@ interface PanelDomainStatus {
 
 function PanelDomainSection() {
   const qc = useQueryClient();
+  const toast = useToast();
   const status = useQuery<PanelDomainStatus>({
     queryKey: ["system", "panel-domain"],
     queryFn: () => api("/system/panel-domain"),
@@ -163,50 +178,65 @@ function PanelDomainSection() {
   }, [status.data]);
   const save = useMutation<PanelDomainStatus, Error, string>({
     mutationFn: (value) => api("/system/panel-domain", { method: "PUT", body: JSON.stringify({ hostname: value }) }),
+    onSuccess: (_d, value) => toast.ok(value ? "Panel domain saved" : "Panel domain removed"),
     onSettled: () => qc.invalidateQueries({ queryKey: ["system", "panel-domain"] }),
   });
 
   if (status.isError) return null;
   return (
-    <Group title="Panel domain">
-      <Row
-        title="Hostname"
-        desc="Point this name's DNS A/AAAA record at the server; Windlass adds its own Caddy route and gets HTTPS automatically."
-        stack
+    <Card>
+      <CardHeader
+        title="Panel domain"
+        description="Serve this panel on its own hostname over HTTPS. Point the name's DNS A or AAAA record at the server first; Windlass adds its own Caddy route."
+      />
+      <form
+        id="panel-domain"
+        className="px-5 py-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate(hostname.trim());
+        }}
       >
-        <div className="mt-1 flex gap-2">
+        <Field label="Hostname" className="max-w-md">
           <Input
             value={hostname}
             onChange={(e) => setHostname(e.target.value.toLowerCase())}
             placeholder="windlass.example.com"
+            spellCheck={false}
           />
-          <Button variant="primary" onClick={() => save.mutate(hostname.trim())} disabled={save.isPending}>
-            {save.isPending ? "Saving…" : "Save"}
-          </Button>
-        </div>
+        </Field>
         {status.data?.configured && (
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <StatusPill tone={status.data.proxy_available ? "ok" : "warn"}>
+            <StatusPill tone={status.data.proxy_available ? "ok" : "warn"} live={status.data.proxy_available}>
               {status.data.proxy_available ? "Active" : "Caddy unavailable"}
             </StatusPill>
             <a className="font-mono text-sm text-accent hover:underline" href={status.data.url}>
               {status.data.url}
             </a>
-            <button
-              className="text-xs text-fg3 hover:text-err"
-              onClick={() => { setHostname(""); save.mutate(""); }}
-            >
-              Remove
-            </button>
           </div>
         )}
-        {save.isError && (
-          <p className="mt-2 text-sm text-err">
-            {save.error instanceof Error ? save.error.message : "Could not configure panel domain"}
-          </p>
+        <div className="mt-3 empty:hidden">
+          <FormError error={save.error} fallback="Could not configure the panel domain" />
+        </div>
+      </form>
+      <CardFooter note="The panel stays reachable on its port as well.">
+        {status.data?.configured && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setHostname("");
+              save.mutate("");
+            }}
+          >
+            Remove
+          </Button>
         )}
-      </Row>
-    </Group>
+        <Button type="submit" form="panel-domain" size="sm" variant="primary" loading={save.isPending}>
+          Save
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }
 
@@ -216,7 +246,9 @@ function SecuritySection() {
   const [enroll, setEnroll] = useState<{ secret: string; otpauth_url: string } | null>(null);
   const [code, setCode] = useState("");
   const qc = useQueryClient();
-  const me = useQuery<{ totp_enabled: boolean }>({ queryKey: ["auth", "me"], queryFn: () => api("/auth/me") });
+  const toast = useToast();
+  const confirm = useConfirm();
+  const me = useMe();
 
   const begin = useMutation({
     mutationFn: () => api<{ secret: string; otpauth_url: string }>("/auth/totp/setup", { method: "POST" }),
@@ -224,50 +256,90 @@ function SecuritySection() {
   });
   const verify = useMutation({
     mutationFn: () => api("/auth/totp/verify", { method: "POST", body: JSON.stringify({ code }) }),
-    onSuccess: () => { setEnroll(null); setCode(""); qc.invalidateQueries({ queryKey: ["auth", "me"] }); },
+    onSuccess: () => {
+      setEnroll(null);
+      setCode("");
+      toast.ok("Two-factor authentication is on");
+      qc.invalidateQueries({ queryKey: ["auth", "me"] });
+    },
   });
   const disable = useMutation({
     mutationFn: () => api("/auth/totp/disable", { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "me"] }),
+    onSuccess: () => {
+      toast.ok("Two-factor authentication is off");
+      qc.invalidateQueries({ queryKey: ["auth", "me"] });
+    },
   });
 
   return (
-    <Group title="Two-factor authentication">
+    <Card>
+      <CardHeader title="Two-factor authentication" description="For your account. Protects sign-in with a code from an authenticator app." />
       {me.data?.totp_enabled ? (
-        <Row title="Authenticator app" desc="An authenticator code is required at sign-in.">
+        <Row title="Authenticator app" desc="A code is required every time you sign in.">
           <StatusPill tone="ok">Enabled</StatusPill>
-          <Button size="sm" variant="ghost" onClick={() => disable.mutate()}>Disable</Button>
+          <Button
+            size="sm"
+            onClick={async () => {
+              if (
+                await confirm({
+                  title: "Turn off two-factor authentication?",
+                  body: "Signing in will need only your password.",
+                  confirmLabel: "Turn off",
+                })
+              )
+                disable.mutate();
+            }}
+          >
+            Disable
+          </Button>
         </Row>
       ) : enroll ? (
-        <Row title="Set up authenticator" stack>
-          <p className="text-sm text-fg2">Add this secret to your authenticator app, then confirm a code:</p>
-          <code className="mt-2 block break-all rounded-[8px] bg-sunken p-2.5 font-mono text-xs">{enroll.secret}</code>
-          <code className="mt-2 block break-all rounded-[8px] bg-sunken p-2.5 font-mono text-xs text-fg3">{enroll.otpauth_url}</code>
-          <div className="mt-3 flex gap-2">
-            <Input
-              inputMode="numeric"
-              maxLength={6}
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-              placeholder="123456"
-              className="w-36 text-center font-mono tracking-[0.3em]"
-            />
-            <Button variant="primary" onClick={() => verify.mutate()} disabled={code.length !== 6 || verify.isPending}>
+        <div className="space-y-3 px-5 py-4">
+          <p className="text-sm text-fg2">
+            Add this secret to your authenticator app (or open the link on your phone), then enter the 6-digit code it shows.
+          </p>
+          <Field as="div" label="Secret">
+            <CopyField value={enroll.secret} />
+          </Field>
+          <Field as="div" label="Setup link">
+            <CopyField value={enroll.otpauth_url} />
+          </Field>
+          <form
+            className="flex flex-wrap items-end gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              verify.mutate();
+            }}
+          >
+            <Field label="Code" className="w-40">
+              <Input
+                autoFocus
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                placeholder="123456"
+                className="text-center font-mono tracking-[0.3em]"
+              />
+            </Field>
+            <Button type="submit" variant="primary" disabled={code.length !== 6} loading={verify.isPending}>
               Confirm
             </Button>
-          </div>
-          {verify.isError && (
-            <p className="mt-2 text-sm text-err">
-              {verify.error instanceof Error ? verify.error.message : "Invalid code"}
-            </p>
-          )}
-        </Row>
+            <Button variant="ghost" onClick={() => setEnroll(null)}>
+              Cancel
+            </Button>
+          </form>
+          <FormError error={verify.error} fallback="Invalid code" />
+        </div>
       ) : (
-        <Row title="Authenticator app" desc="Add a second factor with any TOTP authenticator.">
-          <Button size="sm" onClick={() => begin.mutate()}>Enable TOTP</Button>
+        <Row title="Authenticator app" desc="Any TOTP app works: 1Password, Authy, Google Authenticator.">
+          <Button size="sm" icon="shield" onClick={() => begin.mutate()} loading={begin.isPending}>
+            Set up
+          </Button>
         </Row>
       )}
-    </Group>
+    </Card>
   );
 }
 
@@ -287,77 +359,68 @@ const githubAppErrors: Record<string, string> = {
 };
 
 function GitHubAppSection() {
-  const me = useQuery<{ role: string }>({ queryKey: ["auth", "me"], queryFn: () => api("/auth/me") });
+  const can = useCan();
   const app = useQuery<GitHubAppStatus>({
     queryKey: ["system", "github-app"],
     queryFn: () => api("/system/github-app"),
     retry: false,
+    enabled: can("admin"),
   });
 
   const [searchParams, setSearchParams] = useSearchParams();
   const created = searchParams.get("github_app");
   const appError = searchParams.get("github_app_error");
 
-  if (me.data?.role !== "admin" || app.isError) return null;
+  if (!can("admin") || app.isError) return null;
 
   return (
-    <Group title="GitHub App">
-      <Row
-        title="Connect GitHub in two clicks"
-        desc="Windlass sends GitHub a pre-filled app manifest; you confirm once and the credentials come back automatically, repository access and push auto-deploys, no copying."
-        stack
-      >
+    <Card>
+      <CardHeader
+        title="GitHub App"
+        description="Connect GitHub in two clicks. Windlass sends GitHub a pre-filled app manifest; you confirm once and the credentials come back on their own: repository access and push deploys, nothing to copy."
+      />
+      <div className="space-y-3 px-5 py-4">
         {created && (
-          <div className="mb-3">
-            <Notice tone="ok" onClose={() => setSearchParams({}, { replace: true })}>
-              GitHub App <span className="font-mono">{created}</span> created. Install it on your
-              repositories from{" "}
-              <Link to="/settings/git" className="underline">
-                Settings → Git
-              </Link>
-              . To also sign in with GitHub, add the “Email addresses: read” account permission on
-              GitHub, manifests cannot request it.
-            </Notice>
-          </div>
+          <Callout tone="ok" title={`GitHub App ${created} created`} onClose={() => setSearchParams({}, { replace: true })}>
+            Install it on your repositories from{" "}
+            <Link to="/settings/git" className="underline">
+              Settings, Git
+            </Link>
+            . To also sign in with GitHub, add the “Email addresses: read” account permission on GitHub: manifests
+            cannot request it.
+          </Callout>
         )}
         {appError && (
-          <div className="mb-3">
-            <Notice tone="err" onClose={() => setSearchParams({}, { replace: true })}>
-              {githubAppErrors[appError] ?? "GitHub App creation failed."}
-            </Notice>
-          </div>
+          <Callout tone="err" onClose={() => setSearchParams({}, { replace: true })}>
+            {githubAppErrors[appError] ?? "GitHub App creation failed."}
+          </Callout>
         )}
 
         {app.data?.configured ? (
           <div className="flex flex-wrap items-center gap-3">
             <StatusPill tone="ok">Configured</StatusPill>
             <span className="text-sm">
-              <span className="font-mono font-medium">{app.data.slug}</span>
+              <span className="font-mono font-medium text-fg">{app.data.slug}</span>
               {app.data.owner && <span className="text-fg3"> · owned by {app.data.owner}</span>}
             </span>
-            {app.data.html_url && (
-              <a
-                href={app.data.html_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-sm text-accent hover:underline"
-              >
-                Manage on GitHub
-              </a>
-            )}
-            <Link to="/settings/git" className="text-sm text-accent hover:underline">
-              Install on repositories
-            </Link>
+            <span className="ml-auto flex gap-2">
+              {app.data.html_url && (
+                <a href={app.data.html_url} target="_blank" rel="noreferrer" className={btn("secondary", "sm")}>
+                  Manage on GitHub <Icon name="external" size={14} />
+                </a>
+              )}
+              <Link to="/settings/git" className={btn("secondary", "sm")}>
+                Install on repositories
+              </Link>
+            </span>
           </div>
         ) : (
-          <div className="flex items-center gap-2.5">
-            <a href="/api/v1/system/github-app/create" className={btn("primary", "md")}>
-              <Icon name="github" size={16} /> Create GitHub App
-            </a>
-          </div>
+          <a href="/api/v1/system/github-app/create" className={btn("primary", "md")}>
+            <Icon name="github" size={16} /> Create GitHub App
+          </a>
         )}
-      </Row>
-    </Group>
+      </div>
+    </Card>
   );
 }
 
@@ -365,7 +428,8 @@ function GitHubAppSection() {
 
 function OAuthAppsSection() {
   const qc = useQueryClient();
-  const me = useQuery<{ role: string }>({ queryKey: ["auth", "me"], queryFn: () => api("/auth/me") });
+  const can = useCan();
+  const toast = useToast();
   const providers = useQuery<{ github: boolean; google: boolean }>({
     queryKey: ["auth", "oauth-providers"],
     queryFn: () => api("/auth/oauth/providers"),
@@ -381,49 +445,64 @@ function OAuthAppsSection() {
         method: "PUT",
         body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
       }),
-    onSuccess: () => { setClientId(""); setClientSecret(""); qc.invalidateQueries({ queryKey: ["auth", "oauth-providers"] }); },
+    onSuccess: () => {
+      setClientId("");
+      setClientSecret("");
+      toast.ok(`${provider === "github" ? "GitHub" : "Google"} sign-in configured`);
+      qc.invalidateQueries({ queryKey: ["auth", "oauth-providers"] });
+    },
   });
 
-  if (me.data?.role !== "admin") return null;
+  if (!can("admin")) return null;
   const callbackUrl = `${window.location.origin}/api/v1/auth/oauth/${provider}/callback`;
 
   return (
-    <Group title="OAuth applications">
-      <Row
-        title="Connect an identity provider"
-        desc="Manual setup: register an app with this callback URL, then paste its credentials. Needed for Google sign-in; for GitHub, prefer the two-click GitHub App above."
-        stack
+    <Card>
+      <CardHeader
+        title="Sign in with GitHub or Google"
+        description="Manual setup: register an OAuth app with the callback URL below, then paste its credentials. Needed for Google; for GitHub, the GitHub App above is quicker."
+        actions={
+          <span className="flex gap-1.5">
+            <StatusPill tone={providers.data?.github ? "ok" : "idle"}>GitHub</StatusPill>
+            <StatusPill tone={providers.data?.google ? "ok" : "idle"}>Google</StatusPill>
+          </span>
+        }
+      />
+      <form
+        id="oauth-app"
+        className="space-y-4 px-5 py-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
       >
-        <Chip className="mt-1 self-start break-all">{callbackUrl}</Chip>
-        <form
-          className="mt-3 flex flex-wrap items-end gap-2.5"
-          onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
-        >
-          <Field label="Provider" className="w-[130px]">
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Provider" className="w-36">
             <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
               <option value="github">GitHub</option>
               <option value="google">Google</option>
             </Select>
           </Field>
-          <Field label="Client ID" className="min-w-[160px] flex-1">
+          <Field as="div" label="Callback URL" className="min-w-[240px] flex-1">
+            <CopyField value={callbackUrl} />
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Client ID" className="min-w-[200px] flex-1">
             <Input required value={clientId} onChange={(e) => setClientId(e.target.value)} className="font-mono" />
           </Field>
-          <Field label="Client secret" className="min-w-[160px] flex-1">
-            <Input required type="password" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
+          <Field label="Client secret" className="min-w-[200px] flex-1">
+            <Input required type="password" autoComplete="off" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
           </Field>
-          <Button type="submit" variant="primary" disabled={save.isPending}>Save</Button>
-        </form>
-        <div className="mt-3 flex gap-4 text-xs text-fg3">
-          <span>GitHub · {providers.data?.github ? <span className="text-ok">configured</span> : "not configured"}</span>
-          <span>Google · {providers.data?.google ? <span className="text-ok">configured</span> : "not configured"}</span>
         </div>
-        {save.isError && (
-          <p className="mt-2 text-sm text-err">
-            {save.error instanceof Error ? save.error.message : "Failed to save"}
-          </p>
-        )}
-      </Row>
-    </Group>
+        <FormError error={save.error} fallback="Failed to save" />
+      </form>
+      <CardFooter note="The secret is stored encrypted and never shown again.">
+        <Button type="submit" form="oauth-app" size="sm" variant="primary" loading={save.isPending}>
+          Save credentials
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }
 
@@ -431,14 +510,16 @@ function OAuthAppsSection() {
 
 const gitErrorMessages: Record<string, string> = {
   not_configured: "The GitHub OAuth app is not configured.",
-  state_mismatch: "The authorization state did not match. Try connecting again.",
-  exchange_failed: "GitHub rejected the authorization code. Try connecting again.",
+  state_mismatch: "The authorisation state did not match. Try connecting again.",
+  exchange_failed: "GitHub rejected the authorisation code. Try connecting again.",
   profile_failed: "Connected, but the GitHub profile could not be read.",
   app_install_failed: "The GitHub App installation could not be linked. Try again.",
 };
 
 function GitConnections() {
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
   const connections = useQuery<Connection[]>({ queryKey: ["git", "connections"], queryFn: () => api("/git/connections") });
   const providers = useQuery<{ github: boolean; google: boolean }>({
     queryKey: ["auth", "oauth-providers"],
@@ -461,100 +542,116 @@ function GitConnections() {
 
   const add = useMutation({
     mutationFn: () => api("/git/connections", { method: "POST", body: JSON.stringify({ provider, name, token }) }),
-    onSuccess: () => { setName(""); setToken(""); setManualOpen(false); qc.invalidateQueries({ queryKey: ["git", "connections"] }); },
+    onSuccess: () => {
+      setName("");
+      setToken("");
+      setManualOpen(false);
+      toast.ok("Connection added");
+      qc.invalidateQueries({ queryKey: ["git", "connections"] });
+    },
   });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/git/connections/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["git", "connections"] }),
+    onError: (e) => toast.err("Could not remove the connection", errorText(e)),
   });
 
   return (
-    <Group title="Git connections">
-      <Row
-        title="Private repository access"
-        desc="Tokens are stored encrypted and never written to disk."
-        stack
-      >
+    <Card>
+      <CardHeader
+        title="Git connections"
+        description="Access to private repositories. Tokens are stored encrypted and never written to disk."
+        actions={
+          <Button size="sm" variant="ghost" onClick={() => setManualOpen((o) => !o)}>
+            {manualOpen ? "Cancel" : "Add a token manually"}
+          </Button>
+        }
+      />
+      <div className="space-y-4 px-5 py-4">
         {connected && (
-          <div className="mb-3">
-            <Notice tone="ok" onClose={() => setSearchParams({}, { replace: true })}>
-              GitHub account connected as <span className="font-mono">{connected}</span>.
-            </Notice>
-          </div>
+          <Callout tone="ok" onClose={() => setSearchParams({}, { replace: true })}>
+            GitHub account connected as <span className="font-mono">{connected}</span>.
+          </Callout>
         )}
         {gitError && (
-          <div className="mb-3">
-            <Notice tone="err" onClose={() => setSearchParams({}, { replace: true })}>
-              {gitErrorMessages[gitError] ?? "GitHub connect failed."}
-            </Notice>
-          </div>
+          <Callout tone="err" onClose={() => setSearchParams({}, { replace: true })}>
+            {gitErrorMessages[gitError] ?? "GitHub connect failed."}
+          </Callout>
         )}
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {app.data?.configured ? (
-            <a
-              href={`https://github.com/apps/${app.data.slug}/installations/new`}
-              className={btn("primary", "md")}
-            >
-              <Icon name="github" size={16} /> Install GitHub App on repositories
-            </a>
-          ) : providers.data?.github ? (
-            <a href="/api/v1/git/connections/github/connect" className={btn("primary", "md")}>
-              <Icon name="github" size={16} /> Connect GitHub
-            </a>
-          ) : (
-            <p className="text-sm text-fg3">
-              Create the GitHub App in{" "}
-              <Link to="/settings/auth" className="text-accent hover:underline">
-                Users &amp; auth
-              </Link>{" "}
-              for two-click connect.
-            </p>
-          )}
-          <Button variant="ghost" onClick={() => setManualOpen((o) => !o)}>
-            {manualOpen ? "Cancel manual token" : "Add a token manually"}
-          </Button>
-        </div>
+        {app.data?.configured ? (
+          <a href={`https://github.com/apps/${app.data.slug}/installations/new`} className={btn("primary", "md")}>
+            <Icon name="github" size={16} /> Install GitHub App on repositories
+          </a>
+        ) : providers.data?.github ? (
+          <a href="/api/v1/git/connections/github/connect" className={btn("primary", "md")}>
+            <Icon name="github" size={16} /> Connect GitHub
+          </a>
+        ) : (
+          <p className="text-sm text-fg3">
+            Create the GitHub App in{" "}
+            <Link to="/settings/auth" className="text-accent hover:underline">
+              Users and sign-in
+            </Link>{" "}
+            for two-click connect, or add a token manually.
+          </p>
+        )}
 
         {manualOpen && (
           <form
-            className="mt-4 flex flex-wrap items-end gap-2.5"
-            onSubmit={(e) => { e.preventDefault(); add.mutate(); }}
+            className="flex flex-wrap items-end gap-3 rounded-card border border-hairline bg-surface2 p-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              add.mutate();
+            }}
           >
-            <Field label="Provider" className="w-[120px]">
+            <Field label="Provider" className="w-32">
               <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
                 <option value="github">GitHub</option>
                 <option value="gitlab">GitLab</option>
               </Select>
             </Field>
-            <Field label="Name" className="w-[150px]">
+            <Field label="Name" className="w-44">
               <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="acme-bot" />
             </Field>
-            <Field label="Token" className="min-w-[160px] flex-1">
-              <Input required type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="ghp_… / glpat-…" />
+            <Field label="Token" className="min-w-[200px] flex-1">
+              <Input required type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="ghp_… or glpat-…" />
             </Field>
-            <Button type="submit" variant="primary" disabled={add.isPending}>Add</Button>
+            <Button type="submit" variant="primary" loading={add.isPending}>
+              Add
+            </Button>
+            <div className="basis-full empty:hidden">
+              <FormError error={add.error} fallback="Failed" />
+            </div>
           </form>
         )}
-        {add.isError && (
-          <p className="mt-2 text-sm text-err">{add.error instanceof Error ? add.error.message : "Failed"}</p>
-        )}
+      </div>
 
-        {connections.data && connections.data.length > 0 && (
-          <div className="mt-4 space-y-2">
-            {connections.data.map((c) => (
-              <div key={c.id} className="flex items-center justify-between rounded-[10px] border border-hairline bg-surface2 px-4 py-2.5">
-                <div className="flex items-center gap-2.5 text-sm">
-                  <span className="font-mono font-medium">{c.name}</span>
-                  <StatusPill tone="idle">{c.provider}</StatusPill>
-                </div>
-                <button onClick={() => remove.mutate(c.id)} className="text-xs text-fg3 hover:text-err">Remove</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Row>
-    </Group>
+      {connections.data && connections.data.length > 0 && (
+        <ul className="divide-y divide-hairline border-t border-hairline">
+          {connections.data.map((c) => (
+            <ListRow
+              key={c.id}
+              removeLabel={`Remove ${c.name}`}
+              onRemove={async () => {
+                if (
+                  await confirm({
+                    title: `Remove ${c.name}?`,
+                    body: "Projects that pull private repositories through it will fail to deploy until they get another connection.",
+                    confirmLabel: "Remove connection",
+                  })
+                )
+                  remove.mutate(c.id);
+              }}
+            >
+              <Icon name={c.provider === "github" ? "github" : "gitBranch"} size={16} className="text-fg2" />
+              <span className="font-mono font-medium text-fg">{c.name}</span>
+              <Tag>{c.provider}</Tag>
+            </ListRow>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
@@ -578,6 +675,8 @@ interface RegistryCredential {
  */
 function RegistryCredentials() {
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
   const creds = useQuery<RegistryCredential[]>({
     queryKey: ["registries"],
     queryFn: () => api("/registries"),
@@ -608,12 +707,14 @@ function RegistryCredentials() {
       // Stored but the login failed: worth saying, because the credential is
       // saved and somebody would otherwise assume it works.
       setWarning(res.warning ?? null);
+      if (!res.warning) toast.ok(`Signed in to ${host}`);
       qc.invalidateQueries({ queryKey: ["registries"] });
     },
   });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/registries/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["registries"] }),
+    onError: (e) => toast.err("Could not remove the credential", errorText(e)),
   });
   const fromGit = useMutation({
     mutationFn: (id: number) =>
@@ -629,83 +730,92 @@ function RegistryCredentials() {
   });
 
   return (
-    <Group title="Container registries">
-      <Row
-        title="Private image access"
-        desc="Applied to the host with docker login, so pulls keep working if Windlass is stopped or removed. Tokens are stored encrypted and never returned."
-        stack
-      >
+    <Card>
+      <CardHeader
+        title="Container registries"
+        description="Credentials for private images. Applied to the host with docker login, so pulls keep working if Windlass is stopped or removed. Tokens are stored encrypted and never returned."
+      />
+      <div className="space-y-4 px-5 py-4">
         {warning && (
-          <div className="mb-3">
-            <Notice tone="err" onClose={() => setWarning(null)}>
-              Saved, but signing in failed: {warning}
-            </Notice>
-          </div>
+          <Callout tone="err" title="Saved, but signing in failed" onClose={() => setWarning(null)}>
+            {warning}
+          </Callout>
         )}
 
         {github && (
-          <div className="mb-4 flex flex-wrap items-center gap-2.5">
-            <Button
-              variant="primary"
-              disabled={fromGit.isPending}
-              onClick={() => fromGit.mutate(github.id)}
-            >
-              <Icon name="github" size={16} />
-              {fromGit.isPending ? "Signing in…" : `Use ${github.name} for ghcr.io`}
-            </Button>
-            <span className="text-sm text-fg3">
-              Uses the GitHub connection you already have. Needs read:packages on that token.
+          <div className="flex flex-wrap items-center gap-3 rounded-card border border-hairline bg-surface2 px-4 py-3">
+            <Icon name="github" size={18} className="text-fg2" />
+            <span className="min-w-0 flex-1 text-sm text-fg2">
+              Use the <span className="font-mono font-medium text-fg">{github.name}</span> connection for ghcr.io. Its
+              token needs read:packages.
             </span>
+            <Button size="sm" loading={fromGit.isPending} onClick={() => fromGit.mutate(github.id)}>
+              Use for ghcr.io
+            </Button>
           </div>
         )}
 
         <form
-          className="flex flex-wrap items-end gap-2.5"
-          onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
+          id="registry"
+          className="flex flex-wrap items-end gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save.mutate();
+          }}
         >
-          <Field label="Registry" className="w-[170px]">
-            <Input required value={host} onChange={(e) => setHost(e.target.value)} placeholder="ghcr.io" />
+          <Field label="Registry" className="w-44">
+            <Input required value={host} onChange={(e) => setHost(e.target.value)} placeholder="ghcr.io" className="font-mono" />
           </Field>
-          <Field label="Username" className="w-[150px]">
+          <Field label="Username" className="w-44">
             <Input required value={username} onChange={(e) => setUsername(e.target.value)} placeholder="your-github-user" />
           </Field>
-          <Field label="Token" className="min-w-[160px] flex-1">
-            <Input required type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="read:packages token" />
+          <Field label="Token" className="min-w-[200px] flex-1">
+            <Input required type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="read:packages token" />
           </Field>
-          <Button type="submit" variant="primary" disabled={save.isPending}>
-            {save.isPending ? "Signing in…" : "Save and sign in"}
+          <Button type="submit" variant="primary" loading={save.isPending}>
+            Save and sign in
           </Button>
         </form>
-        {save.isError && (
-          <p className="mt-2 text-sm text-err">{save.error instanceof Error ? save.error.message : "Failed"}</p>
-        )}
+        <FormError error={save.error} fallback="Failed" />
+      </div>
 
-        {creds.data && creds.data.length > 0 && (
-          <div className="mt-4 space-y-2">
-            {creds.data.map((c) => (
-              <div key={c.id} className="flex items-center justify-between rounded-[10px] border border-hairline bg-surface2 px-4 py-2.5">
-                <div className="flex items-center gap-2.5 text-sm">
-                  <span className="font-mono font-medium">{c.host}</span>
-                  <span className="text-fg3">{c.username}</span>
-                  {c.verified_at ? (
-                    <StatusPill tone="ok">signed in</StatusPill>
-                  ) : (
-                    <StatusPill tone="err">never signed in</StatusPill>
-                  )}
-                </div>
-                <button onClick={() => remove.mutate(c.id)} className="text-xs text-fg3 hover:text-err">Remove</button>
-              </div>
-            ))}
-          </div>
-        )}
-        {creds.data && creds.data.length === 0 && (
-          <p className="mt-3 text-sm text-fg3">
-            Nothing configured. A project pulling a private image will fail with
-            <span className="font-mono"> unauthorized</span> until one is added.
-          </p>
-        )}
-      </Row>
-    </Group>
+      {creds.data && creds.data.length > 0 ? (
+        <ul className="divide-y divide-hairline border-t border-hairline">
+          {creds.data.map((c) => (
+            <ListRow
+              key={c.id}
+              removeLabel={`Remove ${c.host}`}
+              onRemove={async () => {
+                if (
+                  await confirm({
+                    title: `Remove the ${c.host} credential?`,
+                    body: "Windlass logs the host out of this registry. Private images from it will fail to pull.",
+                    confirmLabel: "Remove credential",
+                  })
+                )
+                  remove.mutate(c.id);
+              }}
+            >
+              <Icon name="package" size={16} className="text-fg2" />
+              <span className="font-mono font-medium text-fg">{c.host}</span>
+              <span className="text-fg3">{c.username}</span>
+              {c.verified_at ? <StatusPill tone="ok">Signed in</StatusPill> : <StatusPill tone="err">Never signed in</StatusPill>}
+            </ListRow>
+          ))}
+        </ul>
+      ) : (
+        creds.data && (
+          <CardFooter
+            note={
+              <>
+                Nothing configured. A project pulling a private image fails with <span className="font-mono">unauthorized</span> until one
+                is added.
+              </>
+            }
+          />
+        )
+      )}
+    </Card>
   );
 }
 
@@ -722,65 +832,107 @@ interface AdminUser {
 
 function UsersSection() {
   const qc = useQueryClient();
-  const users = useQuery<AdminUser[]>({ queryKey: ["users"], queryFn: () => api("/users"), retry: false });
+  const toast = useToast();
+  const confirm = useConfirm();
+  const can = useCan();
+  const me = useMe();
+  const users = useQuery<AdminUser[]>({ queryKey: ["users"], queryFn: () => api("/users"), retry: false, enabled: can("admin") });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("member");
 
   const create = useMutation({
     mutationFn: () => api("/users", { method: "POST", body: JSON.stringify({ email, password, role }) }),
-    onSuccess: () => { setEmail(""); setPassword(""); qc.invalidateQueries({ queryKey: ["users"] }); },
+    onSuccess: () => {
+      toast.ok(`Added ${email}`);
+      setEmail("");
+      setPassword("");
+      qc.invalidateQueries({ queryKey: ["users"] });
+    },
   });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/users/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
+    onError: (e) => toast.err("Could not remove the user", errorText(e)),
   });
 
-  if (users.isError) return null;
+  if (!can("admin") || users.isError) return null;
 
   return (
-    <Group title="Users">
-      <Row stack>
-        <form className="flex flex-wrap items-end gap-2.5" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
-          <Field label="Email" className="min-w-[180px] flex-1">
-            <Input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </Field>
-          <Field label="Password (min 10)" className="w-[180px]">
-            <Input type="password" minLength={10} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="empty = OAuth-only" />
-          </Field>
-          <Field label="Role" className="w-[130px]">
-            <Select value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="viewer">viewer</option>
-              <option value="member">member</option>
-              <option value="admin">admin</option>
-            </Select>
-          </Field>
-          <Button type="submit" variant="primary" disabled={create.isPending}>Add</Button>
-        </form>
-        {create.isError && (
-          <p className="mt-2 text-sm text-err">{create.error instanceof Error ? create.error.message : "Failed"}</p>
-        )}
-        {users.data && users.data.length > 0 && (
-          <div className="mt-4 space-y-2">
-            {users.data.map((u) => (
-              <div key={u.id} className="flex items-center justify-between rounded-[10px] border border-hairline bg-surface2 px-4 py-2.5 text-sm">
-                <div className="flex items-center gap-2.5">
-                  <span className="font-medium">{u.email}</span>
-                  <StatusPill tone={u.role === "admin" ? "accent" : "idle"}>{u.role}</StatusPill>
-                  {u.totp_enabled && <span className="text-xs text-fg3">2FA</span>}
-                </div>
-                <button
-                  onClick={() => { if (confirm(`Delete user ${u.email}?`)) remove.mutate(u.id); }}
-                  className="text-xs text-fg3 hover:text-err"
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Row>
-    </Group>
+    <Card>
+      <CardHeader
+        title="Users"
+        description="Viewers can look but not change anything. Members deploy and edit projects. Admins also manage users and server settings."
+      />
+      <form
+        className="flex flex-wrap items-end gap-3 px-5 py-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          create.mutate();
+        }}
+      >
+        <Field label="Email" className="min-w-[200px] flex-1">
+          <Input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </Field>
+        <Field label="Password" className="w-48">
+          <Input
+            type="password"
+            minLength={10}
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Empty: OAuth only"
+          />
+        </Field>
+        <Field label="Role" className="w-32">
+          <Select value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="viewer">Viewer</option>
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+          </Select>
+        </Field>
+        <Button type="submit" variant="primary" icon="plus" loading={create.isPending}>
+          Add user
+        </Button>
+        <div className="basis-full empty:hidden">
+          <FormError error={create.error} fallback="Failed" />
+        </div>
+      </form>
+      {users.data && users.data.length > 0 && (
+        <ul className="divide-y divide-hairline border-t border-hairline">
+          {users.data.map((u) => (
+            <ListRow
+              key={u.id}
+              removeLabel={`Remove ${u.email}`}
+              onRemove={
+                u.id === me.data?.id
+                  ? undefined
+                  : async () => {
+                      if (
+                        await confirm({
+                          title: `Remove ${u.email}?`,
+                          body: "They are signed out everywhere and can no longer reach this panel.",
+                          confirmLabel: "Remove user",
+                        })
+                      )
+                        remove.mutate(u.id);
+                    }
+              }
+            >
+              <span className="grid h-7 w-7 place-items-center rounded-full border border-hairline bg-sunken text-2xs font-bold uppercase text-fg2">
+                {u.email.slice(0, 2)}
+              </span>
+              <span className="font-medium text-fg">{u.email}</span>
+              {u.id === me.data?.id && <span className="text-xs text-fg3">(you)</span>}
+              <Tag tone={u.role === "admin" ? "accent" : "idle"}>{u.role}</Tag>
+              {u.totp_enabled && <Tag tone="ok">2FA</Tag>}
+              {u.oauth && <Tag>{u.oauth}</Tag>}
+              {u.disabled && <Tag tone="err">Disabled</Tag>}
+            </ListRow>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
@@ -793,68 +945,69 @@ interface ImageDiskUsage {
   reclaimable_bytes: number;
 }
 
-function formatBytes(bytes: number) {
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KiB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GiB`;
-}
-
 function DockerStorageSection() {
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
   const usage = useQuery<ImageDiskUsage>({ queryKey: ["system", "docker", "images"], queryFn: () => api("/system/docker/images"), retry: false });
   const prune = useMutation<{ deleted: number; reclaimed_bytes: number }>({
     mutationFn: () => api("/system/docker/images/prune", { method: "POST", body: JSON.stringify({ retention_days: 7, keep_deployments: 5 }) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["system", "docker", "images"] }),
+    onSuccess: (r) => {
+      toast.ok(`Removed ${r.deleted} images`, `${formatBytes(r.reclaimed_bytes)} reclaimed.`);
+      qc.invalidateQueries({ queryKey: ["system", "docker", "images"] });
+    },
+    onError: (e) => toast.err("Cleanup failed", errorText(e)),
   });
 
   if (usage.isError) return null;
+  const u = usage.data;
   return (
-    <Group title="Docker image storage">
-      <Row
-        title="Reclaim disk space"
-        desc={
-          usage.data
-            ? `${usage.data.total_count} images use ${formatBytes(usage.data.total_bytes)}; ${formatBytes(usage.data.reclaimable_bytes)} potentially reclaimable.`
-            : "Calculating image usage…"
-        }
-        stack
-      >
-        <div className="mt-1">
-          <Button
-            size="sm"
-            onClick={() => {
-              if (confirm("Remove unused images older than 7 days while preserving the last 5 successful deployments per project?")) prune.mutate();
-            }}
-            disabled={prune.isPending}
-          >
-            {prune.isPending ? "Cleaning…" : "Clean unused images"}
-          </Button>
-        </div>
-        {prune.data && (
-          <p className="mt-2 text-sm text-ok">Removed {prune.data.deleted} images ({formatBytes(prune.data.reclaimed_bytes)}).</p>
-        )}
-        {prune.isError && (
-          <p className="mt-2 text-sm text-err">{prune.error instanceof Error ? prune.error.message : "Cleanup failed"}</p>
-        )}
-      </Row>
-    </Group>
+    <Card>
+      <CardHeader title="Docker image storage" description="Old images pile up with every build and pull." />
+      <div className="grid grid-cols-2 divide-x divide-hairline border-b border-hairline sm:grid-cols-3">
+        {[
+          ["Images", u ? `${u.total_count}` : "…", u ? `${u.active_count} in use` : ""],
+          ["Total size", u ? formatBytes(u.total_bytes) : "…", ""],
+          ["Reclaimable", u ? formatBytes(u.reclaimable_bytes) : "…", "potentially"],
+        ].map(([label, value, sub]) => (
+          <div key={label} className="px-5 py-4">
+            <div className="text-xs text-fg3">{label}</div>
+            <div className="mt-1 text-xl font-semibold tabular-nums tracking-[-0.02em] text-fg">{value}</div>
+            {sub && <div className="text-xs text-fg3">{sub}</div>}
+          </div>
+        ))}
+      </div>
+      <CardFooter note="Removes unused images older than 7 days, keeping those behind each project's last 5 successful deployments so rollback still works.">
+        <Button
+          size="sm"
+          loading={prune.isPending}
+          onClick={async () => {
+            if (
+              await confirm({
+                title: "Clean unused images?",
+                body: "Unused images older than 7 days are removed. The images behind each project's last 5 successful deployments are kept.",
+                confirmLabel: "Clean images",
+              })
+            )
+              prune.mutate();
+          }}
+        >
+          Clean unused images
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }
 
 // ---------- Updates ----------
 
-interface UpdateInfo {
-  version: string;
-  current_version: string;
-  update_available: boolean;
-}
-
 function UpdateSection() {
-  const check = useQuery<UpdateInfo>({ queryKey: ["system", "update"], queryFn: () => api("/system/update"), retry: false });
+  const can = useCan();
+  const check = useUpdateCheck(can("admin"));
   const apply = useMutation({ mutationFn: () => api("/system/update", { method: "POST" }) });
 
   // Arriving from the sidebar update alert (#updates) briefly highlights
-  // this group so it's obvious where the click landed.
+  // this card so it's obvious where the click landed.
   const location = useLocation();
   const [flash, setFlash] = useState(false);
   useEffect(() => {
@@ -865,43 +1018,36 @@ function UpdateSection() {
     }
   }, [location.hash]);
 
-  if (check.isError) return null;
+  if (!can("admin") || check.isError) return null;
 
   return (
-    <div
-      id="updates"
-      className={cn(
-        "rounded-[16px] transition-shadow duration-500",
-        flash && "ring-2 ring-[var(--color-accent-fill)]",
-      )}
-    >
-      <Group title="Software updates">
-      <Row
-        title={`Running ${check.data?.current_version ?? "…"}`}
-        desc={check.data?.update_available ? `Version ${check.data.version} is available.` : "You're up to date."}
-      >
-        {check.data?.update_available ? (
-          <>
-            <StatusPill tone="warn">Update available</StatusPill>
-            <Button size="sm" variant="primary" onClick={() => apply.mutate()} disabled={apply.isPending}>
-              {apply.isPending ? "Updating…" : "Update now"}
-            </Button>
-          </>
-        ) : (
-          <StatusPill tone="ok">Up to date</StatusPill>
-        )}
-      </Row>
+    <div id="updates" className={cn("rounded-card transition-shadow duration-500", flash && "ring-2 ring-[var(--color-accent-fill)] ring-offset-2 ring-offset-panel")}>
+      <Card>
+        <CardHeader title="Software updates" description="Updating restarts the panel only. Deployed apps keep running." />
+        <Row
+          title={`Running ${check.data?.current_version ?? "…"}`}
+          desc={check.data?.update_available ? `Version ${check.data.version} is available.` : "You're up to date."}
+        >
+          {check.data?.update_available ? (
+            <>
+              <StatusPill tone="warn">Update available</StatusPill>
+              <Button size="sm" variant="primary" icon="download" onClick={() => apply.mutate()} loading={apply.isPending}>
+                Update now
+              </Button>
+            </>
+          ) : (
+            check.data && <StatusPill tone="ok">Up to date</StatusPill>
+          )}
+        </Row>
         {(apply.isSuccess || apply.isError) && (
-          <Row stack>
+          <div className="px-5 pb-4">
             {apply.isSuccess && (
-              <p className="text-sm text-ok">Updating. The panel restarts in a few seconds. Deployed apps are unaffected.</p>
+              <Callout tone="ok">Updating. The panel restarts in a few seconds. Deployed apps are unaffected.</Callout>
             )}
-            {apply.isError && (
-              <p className="text-sm text-err">{apply.error instanceof Error ? apply.error.message : "Update failed"}</p>
-            )}
-          </Row>
+            {apply.isError && <Callout tone="err">{errorText(apply.error, "Update failed")}</Callout>}
+          </div>
         )}
-      </Group>
+      </Card>
     </div>
   );
 }

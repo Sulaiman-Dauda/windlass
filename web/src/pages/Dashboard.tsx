@@ -1,144 +1,222 @@
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../api/client";
+import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { useCan } from "../api/auth";
 import { useProjects } from "../api/projects";
-import { Page, SectionHead, EmptyState } from "../ui/Page";
-import { Card, CardLink } from "../ui/Card";
+import { useMetrics } from "../api/system";
+import { Page, SectionHead, EmptyState, MetaItem } from "../ui/Page";
+import { Card } from "../ui/Card";
+import { btn } from "../ui/Button";
+import { StatusDot } from "../ui/Badge";
 import { Icon, type IconName } from "../ui/Icon";
+import { Skeleton } from "../ui/Skeleton";
 import { cn } from "../ui/cn";
+import { formatBytes, formatUptime, plural } from "../ui/format";
+import ProjectsTable from "../components/ProjectsTable";
 
-interface Metrics {
-  host: {
-    cpu_percent: number;
-    memory_used: number;
-    memory_total: number;
-    disk_used: number;
-    disk_total: number;
-    load1: number;
-    uptime_seconds: number;
-  };
-  node: { hostname: string; docker_version: string; compose_version: string; caddy_version: string };
-  containers: { running: number; total: number };
+function Meter({ pct }: { pct: number }) {
+  const tone = pct >= 95 ? "bg-err" : pct >= 85 ? "bg-warn" : "bg-accent";
+  return (
+    <div
+      className="mt-3 h-1.5 overflow-hidden rounded-full bg-sunken"
+      role="meter"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(pct)}
+    >
+      <div
+        className={cn("h-full rounded-full transition-[width] duration-700", tone)}
+        style={{ width: `${Math.min(100, Math.max(1.5, pct))}%`, transitionTimingFunction: "var(--ease)" }}
+      />
+    </div>
+  );
 }
 
-function gb(bytes: number): string {
-  return (bytes / (1 << 30)).toFixed(1) + " GB";
-}
-
-function Metric({
+function Tile({
   label,
   icon,
   value,
   unit,
-  sub,
   pct,
+  sub,
 }: {
   label: string;
   icon: IconName;
-  value: string;
+  value?: string;
   unit?: string;
-  sub?: string;
   pct?: number | null;
+  sub?: ReactNode;
 }) {
-  const warn = pct != null && pct >= 85;
   return (
-    <Card className="flex flex-col gap-2.5 p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-2xs font-semibold uppercase tracking-[0.04em] text-fg3">{label}</span>
-        <span className="text-fg3">
-          <Icon name={icon} size={16} />
-        </span>
+    <Card className="p-4">
+      <div className="flex items-center gap-2 text-sm font-medium text-fg2">
+        <Icon name={icon} size={16} className="text-fg3" />
+        {label}
       </div>
-      <div className="text-3xl font-semibold leading-none tracking-[-0.02em] tabular-nums">
-        {value}
-        {unit && <span className="ml-0.5 text-base font-medium text-fg3">{unit}</span>}
-      </div>
-      {pct != null && (
-        <div className="h-[5px] overflow-hidden rounded-full bg-sunken">
-          <div
-            className={cn("h-full rounded-full", warn ? "bg-warn" : "bg-accent")}
-            style={{ width: `${Math.min(100, Math.max(2, pct))}%` }}
-          />
-        </div>
+      {value === undefined ? (
+        <>
+          <Skeleton className="mt-3 h-8 w-20" />
+          <Skeleton className="mt-3 h-1.5 w-full" />
+          <Skeleton className="mt-2.5 h-4 w-28" />
+        </>
+      ) : (
+        <>
+          <div className="mt-2.5 flex items-baseline gap-1">
+            <span className="text-3xl font-semibold tabular-nums tracking-[-0.03em] text-fg">{value}</span>
+            {unit && <span className="text-md font-medium text-fg3">{unit}</span>}
+          </div>
+          {pct != null && <Meter pct={pct} />}
+          {sub && <div className="mt-2 text-xs tabular-nums text-fg3">{sub}</div>}
+        </>
       )}
-      {sub && <div className="text-xs tabular-nums text-fg3">{sub}</div>}
     </Card>
   );
 }
 
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+      <dt className="text-fg3">{label}</dt>
+      <dd className="min-w-0 truncate text-right font-medium text-fg">{children}</dd>
+    </div>
+  );
+}
+
 export default function Dashboard() {
-  const metrics = useQuery<Metrics>({
-    queryKey: ["system", "metrics"],
-    queryFn: () => api("/system/metrics"),
-    refetchInterval: 10_000,
-  });
+  const metrics = useMetrics(10_000);
   const projects = useProjects();
+  const can = useCan();
 
   const m = metrics.data;
-  const memPct = m && m.host.memory_total > 0 ? Math.round((m.host.memory_used / m.host.memory_total) * 100) : null;
-  const diskPct = m && m.host.disk_total > 0 ? Math.round((m.host.disk_used / m.host.disk_total) * 100) : null;
+  const memPct = m && m.host.memory_total > 0 ? (m.host.memory_used / m.host.memory_total) * 100 : null;
+  const diskPct = m && m.host.disk_total > 0 ? (m.host.disk_used / m.host.disk_total) * 100 : null;
+  const stopped = m ? m.containers.total - m.containers.running : 0;
+  const list = projects.data ?? [];
 
   return (
     <Page
-      title={m?.node.hostname || "Dashboard"}
-      subtitle={
-        m
-          ? `docker ${m.node.docker_version || "—"} · compose ${m.node.compose_version || "—"} · caddy ${m.node.caddy_version || "unavailable"}`
-          : undefined
+      title="Overview"
+      crumbs={[{ label: "Overview" }]}
+      meta={
+        m && (
+          <>
+            <MetaItem icon="server">{m.node.hostname}</MetaItem>
+            {m.host.uptime_seconds > 0 && <MetaItem icon="clock">Up {formatUptime(m.host.uptime_seconds)}</MetaItem>}
+            <MetaItem icon="activity">Load {m.host.load1.toFixed(2)}</MetaItem>
+          </>
+        )
+      }
+      actions={
+        can("member") && (
+          <>
+            <Link to="/templates" className={btn("secondary", "md")}>
+              <Icon name="templates" size={16} /> Templates
+            </Link>
+            <Link to="/projects?new=1" className={btn("primary", "md")}>
+              <Icon name="plus" size={16} /> New project
+            </Link>
+          </>
+        )
       }
     >
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Metric
+      {metrics.isError && (
+        <p className="mb-4 text-sm text-fg3">Host metrics are unavailable right now. Projects below are unaffected.</p>
+      )}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Tile
           label="CPU"
-          icon="dashboard"
-          value={m ? `${m.host.cpu_percent.toFixed(0)}` : "—"}
-          unit={m ? "%" : undefined}
-          pct={m ? m.host.cpu_percent : null}
-          sub={m ? `load ${m.host.load1.toFixed(2)}` : undefined}
+          icon="cpu"
+          value={m ? m.host.cpu_percent.toFixed(0) : undefined}
+          unit="%"
+          pct={m?.host.cpu_percent}
+          sub={m && `Load average ${m.host.load1.toFixed(2)}`}
         />
-        <Metric
+        <Tile
           label="Memory"
-          icon="database"
-          value={memPct !== null ? `${memPct}` : "—"}
-          unit={memPct !== null ? "%" : undefined}
+          icon="memory"
+          value={memPct !== null ? memPct.toFixed(0) : m ? "0" : undefined}
+          unit="%"
           pct={memPct}
-          sub={m && m.host.memory_total > 0 ? `${gb(m.host.memory_used)} / ${gb(m.host.memory_total)}` : undefined}
+          sub={m && m.host.memory_total > 0 && `${formatBytes(m.host.memory_used)} of ${formatBytes(m.host.memory_total)}`}
         />
-        <Metric
+        <Tile
           label="Disk"
-          icon="globe"
-          value={diskPct !== null ? `${diskPct}` : "—"}
-          unit={diskPct !== null ? "%" : undefined}
+          icon="disk"
+          value={diskPct !== null ? diskPct.toFixed(0) : m ? "0" : undefined}
+          unit="%"
           pct={diskPct}
-          sub={m && m.host.disk_total > 0 ? `${gb(m.host.disk_used)} / ${gb(m.host.disk_total)}` : undefined}
+          sub={m && m.host.disk_total > 0 && `${formatBytes(m.host.disk_used)} of ${formatBytes(m.host.disk_total)}`}
         />
-        <Metric
+        <Tile
           label="Containers"
-          icon="projects"
-          value={m ? `${m.containers.running}` : "—"}
-          sub={m ? `of ${m.containers.total} total` : undefined}
+          icon="layers"
+          value={m ? String(m.containers.running) : undefined}
+          unit={m ? `/ ${m.containers.total}` : undefined}
+          pct={m && m.containers.total > 0 ? (m.containers.running / m.containers.total) * 100 : null}
+          sub={m && (stopped > 0 ? `${stopped} stopped` : "All running")}
         />
       </div>
 
-      <SectionHead title="Projects" />
-      {projects.data && projects.data.length === 0 ? (
-        <EmptyState
-          icon={<Icon name="projects" size={26} />}
-          title="No projects yet"
-          desc="Create one from Projects or spin up a database from Templates."
-        />
-      ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.data?.map((p) => (
-            <CardLink key={p.name} to={`/projects/${p.name}`} className="p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-md font-semibold tracking-[-0.01em]">{p.name}</span>
-                <Icon name="chevronRight" size={16} className="text-fg3" />
-              </div>
-              <div className="mt-2 truncate font-mono text-xs text-fg3">{p.source}</div>
-            </CardLink>
-          ))}
-        </div>
-      )}
+      <div className="mt-8 grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <section className="min-w-0">
+          <SectionHead
+            title="Projects"
+            description={projects.data && plural(list.length, "project")}
+            actions={
+              list.length > 0 && (
+                <Link to="/projects" className="inline-flex items-center gap-1 text-sm font-medium text-fg3 hover:text-fg">
+                  View all <Icon name="chevronRight" size={14} />
+                </Link>
+              )
+            }
+          />
+          {projects.data && list.length === 0 ? (
+            <EmptyState
+              icon="projects"
+              title="No projects yet"
+              desc="A project is a directory with a compose.yaml. Create one, start from a template, or scan the stacks directory to adopt what is already there."
+              actions={
+                can("member") && (
+                  <>
+                    <Link to="/templates" className={btn("secondary", "md")}>
+                      Browse templates
+                    </Link>
+                    <Link to="/projects?new=1" className={btn("primary", "md")}>
+                      <Icon name="plus" size={16} /> New project
+                    </Link>
+                  </>
+                )
+              }
+            />
+          ) : (
+            <ProjectsTable projects={list} loading={projects.isLoading} />
+          )}
+        </section>
+
+        <section className="min-w-0">
+          <SectionHead title="Server" description="Runtime this panel drives" />
+          <Card>
+            <dl className="divide-y divide-hairline">
+              <Row label="Hostname">{m?.node.hostname || "–"}</Row>
+              <Row label="Uptime">{m ? formatUptime(m.host.uptime_seconds) || "–" : "–"}</Row>
+              <Row label="Docker">{m?.node.docker_version || "–"}</Row>
+              <Row label="Compose">{m?.node.compose_version || "–"}</Row>
+              <Row label="Caddy">
+                {m ? (
+                  <span className="inline-flex items-center gap-2">
+                    <StatusDot tone={m.node.caddy_version ? "ok" : "warn"} />
+                    {m.node.caddy_version || "Unavailable"}
+                  </span>
+                ) : (
+                  "–"
+                )}
+              </Row>
+            </dl>
+          </Card>
+          <p className="mt-3 px-1 text-xs leading-relaxed text-fg3">
+            Containers belong to Docker, not to Windlass. Stop the panel and every project keeps running.
+          </p>
+        </section>
+      </div>
     </Page>
   );
 }

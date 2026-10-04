@@ -57,7 +57,10 @@ export function useDeleteProject() {
         method: "DELETE",
         body: JSON.stringify(password ? { password } : {}),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+    // Only the list: refetching the deleted project's own queries 404s them,
+    // which swaps the page to "not found" and unmounts the dialog before its
+    // onSuccess can navigate away.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"], exact: true }),
   });
 }
 

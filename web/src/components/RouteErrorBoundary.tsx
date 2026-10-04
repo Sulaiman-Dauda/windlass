@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { Button, btn } from "../ui/Button";
+import { Icon } from "../ui/Icon";
 
 interface BoundaryProps {
   children: ReactNode;
@@ -30,22 +32,21 @@ class Boundary extends Component<BoundaryProps, BoundaryState> {
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div className="rounded-[13px] border border-hairline bg-err-soft p-5">
-        <h1 className="text-lg font-semibold text-err">This page could not be displayed</h1>
-        <p className="mt-2 text-sm text-fg2">{this.state.error.message}</p>
-        <div className="mt-4 flex gap-2">
-          <button
-            onClick={() => window.location.reload()}
-            className="rounded-[10px] bg-accent-fill px-4 py-2.5 text-md font-semibold text-onaccent hover:bg-accent-fill-hi"
-          >
-            Reload page
-          </button>
-          <Link
-            to="/projects"
-            className="rounded-[10px] border border-edge bg-surface px-4 py-2.5 text-md font-semibold text-fg no-underline hover:bg-surface2"
-          >
-            Back to projects
-          </Link>
+      <div className="grid min-h-[60vh] place-items-center px-4">
+        <div className="max-w-md text-center">
+          <div className="mx-auto grid h-11 w-11 place-items-center rounded-[10px] border border-hairline bg-err-soft text-err">
+            <Icon name="warning" size={20} />
+          </div>
+          <h1 className="mt-4 text-lg font-semibold text-fg">This page could not be displayed</h1>
+          <p className="mt-1 break-words text-sm text-fg3">{this.state.error.message}</p>
+          <div className="mt-5 flex justify-center gap-2">
+            <Link to="/projects" className={btn("secondary", "md")}>
+              Back to projects
+            </Link>
+            <Button variant="primary" icon="refresh" onClick={() => window.location.reload()}>
+              Reload page
+            </Button>
+          </div>
         </div>
       </div>
     );

@@ -24,12 +24,12 @@ test("first-run → project → real deployment", async ({ page }) => {
   await page.getByRole("button", { name: "New project" }).click();
   await page.getByPlaceholder(/project-name/).fill("smoke");
   await page.getByRole("button", { name: "Create", exact: true }).click();
-  await expect(page.getByRole("link", { name: /smoke/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /smoke/ }).first()).toBeVisible();
 
   // Deploy it (starter nginx compose) and watch the live log.
   await page.goto("/projects/smoke/deployments");
   await page.getByRole("button", { name: "Deploy", exact: true }).click();
-  await expect(page.locator("text=#1")).toBeVisible();
+  await expect(page.locator("text=#1").first()).toBeVisible();
 
   // The pipeline streams steps into the log pane and finishes.
   await expect(page.getByText("starting services")).toBeVisible({ timeout: 120_000 });
@@ -39,7 +39,8 @@ test("first-run → project → real deployment", async ({ page }) => {
   await page.goto("/projects/smoke");
   await expect(page.getByText("running").first()).toBeVisible({ timeout: 30_000 });
 
-  // Sign out returns to the login screen.
-  await page.getByRole("button", { name: "Sign out" }).click();
+  // Sign out (from the account menu) returns to the login screen.
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page.getByText("Sign in to your server")).toBeVisible();
 });

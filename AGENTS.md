@@ -52,3 +52,12 @@ deployment, proxy routing, domains or backups.
   wrong — Windlass does not replace Docker Compose, it drives it. Changes that make the panel the
   authority rather than the compose file are architecturally wrong.
 - `bin/` holds build output and is disposable; never hand-edit it.
+- `web/src/index.css` is also read by the website's `scripts/sync-brand.mjs`. Keep the
+  `/* ---------- Light (default) ---------- */` marker, the `prefers-color-scheme: dark` block,
+  the single-quoted base64 `@font-face` blocks and the tokens the site maps (`--accent`,
+  `--accent-hi`, `--accent-soft`, `--fg`, `--fg2`, `--fg3`, `--edge-strong`, `--hairline`,
+  `--surface2`, `--canvas`, `--chrome`), or the site build breaks or drifts.
+- The web UI kit is `web/src/ui`. `cn()` does no Tailwind conflict resolution, so size and
+  width go through props (`size`, `controlSize`) or a wrapper, never a competing class.
+  Overlays (Modal, Menu, Toast, command palette, mobile drawer) render through portals because
+  the sticky header's `backdrop-filter` makes it the containing block for fixed children.

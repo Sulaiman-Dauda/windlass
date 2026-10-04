@@ -93,7 +93,7 @@ platform backup, not from the project directories. See
 
 ## Reporting a bug
 
-Server OS and version, Docker and Compose versions (shown at the top of the dashboard),
+Server OS and version, Docker and Compose versions (shown in the Server card on Overview),
 what you did, what happened, and the relevant log lines. The compose file, with secrets
 removed, usually answers the first three follow-up questions:
 [github.com/Sulaiman-Dauda/windlass/issues](https://github.com/Sulaiman-Dauda/windlass/issues).

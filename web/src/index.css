@@ -23,10 +23,12 @@
 }
 
 /* ============================================================
-   Windlass · "Tidewater" design system
-   Signature type: Manrope (UI) + Windlass Mono (data/code).
-   Theme: system default via prefers-color-scheme, with explicit
-   light/dark overrides stamped as data-theme on <html>.
+   Windlass design system
+   Type: Manrope for the interface, Windlass Mono for data and code.
+   Theme: follows prefers-color-scheme, with explicit light/dark
+   overrides stamped as data-theme on <html>.
+   Log and terminal panes stay dark in both themes (term-* tokens),
+   so streamed output reads the same wherever it is shown.
    ============================================================ */
 
 @theme inline {
@@ -34,12 +36,22 @@
   --font-mono: "Windlass Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   --color-canvas: var(--canvas);
+  --color-panel: var(--panel);
   --color-surface: var(--surface);
   --color-surface2: var(--surface2);
   --color-sunken: var(--sunken);
   --color-chrome: var(--chrome);
   --color-chrome-edge: var(--chrome-edge);
+  --color-overlay: var(--overlay);
+
   --color-term: var(--term);
+  --color-term-fg: var(--term-fg);
+  --color-term-dim: var(--term-dim);
+  --color-term-edge: var(--term-edge);
+  --color-term-accent: var(--term-accent);
+  --color-term-ok: var(--term-ok);
+  --color-term-warn: var(--term-warn);
+  --color-term-err: var(--term-err);
 
   --color-fg: var(--fg);
   --color-fg2: var(--fg2);
@@ -66,61 +78,81 @@
   --color-err-hi: var(--err-hi);
   --color-err-soft: var(--err-soft);
 
-  --radius-control: 10px;
-  --radius-card: 13px;
+  --radius-control: 8px;
+  --radius-card: 12px;
   --radius-xl2: 16px;
 }
 
 @theme {
   --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
   --text-xs: 12.5px;
+  --text-xs--line-height: 18px;
   --text-sm: 14px;
+  --text-sm--line-height: 20px;
   --text-md: 15px;
+  --text-md--line-height: 22px;
   --text-base: 16px;
-  --text-lg: 18px;
-  --text-xl: 22px;
-  --text-2xl: 26px;
-  --text-3xl: 32px;
+  --text-base--line-height: 24px;
+  --text-lg: 17px;
+  --text-lg--line-height: 26px;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+  --text-3xl: 30px;
+  --text-3xl--line-height: 36px;
 }
 
 /* ---------- Light (default) ---------- */
 :root {
-  --canvas: #f4f5f7;
+  --canvas: #f3f4f6;
+  --panel: #ffffff;
   --surface: #ffffff;
-  --surface2: #f6f7f9;
-  --sunken: #eef0f3;
-  --chrome: rgba(248, 249, 251, 0.72);
-  --chrome-edge: rgba(0, 0, 0, 0.08);
-  --term: #0d1013;
+  --surface2: #f8f9fa;
+  --sunken: #f1f2f4;
+  --chrome: rgba(255, 255, 255, 0.84);
+  --chrome-edge: rgba(14, 17, 22, 0.08);
+  --overlay: rgba(10, 13, 18, 0.42);
 
-  --fg: #16181d;
-  --fg2: #545963;
-  --fg3: #878c97;
+  --term: #0c0e12;
+  --term-fg: #d5d9e0;
+  --term-dim: #737b88;
+  --term-edge: rgba(255, 255, 255, 0.07);
+  --term-accent: #5cbce4;
+  --term-ok: #3ccf85;
+  --term-warn: #f0b04f;
+  --term-err: #ff7a6b;
 
-  --hairline: rgba(0, 0, 0, 0.09);
-  --edge: rgba(0, 0, 0, 0.14);
-  --edge-strong: rgba(0, 0, 0, 0.22);
+  --fg: #0e1116;
+  --fg2: #4a515c;
+  --fg3: #858b96;
+
+  --hairline: rgba(14, 17, 22, 0.08);
+  --edge: rgba(14, 17, 22, 0.13);
+  --edge-strong: rgba(14, 17, 22, 0.22);
 
   --accent: #0d6f97;
   --accent-hi: #0a5c7f;
   --accent-fill: #0d6f97;
   --accent-fill-hi: #0a5c7f;
   --onaccent: #ffffff;
-  --accent-soft: rgba(13, 111, 151, 0.10);
+  --accent-soft: rgba(13, 111, 151, 0.08);
   --accent-edge: rgba(13, 111, 151, 0.24);
-  --ring: rgba(13, 111, 151, 0.35);
+  --ring: rgba(13, 111, 151, 0.3);
 
-  --ok: #1a8f4c;
-  --ok-soft: rgba(26, 143, 76, 0.12);
-  --warn: #b26a00;
-  --warn-soft: rgba(178, 106, 0, 0.12);
-  --err: #c8402f;
-  --err-hi: #ad3626;
-  --err-soft: rgba(200, 64, 47, 0.10);
+  --ok: #12804a;
+  --ok-soft: rgba(18, 128, 74, 0.1);
+  --warn: #a15e00;
+  --warn-soft: rgba(196, 122, 0, 0.12);
+  --err: #c4382a;
+  --err-hi: #a92e22;
+  --err-soft: rgba(196, 56, 42, 0.09);
 
-  --shadow-sm: 0 1px 2px rgba(15, 22, 33, 0.06);
-  --shadow-md: 0 1px 2px rgba(15, 22, 33, 0.05), 0 8px 22px rgba(15, 22, 33, 0.07);
-  --shadow-lg: 0 12px 40px rgba(15, 22, 33, 0.16);
+  --shadow-xs: 0 1px 1px rgba(14, 17, 22, 0.03);
+  --shadow-sm: 0 1px 2px rgba(14, 17, 22, 0.05);
+  --shadow-md: 0 1px 2px rgba(14, 17, 22, 0.04), 0 8px 20px -6px rgba(14, 17, 22, 0.1);
+  --shadow-lg: 0 0 0 1px rgba(14, 17, 22, 0.06), 0 24px 56px -12px rgba(14, 17, 22, 0.24);
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
   color-scheme: light;
 }
@@ -128,84 +160,90 @@
 /* ---------- Dark tokens ---------- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --canvas: #0b0c0e;
-    --surface: #161719;
-    --surface2: #1c1e21;
-    --sunken: #101113;
-    --chrome: rgba(20, 21, 23, 0.66);
-    --chrome-edge: rgba(255, 255, 255, 0.09);
-    --term: #08090b;
+    --canvas: #08090a;
+    --panel: #0e0f11;
+    --surface: #131416;
+    --surface2: #18191c;
+    --sunken: #0a0b0d;
+    --chrome: rgba(14, 15, 17, 0.84);
+    --chrome-edge: rgba(255, 255, 255, 0.07);
+    --overlay: rgba(0, 0, 0, 0.6);
+    --term: #0a0b0d;
 
-    --fg: #f3f4f6;
-    --fg2: #9a9ea8;
-    --fg3: #6b6f79;
+    --fg: #f2f3f5;
+    --fg2: #a0a5ae;
+    --fg3: #6b717b;
 
-    --hairline: rgba(255, 255, 255, 0.10);
-    --edge: rgba(255, 255, 255, 0.16);
-    --edge-strong: rgba(255, 255, 255, 0.26);
+    --hairline: rgba(255, 255, 255, 0.07);
+    --edge: rgba(255, 255, 255, 0.11);
+    --edge-strong: rgba(255, 255, 255, 0.18);
 
     --accent: #3aa9d6;
     --accent-hi: #5cbce4;
     --accent-fill: #1786b8;
     --accent-fill-hi: #1f97cc;
     --onaccent: #ffffff;
-    --accent-soft: rgba(58, 169, 214, 0.14);
-    --accent-edge: rgba(58, 169, 214, 0.30);
-    --ring: rgba(58, 169, 214, 0.45);
+    --accent-soft: rgba(58, 169, 214, 0.12);
+    --accent-edge: rgba(58, 169, 214, 0.3);
+    --ring: rgba(58, 169, 214, 0.4);
 
-    --ok: #3ad07f;
-    --ok-soft: rgba(58, 208, 127, 0.14);
+    --ok: #3ccf85;
+    --ok-soft: rgba(60, 207, 133, 0.12);
     --warn: #f0a83a;
-    --warn-soft: rgba(240, 168, 58, 0.14);
-    --err: #ff6a5a;
-    --err-hi: #ff8578;
-    --err-soft: rgba(255, 106, 90, 0.13);
+    --warn-soft: rgba(240, 168, 58, 0.13);
+    --err: #ff6b5b;
+    --err-hi: #ff8678;
+    --err-soft: rgba(255, 107, 91, 0.12);
 
+    --shadow-xs: 0 1px 1px rgba(0, 0, 0, 0.3);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px rgba(0, 0, 0, 0.5);
-    --shadow-lg: 0 16px 50px rgba(0, 0, 0, 0.6);
+    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px -8px rgba(0, 0, 0, 0.6);
+    --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 24px 64px -12px rgba(0, 0, 0, 0.75);
     color-scheme: dark;
   }
 }
 
 /* ---------- Explicit dark override (toggle) ---------- */
 :root[data-theme="dark"] {
-  --canvas: #0b0c0e;
-  --surface: #161719;
-  --surface2: #1c1e21;
-  --sunken: #101113;
-  --chrome: rgba(20, 21, 23, 0.66);
-  --chrome-edge: rgba(255, 255, 255, 0.09);
-  --term: #08090b;
+  --canvas: #08090a;
+  --panel: #0e0f11;
+  --surface: #131416;
+  --surface2: #18191c;
+  --sunken: #0a0b0d;
+  --chrome: rgba(14, 15, 17, 0.84);
+  --chrome-edge: rgba(255, 255, 255, 0.07);
+  --overlay: rgba(0, 0, 0, 0.6);
+  --term: #0a0b0d;
 
-  --fg: #f3f4f6;
-  --fg2: #9a9ea8;
-  --fg3: #6b6f79;
+  --fg: #f2f3f5;
+  --fg2: #a0a5ae;
+  --fg3: #6b717b;
 
-  --hairline: rgba(255, 255, 255, 0.10);
-  --edge: rgba(255, 255, 255, 0.16);
-  --edge-strong: rgba(255, 255, 255, 0.26);
+  --hairline: rgba(255, 255, 255, 0.07);
+  --edge: rgba(255, 255, 255, 0.11);
+  --edge-strong: rgba(255, 255, 255, 0.18);
 
   --accent: #3aa9d6;
   --accent-hi: #5cbce4;
   --accent-fill: #1786b8;
   --accent-fill-hi: #1f97cc;
   --onaccent: #ffffff;
-  --accent-soft: rgba(58, 169, 214, 0.14);
-  --accent-edge: rgba(58, 169, 214, 0.30);
-  --ring: rgba(58, 169, 214, 0.45);
+  --accent-soft: rgba(58, 169, 214, 0.12);
+  --accent-edge: rgba(58, 169, 214, 0.3);
+  --ring: rgba(58, 169, 214, 0.4);
 
-  --ok: #3ad07f;
-  --ok-soft: rgba(58, 208, 127, 0.14);
+  --ok: #3ccf85;
+  --ok-soft: rgba(60, 207, 133, 0.12);
   --warn: #f0a83a;
-  --warn-soft: rgba(240, 168, 58, 0.14);
-  --err: #ff6a5a;
-  --err-hi: #ff8578;
-  --err-soft: rgba(255, 106, 90, 0.13);
+  --warn-soft: rgba(240, 168, 58, 0.13);
+  --err: #ff6b5b;
+  --err-hi: #ff8678;
+  --err-soft: rgba(255, 107, 91, 0.12);
 
+  --shadow-xs: 0 1px 1px rgba(0, 0, 0, 0.3);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 16px 50px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 28px -8px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 24px 64px -12px rgba(0, 0, 0, 0.75);
   color-scheme: dark;
 }
 
@@ -216,9 +254,9 @@ body {
   font-family: var(--font-sans);
   background: var(--canvas);
   color: var(--fg);
-  font-size: 16px;
-  line-height: 1.55;
-  letter-spacing: -0.006em;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -227,21 +265,32 @@ body {
 ::selection { background: var(--accent-soft); }
 
 *:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3.5px var(--ring);
-  border-radius: 6px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-/* Refined scrollbars */
+code, kbd, samp, pre { font-family: var(--font-mono); }
+
+/* Thin, quiet scrollbars */
 * { scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-thumb { background: var(--edge); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
 *::-webkit-scrollbar-thumb:hover { background: var(--edge-strong); background-clip: content-box; }
 
+/* Dark panes (logs, deploy output, terminal) get dark scrollbars in either theme. */
+.wl-term { color-scheme: dark; scrollbar-color: rgba(255, 255, 255, 0.16) transparent; }
+.wl-term ::selection, .wl-term::selection { background: rgba(92, 188, 228, 0.28); }
+.wl-term .xterm-viewport { background-color: transparent !important; }
+
 @keyframes wl-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes wl-pop { from { opacity: 0; transform: scale(0.965) translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes wl-pop { from { opacity: 0; transform: scale(0.97) translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes wl-drop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@keyframes wl-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes wl-slide-in { from { transform: translateX(-100%); } to { transform: none; } }
 @keyframes wl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes wl-ping { 0% { transform: scale(1); opacity: 0.55; } 80%, 100% { transform: scale(2.6); opacity: 0; } }
 @keyframes wl-spin { to { transform: rotate(360deg); } }
+@keyframes wl-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }

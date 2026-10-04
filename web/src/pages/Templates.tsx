@@ -1,11 +1,17 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { Page } from "../ui/Page";
+import { useCan } from "../api/auth";
+import { Page, FormError } from "../ui/Page";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
-import { Input } from "../ui/Field";
+import { Input, Field } from "../ui/Field";
+import { Tag } from "../ui/Badge";
+import { Segmented } from "../ui/Segmented";
+import { Skeleton } from "../ui/Skeleton";
+import { Modal } from "../ui/Modal";
+import { useToast } from "../ui/Toast";
 import { Icon } from "../ui/Icon";
 
 interface Template {
@@ -16,95 +22,141 @@ interface Template {
   route?: { service: string; container_port: number };
 }
 
+type Kind = "all" | "app" | "service";
+
 export default function Templates() {
   const templates = useQuery<Template[]>({
     queryKey: ["templates"],
     queryFn: () => api("/templates"),
   });
-  const navigate = useNavigate();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [domain, setDomain] = useState("");
+  const can = useCan();
+  const [kind, setKind] = useState<Kind>("all");
+  const [chosen, setChosen] = useState<Template | null>(null);
 
-  const create = useMutation({
-    mutationFn: ({ key, isApp }: { key: string; isApp: boolean }) =>
-      api<{ project: { name: string } }>(`/templates/${key}`, {
-        method: "POST",
-        body: JSON.stringify(isApp ? { name, domain } : { name }),
-      }),
-    onSuccess: (data) => navigate(`/projects/${data.project.name}/deployments`),
-  });
+  const list = (templates.data ?? []).filter((t) => kind === "all" || (kind === "app") === Boolean(t.route));
 
   return (
-    <Page title="Templates" subtitle="one-click apps & databases">
-      <p className="mb-6 max-w-[68ch] text-sm leading-relaxed text-fg2">
-        Each template becomes an ordinary Compose project with generated credentials in its
-        Environment tab. No proprietary formats, nothing to lock you in. Apps are served over
-        HTTPS on a domain you choose.
-      </p>
+    <Page
+      title="Templates"
+      description="One-click apps and services. Each becomes an ordinary Compose project with generated credentials in its Environment tab: no proprietary format, nothing to lock you in."
+    >
+      {chosen && <CreateFromTemplate template={chosen} onClose={() => setChosen(null)} />}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {templates.data?.map((t) => {
+      <Segmented
+        className="mb-5"
+        label="Show"
+        value={kind}
+        onChange={setKind}
+        options={[
+          { value: "all", label: "All" },
+          { value: "app", label: "Web apps" },
+          { value: "service", label: "Services" },
+        ]}
+      />
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+        {templates.isLoading && [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-[196px] rounded-card" />)}
+        {list.map((t) => {
           const isApp = Boolean(t.route);
           return (
-            <Card key={t.key} className="flex flex-col gap-3 p-4">
-              <div className="flex items-center gap-2.5">
-                <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-accent-soft text-accent">
-                  <Icon name={isApp ? "globe" : "database"} size={18} />
+            <Card key={t.key} className="flex flex-col p-5 transition-[border-color,box-shadow] duration-150 hover:border-edge hover:shadow-[var(--shadow-md)]">
+              <div className="flex items-start justify-between gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-[10px] border border-hairline bg-surface2 text-fg2">
+                  <Icon name={isApp ? "globe" : "database"} size={19} />
                 </span>
-                <span className="text-md font-semibold tracking-[-0.01em]">{t.name}</span>
+                <Tag tone={isApp ? "accent" : "idle"}>{isApp ? "Web app" : "Service"}</Tag>
               </div>
-              <p className="flex-1 text-sm leading-relaxed text-fg3">{t.description}</p>
-              {selected === t.key ? (
-                <form
-                  className="flex flex-col gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    create.mutate({ key: t.key, isApp });
-                  }}
-                >
-                  <Input
-                    autoFocus
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value.toLowerCase())}
-                    placeholder="project name"
-                    pattern="[a-z0-9][a-z0-9_-]*"
-                  />
-                  {isApp && (
-                    <Input
-                      required
-                      value={domain}
-                      onChange={(e) => setDomain(e.target.value.toLowerCase())}
-                      placeholder="domain (e.g. blog.example.com)"
-                      pattern="[a-z0-9.-]+\.[a-z0-9.-]+"
-                    />
-                  )}
-                  <Button type="submit" variant="primary" block disabled={create.isPending}>
-                    {create.isPending ? "Creating…" : "Create & deploy"}
+              <h3 className="mt-4 text-md font-semibold tracking-[-0.01em] text-fg">{t.name}</h3>
+              <p className="mt-1 line-clamp-3 flex-1 text-sm text-fg3">{t.description}</p>
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-hairline pt-3.5">
+                <span className="font-mono text-xs text-fg3">
+                  {isApp ? `HTTPS to :${t.route!.container_port}` : `port ${t.default_port}`}
+                </span>
+                {can("member") && (
+                  <Button size="sm" onClick={() => setChosen(t)}>
+                    Create
                   </Button>
-                  {create.isError && (
-                    <p className="text-xs text-err">
-                      {create.error instanceof Error ? create.error.message : "Failed"}
-                    </p>
-                  )}
-                </form>
-              ) : (
-                <Button
-                  block
-                  onClick={() => {
-                    setSelected(t.key);
-                    setName(t.key);
-                    setDomain("");
-                  }}
-                >
-                  Create
-                </Button>
-              )}
+                )}
+              </div>
             </Card>
           );
         })}
       </div>
     </Page>
+  );
+}
+
+function CreateFromTemplate({ template, onClose }: { template: Template; onClose: () => void }) {
+  const navigate = useNavigate();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const isApp = Boolean(template.route);
+  const [name, setName] = useState(template.key);
+  const [domain, setDomain] = useState("");
+
+  const create = useMutation({
+    mutationFn: () =>
+      api<{ project: { name: string } }>(`/templates/${template.key}`, {
+        method: "POST",
+        body: JSON.stringify(isApp ? { name, domain } : { name }),
+      }),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["projects"], exact: true });
+      toast.info(`Creating ${data.project.name}`, "The first deployment is running.");
+      navigate(`/projects/${data.project.name}/deployments`);
+    },
+  });
+
+  return (
+    <Modal
+      onClose={onClose}
+      title={`Create ${template.name}`}
+      description={template.description}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="create-template" variant="primary" loading={create.isPending}>
+            Create and deploy
+          </Button>
+        </>
+      }
+    >
+      <form
+        id="create-template"
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          create.mutate();
+        }}
+      >
+        <Field label="Project name" hint="Lowercase letters, digits, - and _.">
+          <Input
+            autoFocus
+            required
+            value={name}
+            onChange={(e) => setName(e.target.value.toLowerCase())}
+            placeholder="project-name"
+            pattern="[a-z0-9][a-z0-9_-]*"
+            spellCheck={false}
+            className="font-mono"
+          />
+        </Field>
+        {isApp && (
+          <Field label="Domain" hint="Point its DNS at this server. HTTPS is set up automatically.">
+            <Input
+              required
+              value={domain}
+              onChange={(e) => setDomain(e.target.value.toLowerCase().trim())}
+              placeholder="blog.example.com"
+              pattern="[a-z0-9.-]+\.[a-z0-9.-]+"
+              spellCheck={false}
+            />
+          </Field>
+        )}
+        <FormError error={create.error} fallback="Could not create the project" />
+      </form>
+    </Modal>
   );
 }

@@ -1,10 +1,15 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { useCan } from "../api/auth";
 import { Button } from "../ui/Button";
-import { Card } from "../ui/Card";
-import { Field, Input, Select } from "../ui/Field";
-import { Icon } from "../ui/Icon";
+import { Card, CardHeader, CardFooter } from "../ui/Card";
+import { Field, Input, Select, Switch } from "../ui/Field";
+import { StatusPill } from "../ui/Badge";
+import { Skeleton } from "../ui/Skeleton";
+import { useConfirm } from "../ui/Modal";
+import { useToast, errorText } from "../ui/Toast";
+import { formatBytes, formatDateTime, timeAgo } from "../ui/format";
 
 interface Backup {
   id: number;
@@ -23,14 +28,11 @@ interface Schedule {
   enabled: boolean;
 }
 
-function fmtSize(bytes: number): string {
-  if (bytes > 1 << 20) return (bytes / (1 << 20)).toFixed(1) + " MB";
-  if (bytes > 1 << 10) return (bytes / (1 << 10)).toFixed(1) + " KB";
-  return bytes + " B";
-}
-
 export default function BackupsTab({ project }: { project: string }) {
   const qc = useQueryClient();
+  const can = useCan();
+  const confirm = useConfirm();
+  const toast = useToast();
   const key = ["projects", project, "backups"];
   const backups = useQuery<Backup[]>({
     queryKey: key,
@@ -42,77 +44,106 @@ export default function BackupsTab({ project }: { project: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: key }),
   });
   const restore = useMutation({
-    mutationFn: (id: number) =>
-      api(`/projects/${project}/backups/${id}/restore`, { method: "POST" }),
+    mutationFn: (id: number) => api(`/projects/${project}/backups/${id}/restore`, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects", project] }),
   });
 
-  return (
-    <div className="max-w-3xl">
-      <div className="flex items-start justify-between gap-4">
-        <p className="text-sm leading-relaxed text-fg2">
-          Backups archive the project directory (compose, env, configs, plus
-          a database dump for template databases). Restore replaces the
-          directory; deploy afterwards to apply it.
-        </p>
-        <Button
-          variant="primary"
-          onClick={() => create.mutate()}
-          disabled={create.isPending}
-          className="shrink-0"
-        >
-          <Icon name="download" size={15} />
-          {create.isPending ? "Backing up…" : "Back up now"}
-        </Button>
-      </div>
-      {(create.isError || restore.isError) && (
-        <p className="mt-2 text-sm text-err">
-          {((create.error ?? restore.error) as Error)?.message ?? "Operation failed"}
-        </p>
-      )}
-      {restore.isSuccess && (
-        <p className="mt-2 text-sm text-ok">
-          Restored. Deploy the project to apply the restored files.
-        </p>
-      )}
+  const doRestore = async (b: Backup) => {
+    const ok = await confirm({
+      title: `Restore backup #${b.id}?`,
+      body: `The project directory is replaced with the copy taken ${timeAgo(b.created_at)}. Running containers are not touched until you deploy.`,
+      confirmLabel: "Restore files",
+    });
+    if (!ok) return;
+    restore.mutate(b.id, {
+      onSuccess: () => toast.ok(`Restored backup #${b.id}`, "Deploy the project to apply the restored files."),
+      onError: (e) => toast.err("Restore failed", errorText(e)),
+    });
+  };
 
-      <div className="mt-4 space-y-2">
-        {backups.data?.map((b) => (
-          <div
-            key={b.id}
-            className="flex items-center justify-between rounded-[10px] border border-hairline bg-surface2 px-4 py-3 text-sm"
-          >
-            <div>
-              <span className="font-mono text-xs text-fg3">#{b.id}</span>
-              <span className="ml-3 text-fg">{new Date(b.created_at).toLocaleString()}</span>
-              <span className="ml-3 text-xs text-fg3">
-                {b.kind} · {b.destination} · {fmtSize(b.size)}
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              {b.status === "done" ? (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    if (confirm(`Restore backup #${b.id}? Current project files are replaced.`)) {
-                      restore.mutate(b.id);
-                    }
-                  }}
-                >
-                  Restore
-                </Button>
-              ) : (
-                <span className="text-xs text-err" title={b.error}>
-                  {b.status}
-                </span>
-              )}
-            </div>
+  return (
+    <div className="max-w-5xl space-y-5">
+      <Card className="overflow-hidden">
+        <CardHeader
+          title="Backups"
+          description="Each backup archives the project directory (Compose files, .env, configs) plus a database dump for template databases."
+          actions={
+            can("member") && (
+              <Button
+                variant="primary"
+                size="sm"
+                icon="archive"
+                loading={create.isPending}
+                onClick={() =>
+                  create.mutate(undefined, {
+                    onSuccess: () => toast.ok("Backup complete"),
+                    onError: (e) => toast.err("Backup failed", errorText(e)),
+                  })
+                }
+              >
+                Back up now
+              </Button>
+            )
+          }
+        />
+        {backups.isLoading ? (
+          <div className="p-5">
+            <Skeleton className="h-5 w-1/2" />
           </div>
-        ))}
-        {backups.data?.length === 0 && (
-          <p className="text-sm text-fg3">No backups yet.</p>
+        ) : backups.data && backups.data.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="border-b border-hairline bg-surface2 text-left text-xs text-fg3">
+                  <th className="h-9 px-5 font-medium">Backup</th>
+                  <th className="h-9 px-4 font-medium">Contents</th>
+                  <th className="h-9 px-4 font-medium">Stored in</th>
+                  <th className="h-9 px-4 text-right font-medium">Size</th>
+                  <th className="h-9 px-4 font-medium">Status</th>
+                  <th className="h-9 w-24" aria-hidden="true" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-hairline">
+                {backups.data.map((b) => (
+                  <tr key={b.id} className="transition-colors hover:bg-surface2">
+                    <td className="px-5 py-3">
+                      <div className="font-semibold text-fg">{formatDateTime(b.created_at)}</div>
+                      <div className="text-xs text-fg3">
+                        #{b.id} · {timeAgo(b.created_at)}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-fg2">{b.kind}</td>
+                    <td className="px-4 py-3 text-fg2">{b.destination === "s3" ? "S3" : "This server"}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-fg2">{formatBytes(b.size)}</td>
+                    <td className="px-4 py-3">
+                      {b.status === "done" ? (
+                        <StatusPill tone="ok">Complete</StatusPill>
+                      ) : b.status === "failed" ? (
+                        <span title={b.error}>
+                          <StatusPill tone="err">Failed</StatusPill>
+                        </span>
+                      ) : (
+                        <StatusPill tone="accent" busy>
+                          {b.status}
+                        </StatusPill>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {b.status === "done" && can("member") && (
+                        <Button size="xs" icon="rollback" onClick={() => doRestore(b)} disabled={restore.isPending}>
+                          Restore
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="px-5 py-8 text-center text-sm text-fg3">No backups yet.</p>
         )}
-      </div>
+      </Card>
 
       <ScheduleEditor project={project} />
     </div>
@@ -121,6 +152,8 @@ export default function BackupsTab({ project }: { project: string }) {
 
 function ScheduleEditor({ project }: { project: string }) {
   const qc = useQueryClient();
+  const can = useCan();
+  const toast = useToast();
   const key = ["projects", project, "backup-schedule"];
   const schedule = useQuery<Schedule>({
     queryKey: key,
@@ -128,6 +161,7 @@ function ScheduleEditor({ project }: { project: string }) {
   });
   const [draft, setDraft] = useState<Schedule | null>(null);
   const current = draft ?? schedule.data ?? null;
+  const editable = can("member");
 
   const save = useMutation({
     mutationFn: (s: Schedule) =>
@@ -137,66 +171,70 @@ function ScheduleEditor({ project }: { project: string }) {
       }),
     onSuccess: () => {
       setDraft(null);
+      toast.ok("Schedule saved");
       qc.invalidateQueries({ queryKey: key });
     },
+    onError: (e) => toast.err("Could not save the schedule", errorText(e)),
   });
 
   if (!current) return null;
 
-  const update = (patch: Partial<Schedule>) =>
-    setDraft({ ...current, ...patch });
+  const update = (patch: Partial<Schedule>) => setDraft({ ...current, ...patch });
 
   return (
-    <Card className="mt-8 p-4">
-      <h3 className="text-sm font-semibold text-fg">Scheduled backups</h3>
-      <div className="mt-3 flex flex-wrap items-end gap-3">
-        <label className="flex items-center gap-2.5 py-2.5 text-sm text-fg">
-          <input
-            type="checkbox"
-            checked={current.enabled}
-            onChange={(e) => update({ enabled: e.target.checked })}
-            className="h-[18px] w-[18px] flex-none rounded-[6px] accent-[var(--color-accent-fill)]"
-          />
-          Enabled
-        </label>
-        <Field label="Interval">
-          <Select
-            value={current.interval}
-            onChange={(e) => update({ interval: e.target.value })}
-          >
-            <option value="hourly">Hourly</option>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-          </Select>
-        </Field>
-        <Field label="Destination">
-          <Select
-            value={current.destination}
-            onChange={(e) => update({ destination: e.target.value })}
-          >
-            <option value="local">Local</option>
-            <option value="s3">S3</option>
-          </Select>
-        </Field>
-        <Field label="Keep last" className="w-24">
-          <Input
-            type="number"
-            min={1}
-            value={current.retention_count}
-            onChange={(e) => update({ retention_count: parseInt(e.target.value, 10) || 7 })}
-          />
-        </Field>
-        <Button
-          onClick={() => save.mutate(current)}
-          disabled={save.isPending || draft === null}
-        >
-          Save
-        </Button>
+    <Card>
+      <CardHeader title="Schedule" description="Automatic backups, with older ones pruned past the retention count." />
+      <div className="space-y-4 px-5 py-4">
+        <Switch
+          checked={current.enabled}
+          onChange={(enabled) => update({ enabled })}
+          disabled={!editable}
+          label="Back up on a schedule"
+        />
+        <div className="flex flex-wrap items-end gap-3">
+          <Field label="Every" className="w-40">
+            <Select
+              value={current.interval}
+              disabled={!editable || !current.enabled}
+              onChange={(e) => update({ interval: e.target.value })}
+            >
+              <option value="hourly">Hour</option>
+              <option value="daily">Day</option>
+              <option value="weekly">Week</option>
+            </Select>
+          </Field>
+          <Field label="Store in" className="w-44">
+            <Select
+              value={current.destination}
+              disabled={!editable || !current.enabled}
+              onChange={(e) => update({ destination: e.target.value })}
+            >
+              <option value="local">This server</option>
+              <option value="s3">S3</option>
+            </Select>
+          </Field>
+          <Field label="Keep the last" className="w-32">
+            <Input
+              type="number"
+              min={1}
+              disabled={!editable || !current.enabled}
+              value={current.retention_count}
+              onChange={(e) => update({ retention_count: parseInt(e.target.value, 10) || 7 })}
+            />
+          </Field>
+        </div>
       </div>
-      {save.isError && (
-        <p className="mt-2 text-sm text-err">
-          {save.error instanceof Error ? save.error.message : "Save failed"}
-        </p>
+      {editable && (
+        <CardFooter note={draft ? "Unsaved changes." : undefined}>
+          {draft && (
+            <Button size="sm" variant="ghost" onClick={() => setDraft(null)}>
+              Discard
+            </Button>
+          )}
+          <Button size="sm" variant="primary" onClick={() => save.mutate(current)} disabled={draft === null} loading={save.isPending}>
+            Save schedule
+          </Button>
+        </CardFooter>
       )}
     </Card>
   );

@@ -77,18 +77,3 @@ export function Wordmark({
     </span>
   );
 }
-
-export function Logo({
-  size = 30,
-  withText = false,
-  className,
-}: {
-  size?: number;
-  withText?: boolean;
-  className?: string;
-}) {
-  if (withText) {
-    return <Wordmark height={Math.round(size * 0.72)} className={className} />;
-  }
-  return <WindlassMark size={size} className={className} />;
-}

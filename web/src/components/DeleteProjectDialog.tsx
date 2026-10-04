@@ -1,15 +1,10 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../api/client";
+import { useMe } from "../api/auth";
 import { useDeleteProject } from "../api/projects";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Input, Field } from "../ui/Field";
-import { Spinner } from "../ui/Spinner";
-
-interface Me {
-  has_password: boolean;
-}
+import { FormError } from "../ui/Page";
 
 export default function DeleteProjectDialog({
   name,
@@ -20,7 +15,7 @@ export default function DeleteProjectDialog({
   onClose: () => void;
   onDeleted: () => void;
 }) {
-  const me = useQuery<Me>({ queryKey: ["auth", "me"], queryFn: () => api("/auth/me") });
+  const me = useMe();
   const del = useDeleteProject();
   const [typed, setTyped] = useState("");
   const [password, setPassword] = useState("");
@@ -29,24 +24,29 @@ export default function DeleteProjectDialog({
   const ready = typed === name && (!needsPassword || password.length > 0);
 
   return (
-    <Modal onClose={onClose} labelledBy="del-title">
-      <h3 id="del-title" className="text-lg font-semibold tracking-[-0.01em] text-err">
-        Delete {name}
-      </h3>
-      <p className="mt-2 text-sm leading-relaxed text-fg2">
-        This stops the project's containers and permanently removes its directory, including
-        compose files and environment values. This can't be undone.
-      </p>
-
+    <Modal
+      onClose={onClose}
+      tone="danger"
+      title={`Delete ${name}`}
+      description="This stops the project's containers and permanently removes its directory, including Compose files and environment values. It can't be undone."
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="delete-project" variant="dangerSolid" disabled={!ready} loading={del.isPending}>
+            {del.isPending ? "Deleting…" : "Delete project"}
+          </Button>
+        </>
+      }
+    >
       <form
-        className="mt-5 flex flex-col gap-3.5"
+        id="delete-project"
+        className="flex flex-col gap-3.5"
         onSubmit={(e) => {
           e.preventDefault();
           if (!ready || del.isPending) return;
-          del.mutate(
-            { name, password: needsPassword ? password : undefined },
-            { onSuccess: onDeleted },
-          );
+          del.mutate({ name, password: needsPassword ? password : undefined }, { onSuccess: onDeleted });
         }}
       >
         <Field
@@ -78,20 +78,7 @@ export default function DeleteProjectDialog({
           </Field>
         )}
 
-        {del.isError && (
-          <p className="text-sm text-err">
-            {del.error instanceof Error ? del.error.message : "Delete failed"}
-          </p>
-        )}
-
-        <div className="mt-1 flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="dangerSolid" disabled={!ready || del.isPending}>
-            {del.isPending ? <><Spinner /> Deleting…</> : "Delete project"}
-          </Button>
-        </div>
+        <FormError error={del.error} fallback="Delete failed" />
       </form>
     </Modal>
   );
