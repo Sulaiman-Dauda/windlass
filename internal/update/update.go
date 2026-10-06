@@ -35,7 +35,10 @@ type Release struct {
 	Version     string `json:"version"`
 	CurrentVer  string `json:"current_version"`
 	UpdateReady bool   `json:"update_available"`
-	Notes       string `json:"notes,omitempty"`
+	// ApplySupported is false when Apply would refuse, so the UI can show
+	// the new version as information instead of offering a button.
+	ApplySupported bool   `json:"apply_supported"`
+	Notes          string `json:"notes,omitempty"`
 
 	assetURL    string
 	checksumURL string
@@ -67,7 +70,7 @@ type ghRelease struct {
 
 // Check queries the latest release.
 func (s *Service) Check(ctx context.Context) (Release, error) {
-	rel := Release{CurrentVer: version.Version}
+	rel := Release{CurrentVer: version.Version, ApplySupported: supported()}
 
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -118,9 +121,16 @@ func (s *Service) Check(ctx context.Context) (Release, error) {
 
 var ErrNotSupported = errors.New("self-update is only supported for the Linux binary install")
 
+// supported reports whether this install may replace its own binary. Check
+// and Apply share it so the UI never offers an update Apply would refuse.
+// Container images set WINDLASS_NO_SELF_UPDATE.
+func supported() bool {
+	return runtime.GOOS == "linux" && os.Getenv("WINDLASS_NO_SELF_UPDATE") == ""
+}
+
 // Apply downloads, verifies, and swaps the binary, then restarts.
 func (s *Service) Apply(ctx context.Context) error {
-	if runtime.GOOS != "linux" || os.Getenv("WINDLASS_NO_SELF_UPDATE") != "" {
+	if !supported() {
 		return ErrNotSupported
 	}
 	rel, err := s.Check(ctx)
