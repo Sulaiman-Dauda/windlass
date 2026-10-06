@@ -28,7 +28,7 @@ Environment=WINDLASS_LOG_LEVEL=debug
 | `WINDLASS_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128` | Sources allowed to supply forwarding headers. The default covers the recommended local Caddy. Widen it only for a proxy you control. |
 | `WINDLASS_UPDATE_REPO` | `Sulaiman-Dauda/windlass` | Repository checked for releases. |
 | `WINDLASS_UPDATE_TOKEN` | unset | Authenticates release checks and downloads. Required only for a private update repository. |
-| `WINDLASS_NO_SELF_UPDATE` | unset | Any non-empty value disables self-update. Useful when a package manager or image tag owns the version. |
+| `WINDLASS_NO_SELF_UPDATE` | unset | Any non-empty value disables self-update. Useful when a package manager or image tag owns the version. The panel still shows when a new version exists, without an Update button. |
 
 `WINDLASS_TRUSTED_PROXIES` decides whether a client-supplied `X-Forwarded-For` is believed.
 Trusting an address you do not control lets a client claim any source IP, which matters

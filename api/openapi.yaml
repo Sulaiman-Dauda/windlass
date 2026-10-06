@@ -294,7 +294,7 @@ paths:
       operationId: checkUpdate
       security: [{ session: [] }]
       responses:
-        "200": { description: "{version, current_version, update_available}" }
+        "200": { description: "{version, current_version, update_available, apply_supported}" }
     post:
       summary: Apply the available update (admin)
       operationId: applyUpdate
