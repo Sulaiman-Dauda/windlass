@@ -18,7 +18,8 @@ so the credentials are found wherever you set them: in `compose.yaml`, in `.env`
 another `env_file`.
 
 Postgres is dumped with `pg_dump` as `POSTGRES_USER` (default `postgres`) from
-`POSTGRES_DB`. MySQL and MariaDB are dumped with `mysqldump` or `mariadb-dump
+`POSTGRES_DB`, using `POSTGRES_PASSWORD` when it is set. Bitnami's `POSTGRESQL_USERNAME`,
+`POSTGRESQL_DATABASE` and `POSTGRESQL_PASSWORD` are read too. MySQL and MariaDB are dumped with `mysqldump` or `mariadb-dump
 --all-databases` as root, using `MYSQL_ROOT_PASSWORD` or `MARIADB_ROOT_PASSWORD`. A
 database whose credentials are not in its environment, such as a random root password or
 one read from a secrets file, cannot be dumped this way.

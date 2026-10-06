@@ -34,6 +34,23 @@ var dumpStacks = map[string]string{
       interval: 1s
       retries: 120
 `,
+	// Password authentication even on the local socket, so the dump only
+	// works if it passes the container's POSTGRES_PASSWORD.
+	"postgres-scram": `services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: appdb
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
+    volumes:
+      - ./seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "app", "-d", "appdb"]
+      interval: 1s
+      retries: 120
+`,
 	"mysql": `services:
   db:
     image: mysql:8.4
@@ -129,7 +146,7 @@ func TestDumpDatabaseRealContainers(t *testing.T) {
 			project := "windlass-inttest-dump-" + name
 			seed := "CREATE TABLE windlass_marker (note VARCHAR(40));\n" +
 				"INSERT INTO windlass_marker VALUES ('backup-proof');\n"
-			if name != "postgres" {
+			if !strings.HasPrefix(name, "postgres") {
 				seed = "USE appdb;\n" + seed
 			}
 			for file, body := range map[string]string{"compose.yaml": compose, "seed.sql": seed} {

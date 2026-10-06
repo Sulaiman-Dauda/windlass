@@ -283,14 +283,20 @@ func (s *Service) dumpDatabase(ctx context.Context, project string) ([]byte, boo
 }
 
 // dumpCommands run inside the database container through sh, so the
-// variables expand from the container's environment. The defaults match the
-// official images: Postgres falls back to the postgres user and a database
-// named after the user, and MariaDB 11 ships mariadb-dump without the
-// mysqldump name. Neither may prompt for a password: pg_dump gets -w, and
-// the MySQL password is passed only when the environment has one, so a
-// database without usable credentials fails at once instead of waiting.
+// variables expand from the container's environment. They read the official
+// images' variables and, for Postgres, Bitnami's POSTGRESQL_* names, so the
+// dump is of the application's database rather than an empty default one.
+// Postgres falls back to the postgres user and a database named after the
+// user, and MariaDB 11 ships mariadb-dump without the mysqldump name. Neither
+// may prompt: pg_dump gets -w, and each password is passed only when the
+// environment has one, so a database without usable credentials fails at once
+// instead of waiting.
 var dumpCommands = map[string]string{
-	"postgres": `exec pg_dump -w -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-${POSTGRES_USER:-postgres}}"`,
+	"postgres": `u="${POSTGRES_USER:-${POSTGRESQL_USERNAME:-postgres}}"; ` +
+		`db="${POSTGRES_DB:-${POSTGRESQL_DATABASE:-$u}}"; ` +
+		`pw="${POSTGRES_PASSWORD:-$POSTGRESQL_PASSWORD}"; ` +
+		`[ -n "$pw" ] && export PGPASSWORD="$pw"; ` +
+		`exec pg_dump -w -U "$u" "$db"`,
 	"mysql": `dump=mysqldump; command -v mariadb-dump >/dev/null 2>&1 && dump=mariadb-dump; ` +
 		`pw="${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}"; ` +
 		`set -- --all-databases -uroot; [ -n "$pw" ] && set -- "$@" -p"$pw"; ` +

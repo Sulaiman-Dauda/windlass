@@ -59,7 +59,8 @@ func (e execLocal) Start(ctx context.Context, req agent.ExecReq) (agent.ExecSess
 	}
 	go s.pump()
 	// The client only uses ctx to connect, so end the session ourselves when
-	// the caller's deadline passes or it cancels.
+	// the caller's deadline passes or it cancels. Docker has no way to stop an
+	// exec, so the command itself runs on in the container until it finishes.
 	go func() {
 		select {
 		case <-ctx.Done():
