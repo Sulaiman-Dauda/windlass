@@ -7,6 +7,7 @@ package local
 import (
 	"context"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,5 +79,55 @@ func TestListContainersRealDocker(t *testing.T) {
 	stats, err := l.Docker().Stats(ctx, []string{c.ID})
 	if err != nil || len(stats) != 1 {
 		t.Errorf("Stats = %+v, %v", stats, err)
+	}
+}
+
+// A non-TTY exec is how backups take a database dump, so its output must be
+// exactly the command's stdout: no stream headers, no stderr mixed in, and a
+// channel that closes when the command ends.
+func TestExecWithoutTTYReturnsOnlyStdout(t *testing.T) {
+	l, err := New(Config{ProjectsDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	name := "windlass-inttest-exec"
+	exec.Command("docker", "rm", "-f", name).Run()
+	out, err := exec.CommandContext(ctx, "docker", "run", "-d", "--name", name, "busybox", "sleep", "60").CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker run: %v: %s", err, out)
+	}
+	t.Cleanup(func() { exec.Command("docker", "rm", "-f", name).Run() })
+
+	sess, err := l.Exec().Start(ctx, agent.ExecReq{
+		ContainerID: name,
+		Cmd:         []string{"sh", "-c", "printf 'line one\\nline two\\n'; echo warning >&2; exit 3"},
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer sess.Close()
+
+	var got []byte
+	for {
+		select {
+		case chunk, ok := <-sess.Output():
+			if !ok {
+				goto done
+			}
+			got = append(got, chunk...)
+		case <-ctx.Done():
+			t.Fatalf("output channel never closed; collected %q", got)
+		}
+	}
+done:
+	if string(got) != "line one\nline two\n" {
+		t.Errorf("output = %q, want only the command's stdout", got)
+	}
+	code, err := sess.Wait()
+	if code != 3 || err == nil || !strings.Contains(err.Error(), "warning") {
+		t.Errorf("Wait = %d, %v; want 3 and an error carrying stderr", code, err)
 	}
 }

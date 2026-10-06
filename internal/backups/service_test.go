@@ -16,21 +16,44 @@ import (
 	"github.com/windlass-dev/windlass/migrations"
 )
 
-func TestDatabaseContainerSelectsMatchingEngine(t *testing.T) {
+func TestDatabaseContainerPrefersARunningDatabase(t *testing.T) {
 	containers := []agent.Container{
 		{ID: "web", ComposeService: "web", Image: "example/web:latest", State: "running"},
+		{ID: "exporter", ComposeService: "metrics", Image: "prometheuscommunity/postgres-exporter", State: "running"},
 		{ID: "stopped-db", ComposeService: "postgres", Image: "postgres:17", State: "exited"},
-		{ID: "pg", ComposeService: "database", Image: "postgres:17-alpine", State: "running"},
-		{ID: "mysql", ComposeService: "mysql", Image: "mysql:8.4", State: "running"},
+		{ID: "pg", ComposeService: "database", Image: "docker.io/library/postgres:17-alpine", State: "running"},
 	}
-	if got := databaseContainer(containers, "postgres"); got != "pg" {
-		t.Fatalf("postgres target = %q, want pg", got)
+	if got, engine := databaseContainer(containers); got.ID != "pg" || engine != "postgres" {
+		t.Fatalf("target = %q (%s), want pg (postgres)", got.ID, engine)
 	}
-	if got := databaseContainer(containers, "mysql"); got != "mysql" {
-		t.Fatalf("mysql target = %q, want mysql", got)
+	if got, engine := databaseContainer(containers[:3]); got.ID != "stopped-db" || engine != "postgres" {
+		t.Fatalf("with no running database, target = %q (%s), want stopped-db so the skip is logged", got.ID, engine)
 	}
-	if got := databaseContainer(containers[:1], "postgres"); got != "" {
-		t.Fatalf("unrelated container selected: %q", got)
+	if _, engine := databaseContainer(containers[:2]); engine != "" {
+		t.Fatalf("a non-database container was taken for a %s database", engine)
+	}
+}
+
+func TestDatabaseEngine(t *testing.T) {
+	for _, tt := range []struct {
+		service, image, want string
+	}{
+		{"db", "postgres:18-alpine", "postgres"},
+		{"db", "postgis/postgis:16-3.4", "postgres"},
+		{"db", "pgvector/pgvector:pg17", "postgres"},
+		{"db", "postgres@sha256:abc", "postgres"},
+		{"postgres", "registry.example.com/team/custom-pg:1", "postgres"},
+		{"db", "mysql:8.4", "mysql"},
+		{"db", "mariadb:11", "mysql"},
+		{"MariaDB", "example/db:1", "mysql"},
+		{"api", "postgrest/postgrest:v12", ""},
+		{"metrics", "prometheuscommunity/postgres-exporter", ""},
+		{"web", "ghost:5-alpine", ""},
+	} {
+		got := databaseEngine(agent.Container{ComposeService: tt.service, Image: tt.image})
+		if got != tt.want {
+			t.Errorf("databaseEngine(%s, %s) = %q, want %q", tt.service, tt.image, got, tt.want)
+		}
 	}
 }
 

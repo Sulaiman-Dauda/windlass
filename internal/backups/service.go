@@ -233,43 +233,34 @@ func (s *Service) List(ctx context.Context, projectName string) ([]db.Backup, er
 	return s.q.ListProjectBackups(ctx, projectName)
 }
 
-// dumpDatabase writes a native dump into the project dir when the project
-// looks like a Windlass database template. Failure is non-fatal: the file
-// archive still captures compose + env.
+// dumpDatabase takes a native dump from the project's database container,
+// if it has one. The container is recognised by its image or service name,
+// and the dump command runs with that container's own environment, so it
+// finds the credentials whether they were written in compose.yaml, .env or
+// another env_file. Failure is logged and non-fatal: the file archive still
+// captures compose + env.
 func (s *Service) dumpDatabase(ctx context.Context, project string) ([]byte, bool) {
-	env, err := s.projects.GetEnv(ctx, project)
-	if err != nil {
-		return nil, false
-	}
-	var cmd []string
-	var engine string
-	switch {
-	case env["POSTGRES_USER"] != "":
-		cmd = []string{"pg_dump", "-U", env["POSTGRES_USER"]}
-		if env["POSTGRES_DB"] != "" {
-			cmd = append(cmd, env["POSTGRES_DB"])
-		}
-		engine = "postgres"
-	case env["MYSQL_ROOT_PASSWORD"] != "" || env["DB_ROOT_PASSWORD"] != "":
-		cmd = []string{"sh", "-c", "mysqldump --all-databases -uroot -p\"$MYSQL_ROOT_PASSWORD\""}
-		engine = "mysql"
-	default:
-		return nil, false
-	}
-
 	containers, err := s.agent.Docker().ListContainers(ctx, agent.ContainerFilter{ComposeProject: project})
 	if err != nil {
+		s.logger.Warn("list containers; backup has no database dump", "project", project, "error", err)
 		return nil, false
 	}
-	target := databaseContainer(containers, engine)
-	if target == "" {
-		s.logger.Warn("database container not running; skipping dump", "project", project, "engine", engine)
+	target, engine := databaseContainer(containers)
+	if engine == "" {
+		return nil, false
+	}
+	if target.State != "running" {
+		s.logger.Warn("database container not running; backup has no database dump",
+			"project", project, "container", target.Name, "engine", engine)
 		return nil, false
 	}
 
 	dumpCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	sess, err := s.agent.Exec().Start(dumpCtx, agent.ExecReq{ContainerID: target, Cmd: cmd})
+	sess, err := s.agent.Exec().Start(dumpCtx, agent.ExecReq{
+		ContainerID: target.ID,
+		Cmd:         []string{"sh", "-c", dumpCommands[engine]},
+	})
 	if err != nil {
 		s.logger.Warn("db dump exec", "project", project, "error", err)
 		return nil, false
@@ -285,28 +276,60 @@ func (s *Service) dumpDatabase(ctx context.Context, project string) ([]byte, boo
 		}
 	}
 	if code, err := sess.Wait(); err != nil || code != 0 {
-		s.logger.Warn("db dump failed", "project", project, "exit", code, "error", err)
+		s.logger.Warn("db dump failed; backup has no database dump", "project", project, "exit", code, "error", err)
 		return nil, false
 	}
 	return []byte(out.String()), true
 }
 
-func databaseContainer(containers []agent.Container, engine string) string {
+// dumpCommands run inside the database container through sh, so the
+// variables expand from the container's environment. The defaults match the
+// official images: Postgres falls back to the postgres user and a database
+// named after the user, and MariaDB 11 ships mariadb-dump without the
+// mysqldump name.
+var dumpCommands = map[string]string{
+	"postgres": `exec pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-${POSTGRES_USER:-postgres}}"`,
+	"mysql": `dump=mysqldump; command -v mariadb-dump >/dev/null 2>&1 && dump=mariadb-dump; ` +
+		`exec "$dump" --all-databases -uroot -p"${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}"`,
+}
+
+// databaseContainer returns the project's database container and its engine,
+// preferring a running one. The engine is empty when the project has none.
+func databaseContainer(containers []agent.Container) (agent.Container, string) {
+	var stopped agent.Container
+	var stoppedEngine string
 	for _, c := range containers {
-		if c.State != "running" {
+		engine := databaseEngine(c)
+		if engine == "" {
 			continue
 		}
-		service, image := strings.ToLower(c.ComposeService), strings.ToLower(c.Image)
-		switch engine {
-		case "postgres":
-			if service == "postgres" || strings.Contains(image, "postgres") {
-				return c.ID
-			}
-		case "mysql":
-			if service == "mysql" || service == "mariadb" ||
-				strings.Contains(image, "mysql") || strings.Contains(image, "mariadb") {
-				return c.ID
-			}
+		if c.State == "running" {
+			return c, engine
+		}
+		if stoppedEngine == "" {
+			stopped, stoppedEngine = c, engine
+		}
+	}
+	return stopped, stoppedEngine
+}
+
+// databaseEngine recognises a database container by its compose service name
+// or by its image's own name, ignoring registry, namespace and tag. Matching
+// the whole name rather than a substring keeps postgres-exporter or postgrest
+// from being taken for the database.
+func databaseEngine(c agent.Container) string {
+	image := strings.ToLower(c.Image)
+	image, _, _ = strings.Cut(image, "@")
+	if i := strings.LastIndex(image, "/"); i >= 0 {
+		image = image[i+1:]
+	}
+	image, _, _ = strings.Cut(image, ":")
+	for _, name := range []string{strings.ToLower(c.ComposeService), image} {
+		switch name {
+		case "postgres", "postgresql", "postgis", "pgvector", "timescaledb", "timescaledb-ha":
+			return "postgres"
+		case "mysql", "mysql-server", "mariadb", "percona-server":
+			return "mysql"
 		}
 	}
 	return ""
