@@ -18,8 +18,8 @@ jobs:
         with:
           go-version: stable
       - run: go vet ./...
-      # The linter runs on every PR but does not gate merges until the ~135
-      # findings it reports (almost all errcheck on deferred Close calls) are
+      # The linter runs on every PR but does not gate merges until the 135
+      # findings it reports (133 of them errcheck, mostly on Close calls) are
       # cleared, see #8. Each needs a decision about whether the error matters,
       # so no mass edit. Remove continue-on-error then.
       - uses: golangci/golangci-lint-action@v9
@@ -27,17 +27,18 @@ jobs:
         with:
           version: v2.14.0
       # golangci-lint can only type-check code up to the Go release it was
-      # built with. When `stable` moved to 1.27, v2.12.2 failed on the standard
-      # library, reported 2 errors in math/rand/v2 instead of the real findings,
-      # and continue-on-error hid it. This step is not hidden: when it fails,
-      # bump the version above to one built with this Go.
+      # built with. When `stable` moved to 1.27, v2.12.2 could not type-check the
+      # standard library's use of math/rand/v2, reported those 2 errors instead
+      # of the real findings, and continue-on-error hid it. This step is not
+      # hidden: when it fails, bump the version above to one built with this Go.
       - name: Check golangci-lint supports this Go
         run: |
           built=$(go version "$(command -v golangci-lint)" | awk '{print $2}')
           running=$(go env GOVERSION)
-          minor() { echo "$1" | sed -E 's/^go1\.([0-9]+).*/\1/'; }
-          if [ "$(minor "$built")" -lt "$(minor "$running")" ]; then
-            echo "::error::golangci-lint was built with $built and cannot lint code for $running. Bump its version."
+          minor() { echo "$1" | sed -nE 's/^go1\.([0-9]+).*/\1/p'; }
+          # Anything unreadable fails too: a missing binary means the install failed.
+          if ! [ "$(minor "$built")" -ge "$(minor "$running")" ] 2>/dev/null; then
+            echo "::error::golangci-lint (built with ${built:-unknown, not installed?}) cannot lint code for $running. Bump its version."
             exit 1
           fi
           echo "golangci-lint built with $built, toolchain $running"
