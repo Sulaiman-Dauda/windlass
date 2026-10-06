@@ -71,6 +71,9 @@ func TestCheckReportsApplySupportedOnLinuxBinaryInstall(t *testing.T) {
 }
 
 func TestApplyRefusesWhenSelfUpdateDisabled(t *testing.T) {
+	// Stubbed so a regressed guard fails here instead of downloading a real
+	// release over the test binary.
+	stubReleases(t)
 	t.Setenv("WINDLASS_NO_SELF_UPDATE", "1")
 	err := New(slog.New(slog.DiscardHandler), t.TempDir(), func() { t.Error("restart called") }).Apply(context.Background())
 	if !errors.Is(err, ErrNotSupported) {
