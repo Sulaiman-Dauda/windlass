@@ -21,7 +21,7 @@ const FOCUSABLE =
  * Escape closes, the page behind stops scrolling, and focus returns to
  * whatever opened it on close. Shared by Modal and the mobile navigation drawer.
  */
-export function useModalFocus(panel: RefObject<HTMLElement>, onClose: () => void) {
+export function useModalFocus(panel: RefObject<HTMLElement | null>, onClose: () => void) {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 

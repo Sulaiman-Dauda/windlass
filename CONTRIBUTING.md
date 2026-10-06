@@ -13,7 +13,7 @@ than in an issue.
 
 ## Getting set up
 
-You need **Go 1.26+**, **Node 20+** and a working Docker with Compose v2.
+You need **Go 1.26+**, **Node 22.22+** and a working Docker with Compose v2.
 
 ```bash
 git clone https://github.com/Sulaiman-Dauda/windlass.git

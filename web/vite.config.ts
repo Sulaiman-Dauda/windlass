@@ -16,5 +16,8 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: false,
+    // Keep @license headers (React, React Router, xterm). Their MIT licences
+    // require the notice in copies, and Rolldown's minifier drops it by default.
+    rolldownOptions: { output: { comments: { legal: true } } },
   },
 });
