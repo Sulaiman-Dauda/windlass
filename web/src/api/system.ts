@@ -29,6 +29,8 @@ export interface UpdateInfo {
   version: string;
   current_version: string;
   update_available: boolean;
+  /** False when this install cannot update itself (container image, WINDLASS_NO_SELF_UPDATE). */
+  apply_supported: boolean;
 }
 
 /** Release check (admin only). The sidebar and Settings share this cache entry. */
