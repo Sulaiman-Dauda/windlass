@@ -36,6 +36,12 @@ import (
 )
 
 func main() {
+	// Answer --version and --help, and refuse anything else, before run()
+	// touches the data directory: a stray `windlass --version` on an installed
+	// host must not start a second server against the same database.
+	if code, exit := handleArgs(os.Args[1:], os.Stdout, os.Stderr); exit {
+		os.Exit(code)
+	}
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "windlass:", err)
 		os.Exit(1)
