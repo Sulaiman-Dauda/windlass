@@ -308,8 +308,12 @@ type ExecReq struct {
 type ExecSession interface {
 	Write(p []byte) error
 	Resize(cols, rows uint16) error
+	// Output delivers the command's output and is closed when the command
+	// ends. With a TTY it is the terminal stream; without one it is stdout
+	// only.
 	Output() <-chan []byte
-	// Wait blocks until the session ends and returns the exit code.
+	// Wait blocks until the session ends and returns the exit code. Without a
+	// TTY, a non-zero exit also returns an error carrying the end of stderr.
 	Wait() (int, error)
 	Close() error
 }

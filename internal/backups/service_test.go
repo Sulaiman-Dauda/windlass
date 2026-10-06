@@ -16,21 +16,53 @@ import (
 	"github.com/windlass-dev/windlass/migrations"
 )
 
-func TestDatabaseContainerSelectsMatchingEngine(t *testing.T) {
+func TestDatabaseContainerPrefersARunningExactMatch(t *testing.T) {
 	containers := []agent.Container{
 		{ID: "web", ComposeService: "web", Image: "example/web:latest", State: "running"},
+		{ID: "exporter", ComposeService: "metrics", Image: "prometheuscommunity/postgres-exporter", State: "running"},
 		{ID: "stopped-db", ComposeService: "postgres", Image: "postgres:17", State: "exited"},
-		{ID: "pg", ComposeService: "database", Image: "postgres:17-alpine", State: "running"},
-		{ID: "mysql", ComposeService: "mysql", Image: "mysql:8.4", State: "running"},
+		{ID: "pg", ComposeService: "database", Image: "docker.io/library/postgres:17-alpine", State: "running"},
 	}
-	if got := databaseContainer(containers, "postgres"); got != "pg" {
-		t.Fatalf("postgres target = %q, want pg", got)
+	if got, engine := databaseContainer(containers); got.ID != "pg" || engine != "postgres" {
+		t.Fatalf("target = %q (%s), want pg (postgres)", got.ID, engine)
 	}
-	if got := databaseContainer(containers, "mysql"); got != "mysql" {
-		t.Fatalf("mysql target = %q, want mysql", got)
+	if got, _ := databaseContainer(containers[:3]); got.ID != "exporter" {
+		t.Fatalf("with only a loose match running, target = %q, want exporter so the attempt is logged", got.ID)
 	}
-	if got := databaseContainer(containers[:1], "postgres"); got != "" {
-		t.Fatalf("unrelated container selected: %q", got)
+	if got, engine := databaseContainer([]agent.Container{containers[0], containers[2]}); got.ID != "stopped-db" || engine != "postgres" {
+		t.Fatalf("with no running database, target = %q (%s), want stopped-db so the skip is logged", got.ID, engine)
+	}
+	if _, engine := databaseContainer(containers[:1]); engine != "" {
+		t.Fatalf("a non-database container was taken for a %s database", engine)
+	}
+}
+
+func TestDatabaseEngine(t *testing.T) {
+	for _, tt := range []struct {
+		service, image, want string
+		exact                bool
+	}{
+		{"db", "postgres:18-alpine", "postgres", true},
+		{"db", "postgis/postgis:16-3.4", "postgres", true},
+		{"db", "pgvector/pgvector:pg17", "postgres", true},
+		{"db", "postgres@sha256:abc", "postgres", true},
+		{"db", "localhost:5000/postgres:17", "postgres", true},
+		{"postgres", "registry.example.com/team/custom-pg:1", "postgres", true},
+		{"db", "mysql:8.4", "mysql", true},
+		{"db", "mariadb:11", "mysql", true},
+		{"MariaDB", "example/db:1", "mysql", true},
+		{"db", "container-registry.oracle.com/mysql/community-server:8.4", "mysql", false},
+		{"db", "bitnami/postgresql-repmgr:16", "postgres", false},
+		{"db", "yobasystems/alpine-mariadb", "mysql", false},
+		{"db", "ghcr.io/acme/app-postgres:2", "postgres", false},
+		{"metrics", "prometheuscommunity/postgres-exporter", "postgres", false},
+		{"web", "ghost:5-alpine", "", false},
+		{"cache", "redis:7", "", false},
+	} {
+		got, exact := databaseEngine(agent.Container{ComposeService: tt.service, Image: tt.image})
+		if got != tt.want || exact != tt.exact {
+			t.Errorf("databaseEngine(%s, %s) = %q exact=%v, want %q exact=%v", tt.service, tt.image, got, exact, tt.want, tt.exact)
+		}
 	}
 }
 
