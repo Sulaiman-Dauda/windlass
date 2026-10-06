@@ -26,7 +26,9 @@ func (e execLocal) Start(ctx context.Context, req agent.ExecReq) (agent.ExecSess
 		cmd = []string{"/bin/sh"}
 	}
 	exec, err := cli.ExecCreate(ctx, req.ContainerID, client.ExecCreateOptions{
-		AttachStdin:  true,
+		// Only a terminal takes input. Without a TTY, an attached stdin that
+		// nobody writes to leaves a password prompt waiting forever.
+		AttachStdin:  req.TTY,
 		AttachStdout: true,
 		AttachStderr: true,
 		TTY:          req.TTY,
@@ -56,6 +58,15 @@ func (e execLocal) Start(ctx context.Context, req agent.ExecReq) (agent.ExecSess
 		done:   make(chan struct{}),
 	}
 	go s.pump()
+	// The client only uses ctx to connect, so end the session ourselves when
+	// the caller's deadline passes or it cancels.
+	go func() {
+		select {
+		case <-ctx.Done():
+			s.Close()
+		case <-s.done:
+		}
+	}()
 	return s, nil
 }
 

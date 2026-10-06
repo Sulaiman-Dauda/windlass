@@ -286,53 +286,71 @@ func (s *Service) dumpDatabase(ctx context.Context, project string) ([]byte, boo
 // variables expand from the container's environment. The defaults match the
 // official images: Postgres falls back to the postgres user and a database
 // named after the user, and MariaDB 11 ships mariadb-dump without the
-// mysqldump name.
+// mysqldump name. Neither may prompt for a password: pg_dump gets -w, and
+// the MySQL password is passed only when the environment has one, so a
+// database without usable credentials fails at once instead of waiting.
 var dumpCommands = map[string]string{
-	"postgres": `exec pg_dump -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-${POSTGRES_USER:-postgres}}"`,
+	"postgres": `exec pg_dump -w -U "${POSTGRES_USER:-postgres}" "${POSTGRES_DB:-${POSTGRES_USER:-postgres}}"`,
 	"mysql": `dump=mysqldump; command -v mariadb-dump >/dev/null 2>&1 && dump=mariadb-dump; ` +
-		`exec "$dump" --all-databases -uroot -p"${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}"`,
+		`pw="${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}"; ` +
+		`set -- --all-databases -uroot; [ -n "$pw" ] && set -- "$@" -p"$pw"; ` +
+		`exec "$dump" "$@"`,
 }
 
-// databaseContainer returns the project's database container and its engine,
-// preferring a running one. The engine is empty when the project has none.
+// databaseContainer returns the project's database container and its engine.
+// The engine is empty when the project has none. A running container beats a
+// stopped one, and an exact name match beats a looser one, so a real database
+// is chosen over something like postgres-exporter in the same project.
 func databaseContainer(containers []agent.Container) (agent.Container, string) {
-	var stopped agent.Container
-	var stoppedEngine string
+	var best agent.Container
+	var bestEngine string
+	bestRank := 0
 	for _, c := range containers {
-		engine := databaseEngine(c)
+		engine, exact := databaseEngine(c)
 		if engine == "" {
 			continue
 		}
-		if c.State == "running" {
-			return c, engine
+		rank := 1
+		if exact {
+			rank++
 		}
-		if stoppedEngine == "" {
-			stopped, stoppedEngine = c, engine
+		if c.State == "running" {
+			rank += 2
+		}
+		if rank > bestRank {
+			best, bestEngine, bestRank = c, engine, rank
 		}
 	}
-	return stopped, stoppedEngine
+	return best, bestEngine
 }
 
 // databaseEngine recognises a database container by its compose service name
-// or by its image's own name, ignoring registry, namespace and tag. Matching
-// the whole name rather than a substring keeps postgres-exporter or postgrest
-// from being taken for the database.
-func databaseEngine(c agent.Container) string {
-	image := strings.ToLower(c.Image)
-	image, _, _ = strings.Cut(image, "@")
-	if i := strings.LastIndex(image, "/"); i >= 0 {
-		image = image[i+1:]
+// or image. An exact match is a service or image named after the database,
+// ignoring registry, namespace and tag. A looser match is any image whose
+// repository path mentions it, such as mysql/community-server or
+// bitnami/postgresql-repmgr.
+func databaseEngine(c agent.Container) (engine string, exact bool) {
+	repo := strings.ToLower(c.Image)
+	repo, _, _ = strings.Cut(repo, "@")
+	if i := strings.LastIndex(repo, ":"); i > strings.LastIndex(repo, "/") {
+		repo = repo[:i]
 	}
-	image, _, _ = strings.Cut(image, ":")
-	for _, name := range []string{strings.ToLower(c.ComposeService), image} {
-		switch name {
+	name := repo[strings.LastIndex(repo, "/")+1:]
+	for _, n := range []string{strings.ToLower(c.ComposeService), name} {
+		switch n {
 		case "postgres", "postgresql", "postgis", "pgvector", "timescaledb", "timescaledb-ha":
-			return "postgres"
+			return "postgres", true
 		case "mysql", "mysql-server", "mariadb", "percona-server":
-			return "mysql"
+			return "mysql", true
 		}
 	}
-	return ""
+	switch {
+	case strings.Contains(repo, "postgres"):
+		return "postgres", false
+	case strings.Contains(repo, "mysql") || strings.Contains(repo, "mariadb"):
+		return "mysql", false
+	}
+	return "", false
 }
 
 // ---------------------------------------------------------------------------

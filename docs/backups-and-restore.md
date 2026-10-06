@@ -10,14 +10,18 @@ container, Windlass also takes a native dump and adds it to the archive as
 **Back up now** in the project's Backups tab. Backups are listed with their status, and an
 incomplete one cannot be restored.
 
-The database container is recognised by its compose service name or its image name
-(`postgres`, `postgis`, `pgvector`, `timescaledb`, `mysql`, `mariadb`, `percona-server`).
-The dump runs inside that container with its own environment, so the credentials are
-found wherever you set them: in `compose.yaml`, in `.env` or in another `env_file`.
+The database container is recognised by its compose service name or its image, preferring
+one named exactly after the database (`postgres`, `postgis`, `pgvector`, `timescaledb`,
+`mysql`, `mariadb`, `percona-server`) over an image that only mentions it, such as
+`bitnami/postgresql-repmgr`. The dump runs inside that container with its own environment,
+so the credentials are found wherever you set them: in `compose.yaml`, in `.env` or in
+another `env_file`.
 
 Postgres is dumped with `pg_dump` as `POSTGRES_USER` (default `postgres`) from
 `POSTGRES_DB`. MySQL and MariaDB are dumped with `mysqldump` or `mariadb-dump
---all-databases` as root, using `MYSQL_ROOT_PASSWORD` or `MARIADB_ROOT_PASSWORD`.
+--all-databases` as root, using `MYSQL_ROOT_PASSWORD` or `MARIADB_ROOT_PASSWORD`. A
+database whose credentials are not in its environment, such as a random root password or
+one read from a secrets file, cannot be dumped this way.
 
 The dump is best effort and deliberately non-fatal. If the database container is not
 running or the dump fails, Windlass logs a warning saying the backup has no database dump

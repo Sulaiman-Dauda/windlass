@@ -131,3 +131,48 @@ done:
 		t.Errorf("Wait = %d, %v; want 3 and an error carrying stderr", code, err)
 	}
 }
+
+// A command that never finishes, or waits on input nobody will send, must not
+// outlive the context it was started with.
+func TestExecStopsAtContextDeadline(t *testing.T) {
+	l, err := New(Config{ProjectsDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	name := "windlass-inttest-exec-deadline"
+	exec.Command("docker", "rm", "-f", name).Run()
+	out, err := exec.CommandContext(ctx, "docker", "run", "-d", "--name", name, "busybox", "sleep", "60").CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker run: %v: %s", err, out)
+	}
+	t.Cleanup(func() { exec.Command("docker", "rm", "-f", name).Run() })
+
+	for _, cmd := range [][]string{{"sleep", "30"}, {"sh", "-c", "read answer"}} {
+		execCtx, execCancel := context.WithTimeout(ctx, 2*time.Second)
+		sess, err := l.Exec().Start(execCtx, agent.ExecReq{ContainerID: name, Cmd: cmd})
+		if err != nil {
+			execCancel()
+			t.Fatalf("Start(%v): %v", cmd, err)
+		}
+		started := time.Now()
+		closed := make(chan struct{})
+		go func() {
+			for range sess.Output() {
+			}
+			close(closed)
+		}()
+		select {
+		case <-closed:
+			if waited := time.Since(started); waited > 5*time.Second {
+				t.Errorf("%v: output closed after %s, want soon after the 2s deadline", cmd, waited)
+			}
+		case <-time.After(15 * time.Second):
+			t.Errorf("%v: output still open 15s after start with a 2s deadline", cmd)
+		}
+		sess.Close()
+		execCancel()
+	}
+}

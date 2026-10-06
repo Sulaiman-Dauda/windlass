@@ -62,6 +62,56 @@ var dumpStacks = map[string]string{
 `,
 }
 
+// A MySQL whose root password is not in the container's environment cannot be
+// dumped. The backup must give up promptly rather than wait on a password
+// prompt, so the file archive is still taken and the project lock released.
+const mysqlWithoutRootPassword = `services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 1s
+      retries: 180
+`
+
+func TestDumpDatabaseGivesUpWithoutCredentials(t *testing.T) {
+	ag, err := local.New(local.Config{ProjectsDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Service{agent: ag, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	dir := t.TempDir()
+	project := "windlass-inttest-dump-nopass"
+	if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(mysqlWithoutRootPassword), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = exec.Command("docker", "compose", "-p", project, "down", "-v").Run() })
+	up := exec.CommandContext(ctx, "docker", "compose", "-p", project, "up", "-d", "--wait")
+	up.Dir = dir
+	if out, err := up.CombinedOutput(); err != nil {
+		t.Fatalf("compose up: %v: %s", err, out)
+	}
+
+	done := make(chan bool, 1)
+	go func() {
+		_, ok := s.dumpDatabase(ctx, project)
+		done <- ok
+	}()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("dump reported success without credentials")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("dump still waiting after 30s; it is stuck on a password prompt")
+	}
+}
+
 func TestDumpDatabaseRealContainers(t *testing.T) {
 	ag, err := local.New(local.Config{ProjectsDir: t.TempDir()})
 	if err != nil {
