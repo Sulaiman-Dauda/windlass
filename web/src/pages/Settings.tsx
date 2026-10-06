@@ -1020,20 +1020,33 @@ function UpdateSection() {
 
   if (!can("admin") || check.isError) return null;
 
+  // A container or WINDLASS_NO_SELF_UPDATE install still learns about new
+  // versions, but gets no button the server would refuse.
+  const info = check.data;
+  let desc = "You're up to date.";
+  if (info?.update_available) {
+    desc = `Version ${info.version} is available.`;
+    if (!info.apply_supported) {
+      desc += " This install doesn't update itself, so pull the new image or replace the binary the way it was installed.";
+    }
+  }
+
   return (
     <div id="updates" className={cn("rounded-card transition-shadow duration-500", flash && "ring-2 ring-[var(--color-accent-fill)] ring-offset-2 ring-offset-panel")}>
       <Card>
         <CardHeader title="Software updates" description="Updating restarts the panel only. Deployed apps keep running." />
         <Row
           title={`Running ${check.data?.current_version ?? "…"}`}
-          desc={check.data?.update_available ? `Version ${check.data.version} is available.` : "You're up to date."}
+          desc={desc}
         >
-          {check.data?.update_available ? (
+          {info?.update_available ? (
             <>
               <StatusPill tone="warn">Update available</StatusPill>
-              <Button size="sm" variant="primary" icon="download" onClick={() => apply.mutate()} loading={apply.isPending}>
-                Update now
-              </Button>
+              {info.apply_supported && (
+                <Button size="sm" variant="primary" icon="download" onClick={() => apply.mutate()} loading={apply.isPending}>
+                  Update now
+                </Button>
+              )}
             </>
           ) : (
             check.data && <StatusPill tone="ok">Up to date</StatusPill>
