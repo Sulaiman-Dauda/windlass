@@ -18,26 +18,30 @@ jobs:
         with:
           go-version: stable
       - run: go vet ./...
-      # v6 of the action pulls golangci-lint v1.x, which is built with go1.24 and
-      # refuses to load a config for a `go 1.26` module:
-      #   can't load config: the Go language version (go1.24) used to build
-      #   golangci-lint is lower than the targeted Go version (1.26)
-      # v9 pulls golangci-lint v2.x, built with a current toolchain.
-      # Advisory, not blocking, see issue #1.
-      #
-      # The lint step could never actually run before: the action installed
-      # golangci-lint v1, which refuses a `go 1.26` module. Fixing that revealed
-      # ~120 pre-existing findings (almost all errcheck on deferred Close calls).
-      # That is surfaced debt, not a regression, and it is not something to fix
-      # with a mass edit, each one needs a decision about whether the error
-      # matters.
-      #
-      # So the linter runs and its output is visible on every PR, but it does not
-      # gate merges until the backlog is cleared. Remove continue-on-error then.
+      # The linter runs on every PR but does not gate merges until the 135
+      # findings it reports (133 of them errcheck, mostly on Close calls) are
+      # cleared, see #8. Each needs a decision about whether the error matters,
+      # so no mass edit. Remove continue-on-error then.
       - uses: golangci/golangci-lint-action@v9
         continue-on-error: true
         with:
-          version: v2.12.2
+          version: v2.14.0
+      # golangci-lint can only type-check code up to the Go release it was
+      # built with. When `stable` moved to 1.27, v2.12.2 could not type-check the
+      # standard library's use of math/rand/v2, reported those 2 errors instead
+      # of the real findings, and continue-on-error hid it. This step is not
+      # hidden: when it fails, bump the version above to one built with this Go.
+      - name: Check golangci-lint supports this Go
+        run: |
+          built=$(go version "$(command -v golangci-lint)" | awk '{print $2}')
+          running=$(go env GOVERSION)
+          minor() { echo "$1" | sed -nE 's/^go1\.([0-9]+).*/\1/p'; }
+          # Anything unreadable fails too: a missing binary means the install failed.
+          if ! [ "$(minor "$built")" -ge "$(minor "$running")" ] 2>/dev/null; then
+            echo "::error::golangci-lint (built with ${built:-unknown, not installed?}) cannot lint code for $running. Bump its version."
+            exit 1
+          fi
+          echo "golangci-lint built with $built, toolchain $running"
       - run: go test ./...
 
   frontend:
