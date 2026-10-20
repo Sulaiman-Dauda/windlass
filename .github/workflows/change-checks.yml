@@ -1,0 +1,156 @@
+# Generated from a shared template. Do not edit it here: changes are made in
+# the template and its pinned versions, then rendered into each repo.
+#
+# Standard tools only, on what the change touched: gitleaks on its commits,
+# zizmor on changed workflows, govulncheck when go.mod or go.sum changed, and
+# golangci-lint (dupl, unused, gosec) on new issues in changed Go modules.
+# Build, test and lint stay in the project's own CI.
+name: Change checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+# A new push to a pull request replaces its running check.
+concurrency:
+  group: change-checks-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: Change checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.2"
+          cache: false
+
+      - name: Find what changed
+        id: changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base=$BEFORE
+          else
+            base=$(git rev-parse HEAD~1)
+          fi
+          git diff --name-only --no-renames --diff-filter=d "$base" HEAD > "$RUNNER_TEMP/changed"
+          echo "Changed since $base:"
+          cat "$RUNNER_TEMP/changed"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          # touched PREFIX REGEX: a changed file under PREFIX whose rest matches.
+          touched() {
+            awk -v p="$1" -v re="$2" 'index($0, p) == 1 && substr($0, length(p) + 1) ~ re { f = 1 } END { exit !f }' "$RUNNER_TEMP/changed"
+          }
+          vuln=
+          lint=
+          for m in "."; do
+            p="$m/"
+            if [ "$m" = . ]; then p=; fi
+            if touched "$p" '^go[.](mod|sum)$'; then vuln="$vuln $m"; fi
+            if touched "$p" '[.]go$|^go[.](mod|sum)$'; then lint="$lint $m"; fi
+          done
+          echo "vuln=$vuln" >> "$GITHUB_OUTPUT"
+          echo "lint=$lint" >> "$GITHUB_OUTPUT"
+
+      - name: Secrets (gitleaks)
+        if: ${{ !cancelled() && steps.changed.outcome == 'success' }}
+        env:
+          BASE: ${{ steps.changed.outputs.base }}
+          GOTOOLCHAIN: local
+          GOBIN: ${{ runner.temp }}/bin
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          args=()
+          if [ -f .gitleaks.toml ]; then args+=(--config .gitleaks.toml); fi
+          if [ -f .gitleaksignore ]; then args+=(--gitleaks-ignore-path .gitleaksignore); fi
+          "$GOBIN/gitleaks" git --log-opts="$BASE..HEAD" --no-banner --redact --verbose --no-color "${args[@]}" .
+
+      - name: Workflows (zizmor)
+        if: ${{ !cancelled() && steps.changed.outcome == 'success' }}
+        run: |
+          mapfile -t files < <(grep -E '^[.]github/workflows/[^/]+[.]ya?ml$' "$RUNNER_TEMP/changed" || true)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No workflow changed."
+            exit 0
+          fi
+          curl -fsSL -o "$RUNNER_TEMP/zizmor.tar.gz" "https://github.com/zizmorcore/zizmor/releases/download/v1.30.1/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          echo "e65324f4430c2717591937edcec90ccbefaf14c174f8ec9415e03ca875b46e1a  $RUNNER_TEMP/zizmor.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/zizmor.tar.gz" -C "$RUNNER_TEMP" zizmor
+          "$RUNNER_TEMP/zizmor" --offline --no-progress "${files[@]}"
+
+      - name: Vulnerabilities with a fix (govulncheck)
+        if: ${{ !cancelled() && steps.changed.outputs.vuln != '' }}
+        env:
+          MODULES: ${{ steps.changed.outputs.vuln }}
+          GOTOOLCHAIN: local
+          GOBIN: ${{ runner.temp }}/bin
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          status=0
+          for m in $MODULES; do
+            echo "::group::govulncheck in $m"
+            code=0
+            out=$(cd "$m" && "$GOBIN/govulncheck" ./... 2>&1) || code=$?
+            printf '%s\n' "$out"
+            echo "::endgroup::"
+            if [ "$code" -eq 3 ]; then
+              # A vulnerability with no fixed version has nothing to upgrade to.
+              fixable=$(printf '%s\n' "$out" | grep -E '^ *Fixed in: ' | grep -cv 'N/A' || true)
+              if [ "$fixable" -gt 0 ]; then
+                echo "::error::$fixable vulnerability(ies) in $m have a fixed version"
+                status=1
+              fi
+            elif [ "$code" -ne 0 ]; then
+              echo "::error::govulncheck could not run in $m (exit $code)"
+              status=1
+            fi
+          done
+          exit "$status"
+
+      - name: New issues in Go (golangci-lint)
+        if: ${{ !cancelled() && steps.changed.outputs.lint != '' }}
+        env:
+          BASE: ${{ steps.changed.outputs.base }}
+          MODULES: ${{ steps.changed.outputs.lint }}
+          GOTOOLCHAIN: local
+          GOBIN: ${{ runner.temp }}/bin
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+          cat > "$RUNNER_TEMP/golangci.yml" <<'EOF'
+          version: "2"
+          run:
+            # v2 reports paths relative to this file by default; the repo is the cwd.
+            relative-path-mode: wd
+          linters:
+            default: none
+            enable:
+              - dupl
+              - unused
+              - gosec
+            settings:
+              dupl:
+                threshold: 100
+          EOF
+          status=0
+          for m in $MODULES; do
+            (cd "$m" && "$GOBIN/golangci-lint" run -c "$RUNNER_TEMP/golangci.yml" --output.text.colors=false --show-stats=false --new-from-merge-base="$BASE" ./...) || status=1
+          done
+          exit "$status"
