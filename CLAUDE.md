@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # Windlass contributor guide
 
 Windlass is a single-Go-process Docker Compose control plane with an embedded React SPA,
