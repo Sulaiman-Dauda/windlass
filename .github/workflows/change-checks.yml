@@ -1,10 +1,10 @@
 # Generated from a shared template. Do not edit it here: changes are made in
 # the template and its pinned versions, then rendered into each repo.
 #
-# Standard tools only, on what the change touched: gitleaks on its commits,
-# zizmor on changed workflows, govulncheck when go.mod or go.sum changed, and
-# golangci-lint (dupl, unused, gosec) on new issues in changed Go modules.
-# Build, test and lint stay in the project's own CI.
+# Standard tools only, on what the change touched: gitleaks on its commits and
+# zizmor on changed workflows, then for each stack the repo has, a scan of
+# changed lockfiles for vulnerabilities with a fix and a linter that fails only
+# on lines the change added. Build, test and lint stay in the project's own CI.
 name: Change checks
 
 on:
@@ -37,6 +37,10 @@ jobs:
           go-version: "1.27.2"
           cache: false
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.23.1"
+
       - name: Find what changed
         id: changed
         env:
@@ -55,9 +59,9 @@ jobs:
           echo "Changed since $base:"
           cat "$RUNNER_TEMP/changed"
           echo "base=$base" >> "$GITHUB_OUTPUT"
-          # touched PREFIX REGEX: a changed file under PREFIX whose rest matches.
+          # touched PREFIX REGEX [LIST]: a changed file under PREFIX whose rest matches.
           touched() {
-            awk -v p="$1" -v re="$2" 'index($0, p) == 1 && substr($0, length(p) + 1) ~ re { f = 1 } END { exit !f }' "$RUNNER_TEMP/changed"
+            awk -v p="$1" -v re="$2" 'index($0, p) == 1 && substr($0, length(p) + 1) ~ re { f = 1 } END { exit !f }' "${3:-$RUNNER_TEMP/changed}"
           }
           vuln=
           lint=
@@ -69,6 +73,22 @@ jobs:
           done
           echo "vuln=$vuln" >> "$GITHUB_OUTPUT"
           echo "lint=$lint" >> "$GITHUB_OUTPUT"
+          # The web checks skip dependency, build and fixture folders.
+          grep -Ev '(^|/)(node_modules|vendor|testdata|dist|build|[.]next)/' "$RUNNER_TEMP/changed" > "$RUNNER_TEMP/changed-web" || true
+          # Lines the change added, as "path<TAB>line", and the files it added.
+          git -c core.quotePath=false diff -U0 --no-renames --diff-filter=d "$base" HEAD |
+            awk '/^[+][+][+] b\// { f = substr($0, 7); next }
+              /^@@ / { split($3, a, ","); s = substr(a[1], 2); n = (a[2] == "") ? 1 : a[2]; for (i = 0; i < n; i++) print f "\t" (s + i) }' > "$RUNNER_TEMP/added"
+          git -c core.quotePath=false diff --name-only --no-renames --diff-filter=A "$base" HEAD > "$RUNNER_TEMP/new-files"
+          ts=
+          for m in "web"; do
+            p="$m/"
+            if [ "$m" = . ]; then p=; fi
+            if touched "$p" '[.]([mc]?[jt]s|[jt]sx)$|(^|/)(package|package-lock|npm-shrinkwrap)[.]json$' "$RUNNER_TEMP/changed-web"; then ts="$ts $m"; fi
+          done
+          echo "ts=$ts" >> "$GITHUB_OUTPUT"
+          npmlock=$(grep -E '(^|/)(package-lock|npm-shrinkwrap)[.]json$' "$RUNNER_TEMP/changed-web" | tr '\n' ' ' || true)
+          echo "npmlock=$npmlock" >> "$GITHUB_OUTPUT"
 
       - name: Secrets (gitleaks)
         if: ${{ !cancelled() && steps.changed.outcome == 'success' }}
@@ -152,5 +172,221 @@ jobs:
           status=0
           for m in $MODULES; do
             (cd "$m" && "$GOBIN/golangci-lint" run -c "$RUNNER_TEMP/golangci.yml" --output.text.colors=false --show-stats=false --new-from-merge-base="$BASE" ./...) || status=1
+          done
+          exit "$status"
+
+      - name: Vulnerabilities with a fix (osv-scanner)
+        if: ${{ !cancelled() && steps.changed.outputs.npmlock != '' }}
+        env:
+          LOCKS: ${{ steps.changed.outputs.npmlock }}
+          GOTOOLCHAIN: local
+          GOBIN: ${{ runner.temp }}/bin
+        run: |
+          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.0
+          args=()
+          for l in $LOCKS; do args+=(--lockfile "$l"); done
+          code=0
+          "$GOBIN/osv-scanner" scan source --format json "${args[@]}" > "$RUNNER_TEMP/osv.json" || code=$?
+          if [ "$code" -gt 1 ] || ! jq -e .results "$RUNNER_TEMP/osv.json" > /dev/null; then
+            echo "::error::osv-scanner could not run (exit $code)"
+            exit 1
+          fi
+          # Each finding as "fix<TAB>what", the fix empty when no release has one.
+          jq -r '.results[] | .source.path as $s | .packages[]? | .package as $p | .vulnerabilities[]? |
+            ([.affected[]?.ranges[]?.events[]? | .fixed // empty] | last // "") as $fix |
+            "\($fix)\t\(.id) in \($p.name)@\($p.version) (\($s))"' "$RUNNER_TEMP/osv.json" > "$RUNNER_TEMP/osv.txt"
+          fixable=0
+          while IFS=$'\t' read -r fix what; do
+            if [ -n "$fix" ]; then
+              echo "::error::$what is fixed in $fix"
+              fixable=$((fixable + 1))
+            else
+              echo "::warning::$what has no fixed version"
+            fi
+          done < "$RUNNER_TEMP/osv.txt"
+          echo "$fixable vulnerability(ies) with a fixed version"
+          [ "$fixable" -eq 0 ]
+
+      - name: New issues in TS and JS (knip, jscpd)
+        if: ${{ !cancelled() && steps.changed.outputs.ts != '' }}
+        env:
+          PACKAGES: ${{ steps.changed.outputs.ts }}
+          ADDED: ${{ runner.temp }}/added
+          NEW_FILES: ${{ runner.temp }}/new-files
+        run: |
+          tools="$RUNNER_TEMP/npm-tools"
+          mkdir -p "$tools"
+          cat > "$tools/package.json" <<'EOF'
+          {
+            "dependencies": {
+              "jscpd": "5.4.1",
+              "knip": "6.41.0"
+            },
+            "overrides": {
+              "@emnapi/core": "1.11.2",
+              "@emnapi/runtime": "1.11.2",
+              "@emnapi/wasi-threads": "1.2.2",
+              "@napi-rs/wasm-runtime": "1.2.5",
+              "@oxc-parser/binding-android-arm-eabi": "0.153.0",
+              "@oxc-parser/binding-android-arm64": "0.153.0",
+              "@oxc-parser/binding-darwin-arm64": "0.153.0",
+              "@oxc-parser/binding-darwin-x64": "0.153.0",
+              "@oxc-parser/binding-freebsd-x64": "0.153.0",
+              "@oxc-parser/binding-linux-arm-gnueabihf": "0.153.0",
+              "@oxc-parser/binding-linux-arm-musleabihf": "0.153.0",
+              "@oxc-parser/binding-linux-arm64-gnu": "0.153.0",
+              "@oxc-parser/binding-linux-arm64-musl": "0.153.0",
+              "@oxc-parser/binding-linux-ppc64-gnu": "0.153.0",
+              "@oxc-parser/binding-linux-riscv64-gnu": "0.153.0",
+              "@oxc-parser/binding-linux-riscv64-musl": "0.153.0",
+              "@oxc-parser/binding-linux-s390x-gnu": "0.153.0",
+              "@oxc-parser/binding-linux-x64-gnu": "0.153.0",
+              "@oxc-parser/binding-linux-x64-musl": "0.153.0",
+              "@oxc-parser/binding-openharmony-arm64": "0.153.0",
+              "@oxc-parser/binding-win32-arm64-msvc": "0.153.0",
+              "@oxc-parser/binding-win32-ia32-msvc": "0.153.0",
+              "@oxc-parser/binding-win32-x64-msvc": "0.153.0",
+              "@oxc-project/types": "0.153.0",
+              "@oxc-resolver/binding-android-arm-eabi": "11.24.2",
+              "@oxc-resolver/binding-android-arm64": "11.24.2",
+              "@oxc-resolver/binding-darwin-arm64": "11.24.2",
+              "@oxc-resolver/binding-darwin-x64": "11.24.2",
+              "@oxc-resolver/binding-freebsd-x64": "11.24.2",
+              "@oxc-resolver/binding-linux-arm-gnueabihf": "11.24.2",
+              "@oxc-resolver/binding-linux-arm-musleabihf": "11.24.2",
+              "@oxc-resolver/binding-linux-arm64-gnu": "11.24.2",
+              "@oxc-resolver/binding-linux-arm64-musl": "11.24.2",
+              "@oxc-resolver/binding-linux-ppc64-gnu": "11.24.2",
+              "@oxc-resolver/binding-linux-riscv64-gnu": "11.24.2",
+              "@oxc-resolver/binding-linux-riscv64-musl": "11.24.2",
+              "@oxc-resolver/binding-linux-s390x-gnu": "11.24.2",
+              "@oxc-resolver/binding-linux-x64-gnu": "11.24.2",
+              "@oxc-resolver/binding-linux-x64-musl": "11.24.2",
+              "@oxc-resolver/binding-openharmony-arm64": "11.24.2",
+              "@oxc-resolver/binding-wasm32-wasi": "11.24.2",
+              "@oxc-resolver/binding-win32-arm64-msvc": "11.24.2",
+              "@oxc-resolver/binding-win32-x64-msvc": "11.24.2",
+              "@tybys/wasm-util": "0.10.4",
+              "fd-package-json": "2.0.0",
+              "fdir": "6.5.0",
+              "formatly": "0.11.4",
+              "get-tsconfig": "4.14.3",
+              "jiti": "2.7.0",
+              "jscpd-darwin-arm64": "5.4.1",
+              "jscpd-darwin-x64": "5.4.1",
+              "jscpd-linux-arm64-gnu": "5.4.1",
+              "jscpd-linux-arm64-musl": "5.4.1",
+              "jscpd-linux-x64-gnu": "5.4.1",
+              "jscpd-linux-x64-musl": "5.4.1",
+              "jscpd-windows-arm64-msvc": "5.4.1",
+              "jscpd-windows-x64-msvc": "5.4.1",
+              "oxc-parser": "0.153.0",
+              "oxc-resolver": "11.24.2",
+              "package-manager-detector": "1.9.0",
+              "picomatch": "4.0.7",
+              "resolve-pkg-maps": "1.0.0",
+              "smol-toml": "1.9.1",
+              "strip-json-comments": "5.0.3",
+              "tinyglobby": "0.2.17",
+              "tslib": "2.8.1",
+              "unbash": "5.1.0",
+              "walk-up-path": "4.0.0",
+              "yaml": "2.9.1",
+              "zod": "4.6.7"
+            },
+            "private": true
+          }
+          EOF
+          (cd "$tools" && npm install --ignore-scripts --no-audit --no-fund --no-package-lock --loglevel=error)
+          cat > "$RUNNER_TEMP/new-only.mjs" <<'EOF'
+          // Usage: node new-only.mjs knip|jscpd PACKAGE REPORT
+          // Keeps the findings on lines this change added, as slop-ts does locally,
+          // so a repo's old debt never fails new work. An unused file counts only when
+          // the change added it. Run from the repo root; ADDED lists "path<TAB>line"
+          // and NEW_FILES the added paths.
+          import { readFileSync } from 'node:fs';
+          import { relative, resolve } from 'node:path';
+
+          const [tool, pkg, report] = process.argv.slice(2);
+          const added = new Map();
+          for (const l of readFileSync(process.env.ADDED, 'utf8').split('\n')) {
+            const i = l.lastIndexOf('\t');
+            if (i < 0) continue;
+            const p = l.slice(0, i);
+            if (!added.has(p)) added.set(p, new Set());
+            added.get(p).add(Number(l.slice(i + 1)));
+          }
+          const fresh = new Set(readFileSync(process.env.NEW_FILES, 'utf8').split('\n').filter(Boolean));
+          const rel = (p) => relative(process.cwd(), resolve(pkg, p)).split('\\').join('/');
+          const isAdded = (p, n) => (n ? added.get(p)?.has(n) === true : added.has(p));
+          const rep = JSON.parse(readFileSync(report, 'utf8'));
+          const hits = [];
+
+          if (tool === 'knip') {
+            for (const issue of rep.issues ?? []) {
+              const p = rel(issue.file);
+              for (const [kind, items] of Object.entries(issue)) {
+                if (kind === 'file' || kind === 'owners' || !Array.isArray(items)) continue;
+                for (let it of items) {
+                  if (Array.isArray(it)) it = it[0];
+                  if (!it || typeof it !== 'object') continue;
+                  const n = it.line ?? 0;
+                  if ((kind === 'files' && !fresh.has(p)) || !isAdded(p, n)) continue;
+                  if (it.name === p || it.name === issue.file) hits.push({ p, n, msg: `knip: unused ${kind} ${p}` });
+                  else hits.push({ p, n, msg: `knip: unused ${kind} ${it.name}` });
+                }
+              }
+            }
+          } else {
+            const overlaps = (s) => {
+              const lines = added.get(rel(s.name));
+              if (!lines) return false;
+              for (const n of lines) if (n >= s.start && n <= s.end) return true;
+              return false;
+            };
+            for (const d of rep.duplicates ?? []) {
+              if (!overlaps(d.firstFile) && !overlaps(d.secondFile)) continue;
+              const a = d.secondFile, b = d.firstFile;
+              hits.push({
+                p: rel(a.name),
+                n: a.start,
+                msg: `jscpd: lines ${a.start}-${a.end} copy ${rel(b.name)}:${b.start}-${b.end} (${d.lines} lines)`,
+              });
+            }
+          }
+
+          // A file name comes from the pull request, so it is escaped the way workflow
+          // commands require before it reaches the log.
+          const data = (s) => s.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+          const prop = (s) => data(s).replace(/:/g, '%3A').replace(/,/g, '%2C');
+          for (const h of hits) console.log(`::error file=${prop(h.p)}${h.n ? `,line=${h.n}` : ''}::${data(h.msg)}`);
+          console.log(`${tool} in ${pkg}: ${hits.length} new finding(s)`);
+          process.exit(hits.length ? 1 : 0);
+          EOF
+          bin="$tools/node_modules/.bin"
+          status=0
+          for m in $PACKAGES; do
+            if [ -f "$m/package-lock.json" ] || [ -f "$m/npm-shrinkwrap.json" ]; then
+              echo "::group::npm ci in $m"
+              (cd "$m" && npm ci --ignore-scripts --no-audit --no-fund --loglevel=error)
+              echo "::endgroup::"
+            fi
+            code=0
+            (cd "$m" && "$bin/knip" --no-progress --reporter json) > "$RUNNER_TEMP/knip.json" || code=$?
+            if [ "$code" -gt 1 ]; then
+              echo "::error::knip could not run in $m (exit $code)"
+              cat "$RUNNER_TEMP/knip.json"
+              status=1
+            elif [ "$code" -eq 1 ]; then
+              node "$RUNNER_TEMP/new-only.mjs" knip "$m" "$RUNNER_TEMP/knip.json" || status=1
+            fi
+            rm -rf "$RUNNER_TEMP/jscpd"
+            if (cd "$m" && "$bin/jscpd" --silent --absolute --no-colors --reporters json --output "$RUNNER_TEMP/jscpd" \
+              --format typescript,javascript,tsx,jsx --ignore '**/node_modules/**,**/dist/**,**/build/**,**/.next/**' .); then
+              node "$RUNNER_TEMP/new-only.mjs" jscpd "$m" "$RUNNER_TEMP/jscpd/jscpd-report.json" || status=1
+            else
+              echo "::error::jscpd could not run in $m"
+              status=1
+            fi
           done
           exit "$status"
