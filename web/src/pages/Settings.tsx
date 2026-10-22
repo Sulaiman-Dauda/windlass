@@ -249,7 +249,6 @@ function SecuritySection() {
   const [code, setCode] = useState("");
   const qc = useQueryClient();
   const toast = useToast();
-  const confirm = useConfirm();
   const me = useMe();
 
   const begin = useMutation({
@@ -265,9 +264,13 @@ function SecuritySection() {
       qc.invalidateQueries({ queryKey: ["auth", "me"] });
     },
   });
+  const [disabling, setDisabling] = useState(false);
+  const [offCode, setOffCode] = useState("");
   const disable = useMutation({
-    mutationFn: () => api("/auth/totp/disable", { method: "POST" }),
+    mutationFn: () => api("/auth/totp/disable", { method: "POST", body: JSON.stringify({ code: offCode }) }),
     onSuccess: () => {
+      setDisabling(false);
+      setOffCode("");
       toast.ok("Two-factor authentication is off");
       qc.invalidateQueries({ queryKey: ["auth", "me"] });
     },
@@ -276,22 +279,50 @@ function SecuritySection() {
   return (
     <Card>
       <CardHeader title="Two-factor authentication" description="For your account. Protects sign-in with a code from an authenticator app." />
-      {me.data?.totp_enabled ? (
-        <Row title="Authenticator app" desc="A code is required every time you sign in.">
-          <StatusPill tone="ok">Enabled</StatusPill>
-          <Button
-            size="sm"
-            onClick={async () => {
-              if (
-                await confirm({
-                  title: "Turn off two-factor authentication?",
-                  body: "Signing in will need only your password.",
-                  confirmLabel: "Turn off",
-                })
-              )
-                disable.mutate();
+      {me.data?.totp_enabled && disabling ? (
+        <div className="space-y-3 px-5 py-4">
+          <p className="text-sm text-fg2">
+            Enter a current code from your authenticator app to turn two-factor off. Signing in will then need only your password.
+          </p>
+          <form
+            className="flex flex-wrap items-end gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              disable.mutate();
             }}
           >
+            <Field label="Code" className="w-40">
+              <Input
+                autoFocus
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={offCode}
+                onChange={(e) => setOffCode(e.target.value.replace(/\D/g, ""))}
+                placeholder="123456"
+                className="text-center font-mono tracking-[0.3em]"
+              />
+            </Field>
+            <Button type="submit" variant="danger" disabled={offCode.length !== 6} loading={disable.isPending}>
+              Turn off
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setDisabling(false);
+                setOffCode("");
+                disable.reset();
+              }}
+            >
+              Cancel
+            </Button>
+          </form>
+          <FormError error={disable.error} fallback="Invalid code" />
+        </div>
+      ) : me.data?.totp_enabled ? (
+        <Row title="Authenticator app" desc="A code is required every time you sign in.">
+          <StatusPill tone="ok">Enabled</StatusPill>
+          <Button size="sm" onClick={() => setDisabling(true)}>
             Disable
           </Button>
         </Row>
@@ -1022,6 +1053,14 @@ function UsersSection() {
       qc.invalidateQueries({ queryKey: ["users"] });
     },
   });
+  const resetTOTP = useMutation({
+    mutationFn: (id: number) => api(`/users/${id}/totp`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast.ok("Two-factor reset", "They can sign in with their password and set it up again.");
+      qc.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (e) => toast.err("Could not reset two-factor", errorText(e)),
+  });
   const remove = useMutation({
     mutationFn: (id: number) => api(`/users/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
@@ -1100,6 +1139,25 @@ function UsersSection() {
               {u.totp_enabled && <Tag tone="ok">2FA</Tag>}
               {u.oauth && <Tag>{u.oauth}</Tag>}
               {u.disabled && <Tag tone="err">Disabled</Tag>}
+              {u.totp_enabled && u.id !== me.data?.id && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  loading={resetTOTP.isPending && resetTOTP.variables === u.id}
+                  onClick={async () => {
+                    if (
+                      await confirm({
+                        title: `Reset two-factor for ${u.email}?`,
+                        body: "For someone who has lost their authenticator. Their next sign-in needs only their password, until they set it up again.",
+                        confirmLabel: "Reset two-factor",
+                      })
+                    )
+                      resetTOTP.mutate(u.id);
+                  }}
+                >
+                  Reset 2FA
+                </Button>
+              )}
             </ListRow>
           ))}
         </ul>

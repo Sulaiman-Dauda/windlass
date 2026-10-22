@@ -2,7 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
@@ -27,6 +29,7 @@ var (
 	ErrNotAuthenticated   = errors.New("not authenticated")
 	ErrTOTPRequired       = errors.New("totp code required")
 	ErrTOTPInvalid        = errors.New("invalid totp code")
+	ErrTOTPEnabled        = errors.New("two-factor authentication is already on; turn it off first")
 )
 
 // SecretBox decrypts/encrypts stored secrets (TOTP seeds).
@@ -131,11 +134,11 @@ func (s *Service) Login(ctx context.Context, email, password, totpCode, ip, user
 		if totpCode == "" {
 			return "", db.User{}, ErrTOTPRequired
 		}
-		secret, err := s.box.Decrypt(user.TotpSecretEnc)
+		ok, err := s.checkTOTP(user, totpCode)
 		if err != nil {
 			return "", db.User{}, err
 		}
-		if !VerifyTOTP(string(secret), totpCode, s.now()) {
+		if !ok {
 			return "", db.User{}, ErrTOTPInvalid
 		}
 	}
@@ -146,7 +149,18 @@ func (s *Service) Login(ctx context.Context, email, password, totpCode, ip, user
 
 // BeginTOTPEnrollment stores a new (disabled) secret and returns it with the
 // otpauth URL. VerifyTOTPEnrollment activates it.
+//
+// It refuses while two-factor is on. Starting again would replace the live
+// secret and switch two-factor off with no code, so anyone holding a session
+// could remove it.
 func (s *Service) BeginTOTPEnrollment(ctx context.Context, user db.User) (secret, otpauthURL string, err error) {
+	fresh, err := s.q.GetUserByID(ctx, user.ID)
+	if err != nil {
+		return "", "", err
+	}
+	if fresh.TotpEnabled != 0 {
+		return "", "", ErrTOTPEnabled
+	}
 	secret, err = GenerateTOTPSecret()
 	if err != nil {
 		return "", "", err
@@ -183,12 +197,95 @@ func (s *Service) VerifyTOTPEnrollment(ctx context.Context, user db.User, code s
 	})
 }
 
-func (s *Service) DisableTOTP(ctx context.Context, user db.User) error {
-	return s.q.SetUserTOTP(ctx, db.SetUserTOTPParams{TotpSecretEnc: nil, TotpEnabled: 0, ID: user.ID})
+// DisableTOTP turns two-factor off after checking a current code, so a
+// stolen session cannot strip the second factor from the account.
+func (s *Service) DisableTOTP(ctx context.Context, user db.User, code string) error {
+	fresh, err := s.q.GetUserByID(ctx, user.ID)
+	if err != nil {
+		return err
+	}
+	if fresh.TotpEnabled != 0 {
+		ok, err := s.checkTOTP(fresh, code)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return ErrTOTPInvalid
+		}
+	}
+	return s.ResetTOTP(ctx, user.ID)
+}
+
+// ResetTOTP removes a user's second factor without a code. Only an admin
+// does this, for someone who has lost their authenticator.
+func (s *Service) ResetTOTP(ctx context.Context, userID int64) error {
+	return s.q.SetUserTOTP(ctx, db.SetUserTOTPParams{TotpSecretEnc: nil, TotpEnabled: 0, ID: userID})
+}
+
+// checkTOTP verifies code against the user's enrolled secret.
+func (s *Service) checkTOTP(user db.User, code string) (bool, error) {
+	secret, err := s.box.Decrypt(user.TotpSecretEnc)
+	if err != nil {
+		return false, err
+	}
+	return VerifyTOTP(string(secret), code, s.now()), nil
+}
+
+// pendingTOTPTTL is how long a provider sign-in waits for its code.
+const pendingTOTPTTL = 5 * time.Minute
+
+// pendingKey signs pending two-factor tickets. It is derived from the
+// session key with a fixed label, so a ticket can never pass as a session
+// token and a session token can never pass as a ticket.
+func (s *Service) pendingKey() []byte {
+	mac := hmac.New(sha256.New, s.key)
+	mac.Write([]byte("windlass oauth totp pending v1"))
+	return mac.Sum(nil)
+}
+
+// BeginPendingTOTP is called when a provider sign-in matches an account with
+// two-factor on. It returns a short-lived ticket naming the user; no session
+// exists until CompletePendingTOTP checks a code against it.
+func (s *Service) BeginPendingTOTP(user db.User) (string, error) {
+	nonce, err := NewSessionID()
+	if err != nil {
+		return "", err
+	}
+	return SignToken(s.pendingKey(), Claims{SessionID: nonce, UserID: user.ID,
+		ExpiresAt: s.now().Add(pendingTOTPTTL).Unix()})
+}
+
+// CompletePendingTOTP checks the code for a ticket from BeginPendingTOTP and
+// starts the session. A missing or wrong code still returns the ticket's
+// user, so the failure can be audited against the account.
+func (s *Service) CompletePendingTOTP(ctx context.Context, ticket, code, ip, userAgent string) (string, db.User, error) {
+	claims, err := VerifyToken(s.pendingKey(), ticket, s.now())
+	if err != nil {
+		return "", db.User{}, ErrNotAuthenticated
+	}
+	user, err := s.q.GetUserByID(ctx, claims.UserID)
+	if err != nil || user.DisabledAt.Valid {
+		return "", db.User{}, ErrNotAuthenticated
+	}
+	if user.TotpEnabled != 0 {
+		if code == "" {
+			return "", user, ErrTOTPRequired
+		}
+		ok, err := s.checkTOTP(user, code)
+		if err != nil {
+			return "", db.User{}, err
+		}
+		if !ok {
+			return "", user, ErrTOTPInvalid
+		}
+	}
+	cookie, err := s.startSession(ctx, user, ip, userAgent)
+	return cookie, user, err
 }
 
 // StartSessionFor creates a session directly (OAuth logins, where identity
-// was proven by the provider).
+// was proven by the provider). Callers check TotpEnabled first and use
+// BeginPendingTOTP instead when it is set.
 func (s *Service) StartSessionFor(ctx context.Context, user db.User, ip, userAgent string) (string, error) {
 	return s.startSession(ctx, user, ip, userAgent)
 }

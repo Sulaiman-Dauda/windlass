@@ -227,6 +227,7 @@ func TestAPITokenSessionOnlyRoutes(t *testing.T) {
 		{http.MethodGet, "/api/v1/users/1/tokens"},
 		{http.MethodDelete, "/api/v1/users/1/tokens/1"},
 		{http.MethodPost, "/api/v1/projects/app/backups/1/restore"},
+		{http.MethodDelete, "/api/v1/users/2/totp"},
 		{http.MethodDelete, "/api/v1/projects/app"},
 		{http.MethodGet, "/api/v1/projects/app/terminal"},
 		{http.MethodPut, "/api/v1/system/backups/s3"},

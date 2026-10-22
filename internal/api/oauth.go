@@ -18,6 +18,9 @@ import (
 const (
 	oauthSettingPrefix = "oauth."
 	oauthStateCookie   = "windlass_oauth_state"
+	// oauthTOTPCookie carries the ticket for a provider sign-in that still
+	// needs its two-factor code.
+	oauthTOTPCookie = "windlass_oauth_totp"
 )
 
 // oauthConfig loads a provider's client credentials (stored encrypted).
@@ -148,6 +151,24 @@ func (a *API) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		a.Audit.Write(r.Context(), 0, "auth.oauth_unknown_user", "user", email, remoteIP(r),
 			map[string]string{"provider": provider})
 		http.Redirect(w, r, "/?oauth_error=unknown_user", http.StatusFound)
+		return
+	}
+
+	// The provider proved the email, not the second factor. An account with
+	// two-factor on gets a ticket and the code prompt, not a session.
+	if user.TotpEnabled != 0 {
+		ticket, err := a.Auth.BeginPendingTOTP(user)
+		if err != nil {
+			a.internalError(w, "oauth totp ticket", err)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{
+			Name: oauthTOTPCookie, Value: ticket, Path: "/api/v1/auth/oauth",
+			MaxAge: 300, HttpOnly: true, Secure: isTLS(r), SameSite: http.SameSiteLaxMode,
+		})
+		a.Audit.Write(r.Context(), user.ID, "auth.oauth_totp_pending", "user", email, remoteIP(r),
+			map[string]string{"provider": provider})
+		http.Redirect(w, r, "/?signin=totp", http.StatusFound)
 		return
 	}
 

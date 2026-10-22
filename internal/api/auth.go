@@ -147,6 +147,10 @@ func (a *API) handleMe(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 	user, _ := auth.UserFrom(r.Context())
 	secret, url, err := a.Auth.BeginTOTPEnrollment(r.Context(), user)
+	if errors.Is(err, auth.ErrTOTPEnabled) {
+		writeError(w, http.StatusConflict, "totp_enabled", err.Error())
+		return
+	}
 	if err != nil {
 		a.internalError(w, "totp setup", err)
 		return
@@ -172,13 +176,73 @@ func (a *API) handleTOTPVerify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleTOTPDisable(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
 	user, _ := auth.UserFrom(r.Context())
-	if err := a.Auth.DisableTOTP(r.Context(), user); err != nil {
+	err := a.Auth.DisableTOTP(r.Context(), user, strings.TrimSpace(req.Code))
+	if errors.Is(err, auth.ErrTOTPInvalid) {
+		a.Audit.Write(r.Context(), user.ID, "auth.totp_failed", "user", user.Email, remoteIP(r), nil)
+		writeError(w, http.StatusBadRequest, "totp_invalid", "invalid authenticator code")
+		return
+	}
+	if err != nil {
 		a.internalError(w, "totp disable", err)
 		return
 	}
 	a.Audit.Write(r.Context(), user.ID, "auth.totp_disabled", "user", user.Email, remoteIP(r), nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleOAuthTOTP finishes a provider sign-in for an account with two-factor
+// on. The callback left a ticket cookie instead of a session; the code turns
+// it into one.
+func (a *API) handleOAuthTOTP(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	ticket, err := r.Cookie(oauthTOTPCookie)
+	if err != nil || ticket.Value == "" {
+		writeError(w, http.StatusUnauthorized, "totp_expired", "sign in again")
+		return
+	}
+	cookie, user, err := a.Auth.CompletePendingTOTP(r.Context(), ticket.Value, strings.TrimSpace(req.Code), remoteIP(r), r.UserAgent())
+	switch {
+	case errors.Is(err, auth.ErrTOTPRequired):
+		writeError(w, http.StatusUnauthorized, "totp_required", "enter your authenticator code")
+		return
+	case errors.Is(err, auth.ErrTOTPInvalid):
+		a.Audit.Write(r.Context(), user.ID, "auth.totp_failed", "user", user.Email, remoteIP(r), map[string]string{"via": "oauth"})
+		writeError(w, http.StatusUnauthorized, "totp_invalid", "invalid authenticator code")
+		return
+	case errors.Is(err, auth.ErrNotAuthenticated):
+		clearOAuthTOTPCookie(w, r)
+		writeError(w, http.StatusUnauthorized, "totp_expired", "sign in again")
+		return
+	case err != nil:
+		a.internalError(w, "oauth totp", err)
+		return
+	}
+	clearOAuthTOTPCookie(w, r)
+	a.Audit.Write(r.Context(), user.ID, "auth.oauth_login", "user", user.Email, remoteIP(r),
+		map[string]string{"totp": "true"})
+	setSessionCookie(w, r, cookie)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func clearOAuthTOTPCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name: oauthTOTPCookie, Value: "", Path: "/api/v1/auth/oauth",
+		MaxAge: -1, HttpOnly: true, Secure: isTLS(r), SameSite: http.SameSiteLaxMode,
+	})
 }
 
 // ---------------------------------------------------------------------------

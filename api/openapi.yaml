@@ -184,6 +184,7 @@ paths:
       security: [{ session: [] }]
       responses:
         "200": { description: "{secret, otpauth_url}" }
+        "409": { description: "totp_enabled: TOTP is already on; turn it off with a code first" }
 
   /auth/totp/verify:
     post:
@@ -195,11 +196,21 @@ paths:
 
   /auth/totp/disable:
     post:
-      summary: Disable TOTP for the current user
+      summary: Disable TOTP for the current user; needs a current code
       operationId: totpDisable
       security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, description: A current code from the authenticator app }
       responses:
         "204": { description: TOTP disabled }
+        "400": { description: "totp_invalid: the code was wrong" }
 
   /auth/oauth/providers:
     get:
@@ -220,7 +231,24 @@ paths:
       summary: OAuth callback, signs in EXISTING users by verified email
       operationId: oauthCallback
       responses:
-        "302": { description: Redirect to the app (or /?oauth_error=...) }
+        "302": { description: "Redirect to the app (or /?oauth_error=...). An account with TOTP is sent to /?signin=totp with a five-minute ticket cookie instead of a session." }
+
+  /auth/oauth/totp:
+    post:
+      summary: Finish an OAuth sign-in for an account with TOTP, using the ticket cookie set by the callback
+      operationId: oauthTOTP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        "204": { description: Signed in; session cookie set }
+        "401": { description: "totp_expired (no ticket or it timed out), totp_required or totp_invalid" }
 
   /auth/oauth/github/callback/git:
     get:
@@ -251,6 +279,16 @@ paths:
       security: [{ session: [] }]
       responses:
         "204": { description: Updated }
+
+  /users/{id}/totp:
+    delete:
+      summary: Turn off another user's TOTP so they can sign in and enrol again (admin; your own account refused)
+      operationId: resetUserTOTP
+      security: [{ session: [] }]
+      responses:
+        "204": { description: TOTP turned off }
+        "400": { description: "own_account: turn your own off in Settings with a code" }
+        "404": { description: No such user }
 
   /users/{id}:
     delete:

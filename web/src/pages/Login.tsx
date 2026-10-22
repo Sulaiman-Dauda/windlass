@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router";
 import { api, ApiError } from "../api/client";
 import { useLogin } from "../api/auth";
 import { Button, btn } from "../ui/Button";
@@ -8,6 +9,80 @@ import { Icon } from "../ui/Icon";
 import AuthFrame from "../components/AuthFrame";
 
 export default function Login() {
+  const [params, setParams] = useSearchParams();
+  const [notice, setNotice] = useState("");
+  if (params.get("signin") === "totp") {
+    return (
+      <ProviderCode
+        onRestart={(why) => {
+          setNotice(why);
+          setParams({}, { replace: true });
+        }}
+        onDone={() => setParams({}, { replace: true })}
+      />
+    );
+  }
+  return <PasswordSignIn notice={notice} />;
+}
+
+// ProviderCode finishes a GitHub or Google sign-in for an account with
+// two-factor on: the provider proved the email, this asks for the code.
+function ProviderCode({ onRestart, onDone }: { onRestart: (why: string) => void; onDone: () => void }) {
+  const [code, setCode] = useState("");
+  const qc = useQueryClient();
+  const finish = useMutation({
+    mutationFn: () => api("/auth/oauth/totp", { method: "POST", body: JSON.stringify({ code }) }),
+    onSuccess: () => {
+      onDone();
+      qc.invalidateQueries({ queryKey: ["auth"] });
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && e.code === "totp_expired") onRestart("That sign-in timed out. Sign in again.");
+    },
+  });
+
+  return (
+    <AuthFrame footer="Your apps keep running whether or not this panel is.">
+      <h1 className="text-xl font-semibold tracking-[-0.016em] text-fg">Enter your code</h1>
+      <p className="mt-1 text-sm text-fg3">Your account also needs the code from your authenticator app.</p>
+      <form
+        className="mt-6 flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          finish.mutate();
+        }}
+      >
+        <Field label="Authenticator code" hint="The 6-digit code from your authenticator app.">
+          <Input
+            autoFocus
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            required
+            controlSize="lg"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+            className="text-center font-mono tracking-[0.4em]"
+          />
+        </Field>
+        {finish.isError && (
+          <p role="alert" className="text-sm text-err">
+            {finish.error instanceof ApiError ? finish.error.message : "Could not sign in"}
+          </p>
+        )}
+        <Button type="submit" variant="primary" size="lg" block loading={finish.isPending}>
+          {finish.isPending ? "Signing in…" : "Continue"}
+        </Button>
+        <Button variant="ghost" block onClick={() => onRestart("")}>
+          Start again
+        </Button>
+      </form>
+    </AuthFrame>
+  );
+}
+
+function PasswordSignIn({ notice }: { notice: string }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [totp, setTotp] = useState("");
@@ -27,6 +102,11 @@ export default function Login() {
     <AuthFrame footer="Your apps keep running whether or not this panel is.">
       <h1 className="text-xl font-semibold tracking-[-0.016em] text-fg">Sign in</h1>
       <p className="mt-1 text-sm text-fg3">Sign in to your server</p>
+      {notice && (
+        <p role="status" className="mt-3 text-sm text-fg2">
+          {notice}
+        </p>
+      )}
 
       <form
         className="mt-6 flex flex-col gap-4"

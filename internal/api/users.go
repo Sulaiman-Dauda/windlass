@@ -25,7 +25,38 @@ func (a *API) userRoutes(r chi.Router) {
 		r.Put("/{id}/role", a.handleSetUserRole)
 		r.Delete("/{id}", a.handleDeleteUser)
 		r.Delete("/{id}/tokens/{tokenID}", a.handleRevokeUserToken)
+		r.Delete("/{id}/totp", a.handleResetUserTOTP)
 	})
+}
+
+// handleResetUserTOTP removes another user's second factor, for someone who
+// has lost their authenticator. Your own goes through Settings with a code.
+func (a *API) handleResetUserTOTP(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid id")
+		return
+	}
+	actor, _ := auth.UserFrom(r.Context())
+	if id == actor.ID {
+		writeError(w, http.StatusBadRequest, "own_account", "turn off your own two-factor in Settings, with a code")
+		return
+	}
+	target, err := a.Queries.GetUserByID(r.Context(), id)
+	if err == sql.ErrNoRows {
+		writeError(w, http.StatusNotFound, "not_found", "user not found")
+		return
+	}
+	if err != nil {
+		a.internalError(w, "get user", err)
+		return
+	}
+	if err := a.Auth.ResetTOTP(r.Context(), id); err != nil {
+		a.internalError(w, "reset totp", err)
+		return
+	}
+	a.Audit.Write(r.Context(), actor.ID, "user.totp_reset", "user", target.Email, remoteIP(r), nil)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) handleListUsers(w http.ResponseWriter, r *http.Request) {

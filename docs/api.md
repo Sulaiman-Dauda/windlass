@@ -86,12 +86,14 @@ curl -sS -c jar -X POST https://panel.example/api/v1/auth/login \
 curl -sS -b jar https://panel.example/api/v1/projects
 ```
 
-Sessions are server-side rows, so a session can be revoked. Accounts with TOTP complete
-the second factor before the session is usable.
+Sessions are server-side rows, so a session can be revoked. Accounts with TOTP send
+`totp_code` with the password. An account with TOTP that signs in through GitHub or Google
+is sent back to the panel with a five-minute ticket and finishes at
+`POST /auth/oauth/totp`.
 
 ## Shape of it
 
-Seventy-one paths, grouped roughly as:
+Seventy-three paths, grouped roughly as:
 
 | Group | Examples |
 | --- | --- |

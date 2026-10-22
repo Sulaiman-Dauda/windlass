@@ -43,6 +43,21 @@ email, and does not create accounts. Someone with a GitHub account and an email 
 never added cannot get in by being first to the login page.
 
 Create the account in the panel first, then let that person sign in with OAuth.
+Turning it off asks for a current code, so someone holding a stolen session cannot remove
+it. Accounts with TOTP that sign in with GitHub or Google are asked for a code too.
+
+If someone loses their authenticator, an admin can turn TOTP off for them under
+**Settings, Users, Reset 2FA**, and they enrol again after signing in. An admin cannot
+reset their own this way. If the only admin loses theirs, stop Windlass and clear it in
+the database. On a systemd install, with the `sqlite3` package installed:
+
+```sh
+sudo systemctl stop windlass
+sudo sqlite3 /var/lib/windlass/data/windlass.db \
+  "UPDATE users SET totp_secret_enc = NULL, totp_enabled = 0 WHERE email = 'you@example.com';"
+sudo systemctl start windlass
+```
+
 
 ## Sessions
 

@@ -67,6 +67,7 @@ func (a *API) Routes(r chi.Router) {
 	r.Get("/auth/oauth/providers", a.handleOAuthProviders)
 	r.Get("/auth/oauth/{provider}/start", a.handleOAuthStart)
 	r.Get("/auth/oauth/{provider}/callback", a.handleOAuthCallback)
+	r.With(limitRequestBody(64<<10)).Post("/auth/oauth/totp", a.limitAuth(a.handleOAuthTOTP))
 	r.Post("/webhooks/github-app", a.handleAppWebhook)
 	r.Post("/webhooks/{provider}/{project}", a.handleWebhook)
 
@@ -81,7 +82,7 @@ func (a *API) Routes(r chi.Router) {
 			r.Route("/auth/tokens", a.tokenRoutes)
 			r.Post("/auth/totp/setup", a.handleTOTPSetup)
 			r.Post("/auth/totp/verify", a.handleTOTPVerify)
-			r.Post("/auth/totp/disable", a.handleTOTPDisable)
+			r.Post("/auth/totp/disable", a.limitAuth(a.handleTOTPDisable))
 		})
 		r.Get("/events", a.handleGlobalEvents)
 		r.Get("/proxy/status", a.handleProxyStatus)
