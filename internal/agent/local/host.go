@@ -50,7 +50,9 @@ func (h hostLocal) HTTPCheck(ctx context.Context, req agent.HTTPCheckReq) (agent
 
 // GitSync clones or updates a repository inside the project directory.
 // Authentication uses a per-invocation http.extraheader so tokens are never
-// persisted into .git/config.
+// persisted into .git/config. The header travels in the environment, not
+// argv: any user on the host can read a process's argv from /proc, while its
+// environment is readable only by the same user and root.
 func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.LogSink) (agent.GitSyncResult, error) {
 	fs := fsLocal{h.l}
 	dir, err := fs.EnsureProject(ctx, req.Project)
@@ -66,19 +68,17 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 	}
 	target := filepath.Join(dir, subdir)
 
-	var authArgs []string
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if req.Token != "" {
-		// GitHub/GitLab accept token as basic auth; header form keeps it out
-		// of process listings (unlike URL-embedded credentials).
+		// GitHub/GitLab accept token as basic auth.
 		header := "Authorization: Basic " + basicAuth("x-access-token", req.Token)
-		authArgs = []string{"-c", "http.extraheader=" + header}
+		env = gitConfigEnv(env, "http.extraheader", header)
 	}
 
 	run := func(args ...string) error {
-		full := append(append([]string{}, authArgs...), args...)
-		cmd := exec.CommandContext(ctx, "git", full...)
+		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = target
-		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		cmd.Env = env
 		return streamCmd(cmd, out)
 	}
 
@@ -95,11 +95,9 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 			return agent.GitSyncResult{}, fmt.Errorf("git checkout %s: %w", ref, err)
 		}
 	} else {
-		cloneArgs := append(append([]string{}, authArgs...),
-			"clone", "--branch", req.Branch, "--single-branch", req.URL, target)
-		cmd := exec.CommandContext(ctx, "git", cloneArgs...)
+		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", req.Branch, "--single-branch", req.URL, target)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		cmd.Env = env
 		if err := streamCmd(cmd, out); err != nil {
 			return agent.GitSyncResult{}, fmt.Errorf("git clone: %w", err)
 		}
@@ -117,6 +115,23 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 		return agent.GitSyncResult{}, fmt.Errorf("git rev-parse: %w", err)
 	}
 	return agent.GitSyncResult{Commit: strings.TrimSpace(string(outBytes))}, nil
+}
+
+// gitConfigEnv adds key=value to env as if passed with git -c. It uses
+// GIT_CONFIG_PARAMETERS, the variable git itself sets to hand -c options to
+// its child processes (git-remote-https among them). Every git release reads
+// it, unlike GIT_CONFIG_COUNT, which needs git 2.31.
+func gitConfigEnv(env []string, key, value string) []string {
+	param := "'" + strings.ReplaceAll(key+"="+value, "'", `'\''`) + "'"
+	const name = "GIT_CONFIG_PARAMETERS="
+	for i, kv := range env {
+		if strings.HasPrefix(kv, name) {
+			out := append([]string{}, env...)
+			out[i] = kv + " " + param
+			return out
+		}
+	}
+	return append(env, name+param)
 }
 
 func basicAuth(user, pass string) string {
