@@ -67,6 +67,12 @@ func run() error {
 	if err := os.Chmod(dataDir, 0o700); err != nil {
 		return err
 	}
+	// Before the database is opened: a second instance must not touch it.
+	unlock, err := lockDataDir(dataDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	sqlDB, err := store.Open(filepath.Join(dataDir, "windlass.db"))
 	if err != nil {
 		return err
