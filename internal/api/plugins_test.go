@@ -10,9 +10,9 @@ import (
 
 func TestStripCookieKeepsOthers(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.AddCookie(&http.Cookie{Name: "theme", Value: "dark"})
-	r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: "jwt"})
-	r.AddCookie(&http.Cookie{Name: "plugin_state", Value: "1"})
+	r.AddCookie(&http.Cookie{Name: "theme", Value: "dark"})           //nolint:gosec // G124: a test request cookie
+	r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: "jwt"}) //nolint:gosec // G124: a test request cookie
+	r.AddCookie(&http.Cookie{Name: "plugin_state", Value: "1"})       //nolint:gosec // G124: a test request cookie
 	stripCookie(r, auth.SessionCookie)
 	if _, err := r.Cookie(auth.SessionCookie); err == nil {
 		t.Fatal("session cookie still forwarded")

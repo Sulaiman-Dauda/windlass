@@ -242,16 +242,6 @@ func resolve(n *yaml.Node) *yaml.Node {
 	return n
 }
 
-// lookup returns the value for key in mapping n, or nil.
-func lookup(n *yaml.Node, key string) *yaml.Node {
-	for i := 0; i+1 < len(n.Content); i += 2 {
-		if n.Content[i].Value == key {
-			return n.Content[i+1]
-		}
-	}
-	return nil
-}
-
 // lookupAll returns every key and value pair for key in mapping n,
 // including those pulled in through merge keys, however deeply nested.
 func lookupAll(n *yaml.Node, key string) [][2]*yaml.Node {

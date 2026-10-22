@@ -17,7 +17,7 @@ import (
 func TestUpNamesTheProjectsOwnComposeFile(t *testing.T) {
 	root := t.TempDir()
 	docker := filepath.Join(root, "docker")
-	if err := os.WriteFile(docker, []byte("#!/bin/sh\necho \"$*\" > args\n"), 0o755); err != nil {
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\necho \"$*\" > args\n"), 0o755); err != nil { //nolint:gosec // G306: a test shim must be executable
 		t.Fatal(err)
 	}
 	projects := filepath.Join(root, "projects")
@@ -41,12 +41,12 @@ func TestUpNamesTheProjectsOwnComposeFile(t *testing.T) {
 			"compose -p app -f compose.yaml -f compose.override.yml -f compose.rollback.yaml up -d --quiet-pull"},
 	} {
 		dir := filepath.Join(projects, "app")
-		os.RemoveAll(dir)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		_ = os.RemoveAll(dir)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			t.Fatal(err)
 		}
 		for _, f := range tc.files {
-			if err := os.WriteFile(filepath.Join(dir, f), []byte("services: {}\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, f), []byte("services: {}\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -54,7 +54,7 @@ func TestUpNamesTheProjectsOwnComposeFile(t *testing.T) {
 		if err := l.Compose().Up(context.Background(), req, func(agent.LogLine) {}); err != nil {
 			t.Fatal(err)
 		}
-		got, err := os.ReadFile(filepath.Join(dir, "args"))
+		got, err := os.ReadFile(filepath.Join(dir, "args")) //nolint:gosec // G304: a file under t.TempDir()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +70,7 @@ func TestUpNamesTheProjectsOwnComposeFile(t *testing.T) {
 func TestUpKeepsComposeFileFromEnv(t *testing.T) {
 	root := t.TempDir()
 	docker := filepath.Join(root, "docker")
-	if err := os.WriteFile(docker, []byte("#!/bin/sh\necho \"$*\" > args\n"), 0o755); err != nil {
+	if err := os.WriteFile(docker, []byte("#!/bin/sh\necho \"$*\" > args\n"), 0o755); err != nil { //nolint:gosec // G306: a test shim must be executable
 		t.Fatal(err)
 	}
 	projects := filepath.Join(root, "projects")
@@ -90,12 +90,12 @@ func TestUpKeepsComposeFileFromEnv(t *testing.T) {
 			"compose -p app -f compose.yaml -f compose.override.yaml -f compose.rollback.yaml up -d --quiet-pull"},
 	} {
 		dir := filepath.Join(projects, "app")
-		os.RemoveAll(dir)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		_ = os.RemoveAll(dir)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			t.Fatal(err)
 		}
 		for _, f := range []string{"compose.yaml", "compose.prod.yaml", "compose.override.yaml"} {
-			if err := os.WriteFile(filepath.Join(dir, f), []byte("services: {}\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, f), []byte("services: {}\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -106,7 +106,7 @@ func TestUpKeepsComposeFileFromEnv(t *testing.T) {
 		if err := l.Compose().Up(context.Background(), req, func(agent.LogLine) {}); err != nil {
 			t.Fatal(err)
 		}
-		got, err := os.ReadFile(filepath.Join(dir, "args"))
+		got, err := os.ReadFile(filepath.Join(dir, "args")) //nolint:gosec // G304: a file under t.TempDir()
 		if err != nil {
 			t.Fatal(err)
 		}

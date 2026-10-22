@@ -3,7 +3,7 @@ package local
 import (
 	"context"
 	"net/http"
-	"net/http/cgi"
+	"net/http/cgi" //nolint:gosec // G504: serves git-http-backend; the Httpoxy bug was fixed in Go 1.6.3
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -22,7 +22,7 @@ func TestGitSyncTokenStaysOutOfArgv(t *testing.T) {
 	if err != nil {
 		t.Skip("git not installed")
 	}
-	execPath, err := exec.Command(gitBin, "--exec-path").Output()
+	execPath, err := exec.Command(gitBin, "--exec-path").Output() //nolint:gosec // G204: the test drives git directly
 	if err != nil {
 		t.Skip("git --exec-path failed")
 	}
@@ -36,7 +36,7 @@ func TestGitSyncTokenStaysOutOfArgv(t *testing.T) {
 	work := filepath.Join(root, "work")
 	git := func(dir string, args ...string) {
 		t.Helper()
-		cmd := exec.Command(gitBin, args...)
+		cmd := exec.Command(gitBin, args...) //nolint:gosec // G204: the test drives git directly
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
 			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
@@ -44,11 +44,11 @@ func TestGitSyncTokenStaysOutOfArgv(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	if err := os.MkdirAll(work, 0o755); err != nil {
+	if err := os.MkdirAll(work, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	git(work, "init", "-q", "-b", "main")
-	if err := os.WriteFile(filepath.Join(work, "compose.yaml"), []byte("services: {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(work, "compose.yaml"), []byte("services: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	git(work, "add", ".")
@@ -75,7 +75,7 @@ func TestGitSyncTokenStaysOutOfArgv(t *testing.T) {
 	shimDir := t.TempDir()
 	argvLog := filepath.Join(shimDir, "argv.log")
 	shim := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + argvLog + "\nexec " + gitBin + " \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(shim), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(shimDir, "git"), []byte(shim), 0o755); err != nil { //nolint:gosec // G306: a test shim must be executable
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -96,7 +96,7 @@ func TestGitSyncTokenStaysOutOfArgv(t *testing.T) {
 		t.Fatalf("fetch = %+v, %v; clone gave %q", second, err, first.Commit)
 	}
 
-	logged, err := os.ReadFile(argvLog)
+	logged, err := os.ReadFile(argvLog) //nolint:gosec // G304: a file under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +105,10 @@ func TestGitSyncTokenStaysOutOfArgv(t *testing.T) {
 	}
 	if strings.Contains(string(logged), basicAuth("x-access-token", token)) || strings.Contains(string(logged), "extraheader") {
 		t.Fatalf("token on a git command line:\n%s", logged)
+	}
+	// "--" ends the options, so a URL starting with "-" cannot become one.
+	if !strings.Contains(string(logged), "--single-branch -- "+req.URL+" ") {
+		t.Fatalf("clone URL not after --:\n%s", logged)
 	}
 
 	// Without the token the server refuses, so the clone above really used it.
@@ -133,7 +137,7 @@ func TestGitSyncAfterRestore(t *testing.T) {
 	work := filepath.Join(root, "work")
 	git := func(dir string, args ...string) string {
 		t.Helper()
-		cmd := exec.Command(gitBin, args...)
+		cmd := exec.Command(gitBin, args...) //nolint:gosec // G204: the test drives git directly
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
 			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
@@ -143,11 +147,11 @@ func TestGitSyncAfterRestore(t *testing.T) {
 		}
 		return strings.TrimSpace(string(out))
 	}
-	if err := os.MkdirAll(work, 0o755); err != nil {
+	if err := os.MkdirAll(work, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	git(work, "init", "-q", "-b", "main")
-	if err := os.WriteFile(filepath.Join(work, "compose.yaml"), []byte("services: {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(work, "compose.yaml"), []byte("services: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	git(work, "add", ".")
@@ -171,10 +175,10 @@ func TestGitSyncAfterRestore(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(src, ".git")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(src, "compose.yaml"), []byte("stale\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, "compose.yaml"), []byte("stale\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(work, "compose.yaml"), []byte("services: {web: {image: nginx}}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(work, "compose.yaml"), []byte("services: {web: {image: nginx}}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	git(work, "commit", "-q", "-am", "two")
@@ -196,7 +200,7 @@ func TestGitSyncAfterRestore(t *testing.T) {
 	if got.Commit != head {
 		t.Fatalf("commit = %s, want %s", got.Commit, head)
 	}
-	if b, _ := os.ReadFile(filepath.Join(src, "compose.yaml")); string(b) != "services: {web: {image: nginx}}\n" {
+	if b, _ := os.ReadFile(filepath.Join(src, "compose.yaml")); string(b) != "services: {web: {image: nginx}}\n" { //nolint:gosec // G304: a file under t.TempDir()
 		t.Fatalf("compose.yaml = %q, want the remote's", b)
 	}
 	// And the repaired checkout keeps working on the ordinary fetch path.

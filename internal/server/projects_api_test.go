@@ -190,7 +190,7 @@ func TestViewerCannotReadEnvValues(t *testing.T) {
 	admin := e.login(t)
 	e.do(t, http.MethodPost, "/api/v1/projects", map[string]string{"name": "app"}, admin)
 	if rec := e.do(t, http.MethodPut, "/api/v1/projects/app/env",
-		map[string]string{"DATABASE_URL": "postgres://u:sekret@db/x", "EMPTY": ""}, admin); rec.Code != http.StatusNoContent {
+		map[string]string{"DATABASE_URL": "postgres://u:sekret@db/x", "EMPTY": ""}, admin); rec.Code != http.StatusNoContent { //nolint:gosec // G101: a fake credential the test expects to be masked
 		t.Fatalf("set env = %d: %s", rec.Code, rec.Body.String())
 	}
 	if rec := e.do(t, http.MethodPut, "/api/v1/projects/app/files/prod.env",

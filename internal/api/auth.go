@@ -239,7 +239,7 @@ func (a *API) handleOAuthTOTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func clearOAuthTOTPCookie(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure follows the request, as on every cookie here
 		Name: oauthTOTPCookie, Value: "", Path: "/api/v1/auth/oauth",
 		MaxAge: -1, HttpOnly: true, Secure: isTLS(r), SameSite: http.SameSiteLaxMode,
 	})

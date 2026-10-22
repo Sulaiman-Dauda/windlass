@@ -76,7 +76,7 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 	}
 
 	run := func(args ...string) error {
-		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // G204: git subcommands built in this function
 		cmd.Dir = target
 		cmd.Env = env
 		return streamCmd(cmd, out)
@@ -107,7 +107,7 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 			args []string
 		}{
 			{"git init", []string{"init", "-q"}},
-			{"git remote add", []string{"remote", "add", "-t", req.Branch, "origin", req.URL}},
+			{"git remote add", []string{"remote", "add", "-t", req.Branch, "--", "origin", req.URL}},
 			{"git fetch", []string{"fetch", "--prune", "origin"}},
 			{"git checkout " + ref, []string{"checkout", "--force", "--detach", ref}},
 		}
@@ -120,7 +120,9 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 			}
 		}
 	} else {
-		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", req.Branch, "--single-branch", req.URL, target)
+		// "--" keeps a URL from a hand-edited .windlass.json from being read as
+		// an option such as --upload-pack.
+		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", req.Branch, "--single-branch", "--", req.URL, target) //nolint:gosec // G204: see above
 		cmd.Dir = dir
 		cmd.Env = env
 		if err := streamCmd(cmd, out); err != nil {

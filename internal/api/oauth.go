@@ -162,7 +162,7 @@ func (a *API) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 			a.internalError(w, "oauth totp ticket", err)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure follows the request, as on every cookie here
 			Name: oauthTOTPCookie, Value: ticket, Path: "/api/v1/auth/oauth",
 			MaxAge: 300, HttpOnly: true, Secure: isTLS(r), SameSite: http.SameSiteLaxMode,
 		})

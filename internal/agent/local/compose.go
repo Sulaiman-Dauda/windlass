@@ -108,7 +108,7 @@ func projectComposeFiles(dir string) []string {
 // COMPOSE_PATH_SEPARATOR or ":".
 func composeFileSetting(dir string) []string {
 	env := map[string]string{}
-	if data, err := os.ReadFile(filepath.Join(dir, ".env")); err == nil {
+	if data, err := os.ReadFile(filepath.Join(dir, ".env")); err == nil { //nolint:gosec // G304: the project's own .env
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
 			key, value, ok := strings.Cut(line, "=")

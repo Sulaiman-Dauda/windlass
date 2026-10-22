@@ -100,7 +100,7 @@ func TestProxyUnreachablePluginAnswersJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := l.Addr().String()
-	l.Close()
+	_ = l.Close()
 	s.running["good"] = &instance{addr: addr, proxy: newPluginProxy(addr, s.logger)}
 
 	rec := httptest.NewRecorder()

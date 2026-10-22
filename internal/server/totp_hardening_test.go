@@ -22,7 +22,9 @@ func (e *testEnv) enrolTOTP(t *testing.T, cookie *http.Cookie) string {
 	var setup struct {
 		Secret string `json:"secret"`
 	}
-	json.NewDecoder(rec.Body).Decode(&setup)
+	if err := json.NewDecoder(rec.Body).Decode(&setup); err != nil {
+		t.Fatal(err)
+	}
 	rec = e.do(t, http.MethodPost, "/api/v1/auth/totp/verify", map[string]string{"code": totpCodeForTest(t, setup.Secret)}, cookie)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("totp verify = %d: %s", rec.Code, rec.Body.String())
@@ -130,13 +132,13 @@ func TestOAuthSignInAsksForTOTP(t *testing.T) {
 	}
 
 	// The ticket is not a session.
-	forged := &http.Cookie{Name: "windlass_session", Value: ticket.Value}
+	forged := &http.Cookie{Name: "windlass_session", Value: ticket.Value} //nolint:gosec // G124: a test request cookie
 	if rec := e.do(t, http.MethodGet, "/api/v1/auth/me", nil, forged); rec.Code != http.StatusUnauthorized {
 		t.Errorf("ticket used as a session = %d", rec.Code)
 	}
 	// And a session is not a ticket.
 	if rec := e.do(t, http.MethodPost, "/api/v1/auth/oauth/totp", map[string]string{"code": totpCodeForTest(t, secret)},
-		&http.Cookie{Name: "windlass_oauth_totp", Value: admin.Value}); rec.Code != http.StatusUnauthorized {
+		&http.Cookie{Name: "windlass_oauth_totp", Value: admin.Value}); rec.Code != http.StatusUnauthorized { //nolint:gosec // G124: a test request cookie
 		t.Errorf("session used as a ticket = %d", rec.Code)
 	}
 

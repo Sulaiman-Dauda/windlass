@@ -26,7 +26,7 @@ var errAlreadyRunning = errors.New("another windlass instance is already running
 // root-run instance must still be openable by the windlass service user.
 func lockDataDir(dataDir string) (release func(), err error) {
 	path := filepath.Join(dataDir, lockFileName)
-	f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o644)
+	f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o644) //nolint:gosec // G302: must stay readable by the service user, see above
 	if err != nil {
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}
@@ -34,11 +34,11 @@ func lockDataDir(dataDir string) (release func(), err error) {
 	// when another user owns the file, which then already had to be readable.
 	_ = f.Chmod(0o644)
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
+		_ = f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, fmt.Errorf("%w (%s)", errAlreadyRunning, path)
 		}
 		return nil, fmt.Errorf("lock %s: %w", path, err)
 	}
-	return func() { f.Close() }, nil
+	return func() { _ = f.Close() }, nil
 }
