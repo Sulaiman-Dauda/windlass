@@ -55,6 +55,11 @@ Give the panel a hostname under Settings so it is served over HTTPS rather than 
 `:8080`. See [Domains and HTTPS](./domains-and-https.md).
 
 Windlass reaches Docker through a restricted socket proxy on loopback, and its service
-user is deliberately not in the `docker` group. Membership of that group is equivalent to
-root, so the proxy is what keeps a compromise of the panel from becoming a compromise of
-the host. Adding the user to the group removes that separation.
+user is deliberately not in the `docker` group. The proxy limits which parts of the Docker
+API are reachable at all, and keeps the panel's own process away from the raw socket.
+
+Be clear about what it does not do. Deploying Compose files means creating containers,
+and a Compose file can ask for a privileged container or mount the host's filesystem. So
+anyone who can edit a project and deploy it, a `member` or an API token with deploy
+access, can gain root on the host. Give `member` only to people you would trust with
+root, and keep tokens with that access as carefully as an SSH key.

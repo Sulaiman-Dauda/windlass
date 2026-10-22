@@ -40,6 +40,11 @@ func New(cfg config.Config, logger *slog.Logger, a *api.API) (http.Handler, erro
 	r.Use(securityHeaders(inlineScriptHashes(dist)))
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
+	// Refuse state-changing requests a browser sends from another origin.
+	// SameSite=Lax alone lets a sibling subdomain through, and Windlass
+	// serves its users' apps on exactly those. Webhooks and API clients send
+	// neither Sec-Fetch-Site nor Origin, so they pass.
+	r.Use(http.NewCrossOriginProtection().Handler)
 	r.Use(auth.Middleware(a.Auth))
 
 	r.Route("/api/v1", a.Routes)

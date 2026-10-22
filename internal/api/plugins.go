@@ -66,5 +66,29 @@ func (a *API) handlePluginProxy(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "" {
 		r.URL.Path = "/"
 	}
+	// A plugin is a separate program; it gets the request, not the caller's
+	// credentials. Forwarded as is, the session cookie or API token would let
+	// it call the whole API as whoever opened its page.
+	r.Header.Del("Authorization")
+	stripCookie(r, auth.SessionCookie)
 	a.Plugins.Proxy(name, w, r)
+}
+
+// stripCookie removes one cookie from the request and passes the rest on
+// byte for byte. Re-parsing with r.Cookies would drop or re-quote values
+// that a plugin set in a form net/http considers invalid.
+func stripCookie(r *http.Request, name string) {
+	var kept []string
+	for _, line := range r.Header.Values("Cookie") {
+		for _, part := range strings.Split(line, ";") {
+			k, _, _ := strings.Cut(strings.TrimSpace(part), "=")
+			if k != name && strings.TrimSpace(part) != "" {
+				kept = append(kept, strings.TrimSpace(part))
+			}
+		}
+	}
+	r.Header.Del("Cookie")
+	if len(kept) > 0 {
+		r.Header.Set("Cookie", strings.Join(kept, "; "))
+	}
 }

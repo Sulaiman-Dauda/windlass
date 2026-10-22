@@ -54,7 +54,18 @@ Disable it with `POST /api/v1/plugins/hello/disable`.
 
 ## Security and resource guidance
 
-Windlass does not grant plugins Docker, Caddy, project-filesystem, or secret access. A plugin
-has only its process permissions and the HTTP contract above unless the server operator grants
-more. Log to stdout/stderr, keep dependencies minimal, validate all plugin input, and never
+Install only plugins you trust as much as Windlass itself. A plugin runs as the same system
+user as the panel and inherits its environment, so it can read what Windlass can read: the
+database, the encryption key, project files including `.env`, and the Docker socket proxy.
+Windlass gives it no API of its own for any of these, but it does not sandbox it either.
+
+Requests reach the plugin's server without the caller's credentials. The proxy removes the
+`Authorization` header and the `windlass_session` cookie, so the plugin process cannot
+replay them against the Windlass API. Other cookies pass through. This changed in v0.57:
+a plugin that read either of them will no longer see them.
+
+That does not stop a plugin's own pages. They are served from the panel's origin, so a
+script on them runs as whoever is viewing it and can call the API with their session.
+
+Log to stdout/stderr, keep dependencies minimal, validate all plugin input, and never
 assume the panel process will stay running.
