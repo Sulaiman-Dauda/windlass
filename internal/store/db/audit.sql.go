@@ -11,12 +11,13 @@ import (
 )
 
 const insertAudit = `-- name: InsertAudit :exec
-INSERT INTO audit_log (user_id, action, resource_type, resource_id, ip, detail)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO audit_log (user_id, token_id, action, resource_type, resource_id, ip, detail)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertAuditParams struct {
 	UserID       sql.NullInt64
+	TokenID      sql.NullInt64
 	Action       string
 	ResourceType sql.NullString
 	ResourceID   sql.NullString
@@ -27,6 +28,7 @@ type InsertAuditParams struct {
 func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error {
 	_, err := q.db.ExecContext(ctx, insertAudit,
 		arg.UserID,
+		arg.TokenID,
 		arg.Action,
 		arg.ResourceType,
 		arg.ResourceID,
@@ -37,7 +39,7 @@ func (q *Queries) InsertAudit(ctx context.Context, arg InsertAuditParams) error 
 }
 
 const listAudit = `-- name: ListAudit :many
-SELECT id, ts, user_id, "action", resource_type, resource_id, ip, detail FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?
+SELECT id, ts, user_id, "action", resource_type, resource_id, ip, detail, token_id FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?
 `
 
 type ListAuditParams struct {
@@ -63,6 +65,7 @@ func (q *Queries) ListAudit(ctx context.Context, arg ListAuditParams) ([]AuditLo
 			&i.ResourceID,
 			&i.Ip,
 			&i.Detail,
+			&i.TokenID,
 		); err != nil {
 			return nil, err
 		}

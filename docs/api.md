@@ -13,7 +13,70 @@ from the implementation the way a hand-maintained document would.
 
 ## Authenticating
 
-Sign in and keep the session cookie:
+Scripts, CI jobs and AI agents use an API token. The panel itself uses a session cookie.
+
+### API tokens
+
+An admin creates a token under **Settings, API tokens**. It is shown once, so store it
+straight away in a password manager or secret store. Send it as a bearer token:
+
+```sh
+export WINDLASS_TOKEN=wl_pat_...   # from your secret store, not typed into history
+curl -sS -H "Authorization: Bearer $WINDLASS_TOKEN" https://panel.example/api/v1/projects
+curl -sS -H "Authorization: Bearer $WINDLASS_TOKEN" https://panel.example/api/v1/auth/tokens/current
+```
+
+A token acts as the person who made it, limited to the access chosen when it was created:
+
+| Access | Acts as | Can |
+| --- | --- | --- |
+| Read only | `viewer` | Read projects, deployments, logs and metrics |
+| Deploy and edit | `member` | Also create projects, edit compose and env, deploy, roll back, manage domains and backups |
+| Admin | `admin` | Also registries, Git connections, S3 settings and image pruning |
+
+The limit is worked out on every request against the owner's current role, so demoting or
+disabling the owner reduces or ends their tokens at once.
+
+Some things a token can never do, whatever its access. They need a person signed in to the
+panel, and the API answers `403 session_required`:
+
+- create, list or revoke tokens, and manage users or roles
+- set up or remove two-factor authentication, or configure sign-in providers
+- change the panel domain, apply an update, change the S3 backup destination
+- open a terminal
+- delete a project, or restore a backup over it
+
+Env values come back masked (`********`) unless the token was created with **Can read env
+values**. Leave it off unless the job has to read secrets. A token without it can still
+send the masked map back to `PUT /projects/{name}/env` with one value changed: a key whose
+value is still `********` keeps what is stored. Writing a `.env` file that still holds
+masked values is refused with `400 masked_values`.
+
+The flag fully protects secrets only on a read-only token. A Deploy and edit token can
+change compose and deploy, and a container it starts can print its environment to the
+logs. Treat any write token as able to reach the project's secrets, and store it as
+carefully as the secrets themselves.
+
+Every token expires, after 90 days by default and at most 365. Tokens can be revoked at
+any time in Settings, and an admin can see and revoke anyone's under
+`GET /users/{id}/tokens`. The audit log records which token made each change.
+Changing a password does not end tokens: revoke them in Settings if the account may have
+been compromised.
+
+Tokens start with `wl_pat_` so secret scanners and people recognise one that has leaked.
+Windlass stores only a SHA-256 hash of the secret part.
+
+### Behind Cloudflare
+
+If the panel's hostname is proxied through Cloudflare with a bot challenge, Cloudflare
+answers API requests with its own 403 page before they reach Windlass: a script cannot
+solve a challenge. Add a WAF custom rule that skips the challenge for requests whose path
+starts with `/api/` and that carry an `Authorization` header. Windlass still checks every
+token.
+
+### Sessions
+
+The panel signs in and keeps a session cookie:
 
 ```sh
 curl -sS -c jar -X POST https://panel.example/api/v1/auth/login \
@@ -28,7 +91,7 @@ the second factor before the session is usable.
 
 ## Shape of it
 
-Sixty-six paths, grouped roughly as:
+Seventy-one paths, grouped roughly as:
 
 | Group | Examples |
 | --- | --- |
@@ -38,7 +101,7 @@ Sixty-six paths, grouped roughly as:
 | Backups | `GET/POST /projects/{name}/backups`, `POST /projects/{name}/backups/{id}/restore`, `GET/PUT /projects/{name}/backups/schedule` |
 | Runtime | `GET /projects/{name}/services`, `GET /projects/{name}/logs`, `GET /projects/{name}/terminal` |
 | Platform | `GET /system/metrics`, `GET/POST /system/update`, `GET /proxy/status`, `GET /events` |
-| Access | `GET/POST /users`, `PUT /users/{id}/role`, `POST /auth/totp/setup` |
+| Access | `GET/POST /users`, `PUT /users/{id}/role`, `POST /auth/totp/setup`, `GET/POST /auth/tokens` |
 | Git | `GET/POST /git/connections`, `PUT /projects/{name}/git`, `POST /webhooks/{provider}/{project}` |
 | Templates | `GET /templates`, `POST /templates/{key}` |
 
@@ -56,9 +119,13 @@ Consume it as a stream or ask for a bounded read.
 
 State-changing requests are checked against the caller's role and written to the audit
 log. The check is in the handler, so it applies equally to the panel, to `curl`, and to
-anything else holding a session.
+anything else holding a session or a token.
 
-Rate limiting applies to authentication endpoints.
+State-changing requests that a browser sends from another origin are refused, including
+from other subdomains of the panel's own domain, where your apps may run.
+
+Rate limiting applies to authentication endpoints. API tokens are not rate limited: the
+secret is 160 random bits, so guessing one is not a practical attack.
 
 ## Health
 

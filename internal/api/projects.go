@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path"
 	"regexp"
 	"strings"
 
@@ -45,7 +46,9 @@ func (a *API) projectRoutes(r chi.Router) {
 		r.Post("/scan", a.handleScanProjects)
 		// limitAuth: delete re-verifies the password, so it is a credential
 		// endpoint and shares the brute-force budget.
-		r.Delete("/{name}", a.limitAuth(a.handleDeleteProject))
+		// RejectToken: deletion asks for the password and there may be no
+		// backup, so it stays with a person at the panel.
+		r.With(auth.RejectToken).Delete("/{name}", a.limitAuth(a.handleDeleteProject))
 		r.Put("/{name}/files/*", a.handleWriteProjectFile)
 		r.Put("/{name}/env", a.handleSetProjectEnv)
 		r.Put("/{name}/git", a.handleConfigureProjectGit)
@@ -56,7 +59,7 @@ func (a *API) projectRoutes(r chi.Router) {
 	r.Get("/{name}/env", a.handleGetProjectEnv)
 	r.Get("/{name}/services", a.handleProjectServices)
 	r.Get("/{name}/logs", a.handleProjectLogs)
-	r.With(auth.RequireRole("member")).Get("/{name}/terminal", a.handleTerminal)
+	r.With(auth.RejectToken, auth.RequireRole("member")).Get("/{name}/terminal", a.handleTerminal)
 	r.Route("/{name}/deployments", a.deploymentRoutes)
 	r.Route("/{name}/domains", a.domainRoutes)
 	r.Route("/{name}/backups", a.backupRoutes)
@@ -196,7 +199,7 @@ func (a *API) handleReadProjectFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	content := string(data)
-	if isEnvFile(rel) && !auth.HasRole(r.Context(), "member") {
+	if isEnvFile(rel) && !auth.CanReadSecrets(r.Context()) {
 		content = maskEnvFile(content)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"path": rel, "content": content})
@@ -218,6 +221,13 @@ func (a *API) handleWriteProjectFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	name := chi.URLParam(r, "name")
+	// A caller who read this file masked would write the mask back over
+	// every secret in it. Send them to PUT /env, which keeps masked values.
+	if isEnvFile(rel) && !auth.CanReadSecrets(r.Context()) && strings.Contains(req.Content, maskedEnvValue) {
+		writeError(w, http.StatusBadRequest, "masked_values",
+			"this file contains masked values ("+maskedEnvValue+"); set variables with PUT /env instead, which keeps them")
+		return
+	}
 	if err := a.Projects.WriteFile(r.Context(), name, rel, []byte(req.Content)); err != nil {
 		if errors.Is(err, projects.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "project not found")
@@ -237,9 +247,11 @@ func (a *API) handleWriteProjectFile(w http.ResponseWriter, r *http.Request) {
 
 const maskedEnvValue = "********"
 
-// isEnvFile matches the files editableFile treats as dotenv: .env and *.env.
+// isEnvFile matches dotenv files: .env, *.env, and variants such as
+// .env.production or .env.local, which hold the same kind of secrets.
 func isEnvFile(rel string) bool {
-	return strings.HasSuffix(strings.ToLower(rel), ".env")
+	lower := strings.ToLower(rel)
+	return strings.HasSuffix(lower, ".env") || strings.HasPrefix(path.Base(lower), ".env.")
 }
 
 var envKeyRe = regexp.MustCompile(`^\s*(export\s+)?[A-Za-z_][A-Za-z0-9_.-]*\s*$`)
@@ -313,9 +325,10 @@ func (a *API) handleGetProjectEnv(w http.ResponseWriter, r *http.Request) {
 		a.internalError(w, "get env", err)
 		return
 	}
-	// Viewers see which keys are set, never the values: they are the
-	// project's credentials. An unset value stays empty so it still shows.
-	if !auth.HasRole(r.Context(), "member") {
+	// Viewers, and API tokens without the secrets flag, see which keys are
+	// set, never the values: they are the project's credentials. An unset
+	// value stays empty so it still shows.
+	if !auth.CanReadSecrets(r.Context()) {
 		for k, v := range vars {
 			if v != "" {
 				vars[k] = maskedEnvValue
@@ -332,6 +345,25 @@ func (a *API) handleSetProjectEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chi.URLParam(r, "name")
+	// A caller who cannot read secrets got "********" for every value. When
+	// they send the map back with one change, the masked entries mean "keep
+	// what is stored", or a routine edit would overwrite every credential.
+	if !auth.CanReadSecrets(r.Context()) {
+		stored, err := a.Projects.GetEnv(r.Context(), name)
+		if errors.Is(err, projects.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "project not found")
+			return
+		}
+		if err != nil {
+			a.internalError(w, "get env", err)
+			return
+		}
+		for k, v := range vars {
+			if old, ok := stored[k]; ok && v == maskedEnvValue {
+				vars[k] = old
+			}
+		}
+	}
 	if err := a.Projects.SetEnv(r.Context(), name, vars); err != nil {
 		if errors.Is(err, projects.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "project not found")

@@ -3,8 +3,13 @@ info:
   title: Windlass API
   description: |
     HTTP API of the Windlass Docker Compose control plane. All endpoints are
-    versioned under /api/v1. Authentication uses an HTTP-only session cookie
-    obtained from /auth/login or /auth/setup.
+    versioned under /api/v1. The panel authenticates with an HTTP-only
+    session cookie obtained from /auth/login or /auth/setup. Scripts and
+    agents use a personal API token (`Authorization: Bearer wl_pat_...`),
+    created by an admin in Settings. A token acts as its owner with the role
+    capped at its scope (read = viewer, write = member, admin = admin).
+    Operations whose only security scheme is `session` refuse tokens with
+    403 `session_required`.
   version: 0.1.0
 servers:
   - url: /api/v1
@@ -15,6 +20,10 @@ components:
       type: apiKey
       in: cookie
       name: windlass_session
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Personal API token, `wl_pat_` followed by 60 hex characters.
   schemas:
     Error:
       type: object
@@ -44,6 +53,25 @@ components:
         needs_setup: { type: boolean }
         authenticated: { type: boolean }
         user: { $ref: "#/components/schemas/User" }
+    APIToken:
+      type: object
+      required: [id, name, prefix, scope, can_read_secrets, expires_at, expired, created_at]
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        prefix:
+          type: string
+          description: The non-secret start of the token (`wl_pat_` and the public id), for recognising it.
+        scope: { type: string, enum: [read, write, admin] }
+        can_read_secrets:
+          type: boolean
+          description: Whether the token sees real env values. Without it, env reads come back masked.
+        expires_at: { type: string, format: date-time }
+        expired: { type: boolean }
+        last_used_at: { type: [string, "null"], format: date-time }
+        last_used_ip: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+        revoked_at: { type: [string, "null"], format: date-time }
     Health:
       type: object
       required: [status, version]
@@ -128,7 +156,7 @@ paths:
     post:
       summary: Sign out
       operationId: logout
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Session revoked, cookie cleared }
 
@@ -136,7 +164,7 @@ paths:
     get:
       summary: Current user
       operationId: getMe
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200":
           description: The authenticated user
@@ -206,7 +234,7 @@ paths:
     get:
       summary: List users (admin)
       operationId: listUsers
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Array of users }
     post:
@@ -231,6 +259,99 @@ paths:
       security: [{ session: [] }]
       responses:
         "204": { description: Deleted }
+
+  /auth/tokens:
+    get:
+      summary: List your own API tokens, including revoked and expired ones
+      operationId: listTokens
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Tokens, newest first
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/APIToken" } }
+    post:
+      summary: Create an API token (admin). The token is in the response once and never again.
+      operationId: createToken
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scope]
+              properties:
+                name: { type: string, maxLength: 100 }
+                scope:
+                  type: string
+                  enum: [read, write, admin]
+                  description: Highest role the token acts as; cannot exceed your own.
+                expires_in_days: { type: integer, minimum: 1, maximum: 365, default: 90 }
+                can_read_secrets: { type: boolean, default: false }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/APIToken" }
+                  - type: object
+                    required: [token]
+                    properties:
+                      token: { type: string, description: "The full token. Store it now." }
+        "400": { description: Invalid name, scope or expiry }
+        "403": { description: Not an admin, scope above your role, or called with a token }
+
+  /auth/tokens/{id}:
+    delete:
+      summary: Revoke one of your API tokens (idempotent)
+      operationId: revokeToken
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Revoked }
+        "404": { description: No such token of yours }
+
+  /auth/tokens/current:
+    get:
+      summary: The API token making this request, and the user it acts as
+      operationId: getCurrentToken
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Token details with the effective (capped) user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/APIToken" }
+                  - type: object
+                    properties:
+                      user: { $ref: "#/components/schemas/User" }
+        "404": { description: The request used a session, not a token }
+
+  /users/{id}/tokens:
+    get:
+      summary: List a user's API tokens (admin)
+      operationId: listUserTokens
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Tokens, newest first
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/APIToken" } }
+
+  /users/{id}/tokens/{tokenID}:
+    delete:
+      summary: Revoke another user's API token (admin)
+      operationId: revokeUserToken
+      security: [{ session: [] }]
+      responses:
+        "204": { description: Revoked }
+        "404": { description: No such token for that user }
 
   /system/oauth/{provider}:
     put:
@@ -265,7 +386,7 @@ paths:
     get:
       summary: Global platform event stream (SSE)
       operationId: globalEvents
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       parameters:
         - { name: topics, in: query, schema: { type: string }, description: Comma-separated topic filter }
       responses:
@@ -276,7 +397,7 @@ paths:
     get:
       summary: Caddy availability
       operationId: proxyStatus
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "{available, version}" }
 
@@ -284,7 +405,7 @@ paths:
     get:
       summary: Host, node, and container metrics
       operationId: systemMetrics
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "{host, node, containers}" }
 
@@ -292,7 +413,7 @@ paths:
     get:
       summary: Check for a panel update (admin)
       operationId: checkUpdate
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "{version, current_version, update_available, apply_supported}" }
     post:
@@ -307,7 +428,7 @@ paths:
     get:
       summary: Docker image disk usage (admin)
       operationId: imageDiskUsage
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Image counts and reclaimable bytes }
 
@@ -315,7 +436,7 @@ paths:
     post:
       summary: Remove old unused images while protecting recent deployments (admin)
       operationId: pruneImages
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Deleted image count and reclaimed bytes }
 
@@ -323,7 +444,7 @@ paths:
     get:
       summary: Get the Settings-managed panel hostname (admin)
       operationId: getPanelDomain
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Hostname, HTTPS URL, and Caddy availability }
     put:
@@ -348,7 +469,7 @@ paths:
     get:
       summary: S3 backup destination status (admin; never returns secrets)
       operationId: getS3Config
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "{configured, endpoint, bucket}" }
     put:
@@ -362,13 +483,13 @@ paths:
     get:
       summary: List projects
       operationId: listProjects
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Array of projects }
     post:
       summary: Create a project (member)
       operationId: createProject
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "201": { description: Created with a starter compose.yaml on disk }
         "409": { description: Name already exists }
@@ -377,7 +498,7 @@ paths:
     get:
       summary: Get a project
       operationId: getProject
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Project }
         "404": { description: Not found }
@@ -406,7 +527,7 @@ paths:
     post:
       summary: Scan the stacks directory and rebuild the project index (member)
       operationId: scanProjects
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Number of filesystem projects indexed }
 
@@ -414,35 +535,36 @@ paths:
     get:
       summary: List project files
       operationId: listProjectFiles
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Array of file infos }
 
   /projects/{name}/files/{path}:
     get:
-      summary: Read an editable file (yaml/env/conf/json/toml/txt/md; dotenv values masked for viewers)
+      summary: Read an editable file (yaml/env/conf/json/toml/txt/md; dotenv values masked for viewers and tokens without can_read_secrets)
       operationId: readProjectFile
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "{path, content}" }
     put:
       summary: Write an editable file (member; 1MiB cap)
       operationId: writeProjectFile
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Written atomically }
+        "400": { description: "masked_values: a dotenv file still holding ******** from a masked read" }
 
   /projects/{name}/env:
     get:
-      summary: Read env vars (decrypted for members and admins; viewers get keys with values masked)
+      summary: Read env vars (decrypted for members and admins; viewers and tokens without can_read_secrets get values masked)
       operationId: getProjectEnv
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "Object of KEY: value" }
     put:
-      summary: Replace env vars (member; stored AES-256-GCM encrypted)
+      summary: Replace env vars (member; stored AES-256-GCM encrypted; a value of ******** from a masked read keeps the stored value)
       operationId: setProjectEnv
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Saved }
 
@@ -450,7 +572,7 @@ paths:
     get:
       summary: GitHub App status (admin)
       operationId: githubAppStatus
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "{configured, slug?, owner?, html_url?}" }
 
@@ -474,7 +596,7 @@ paths:
     put:
       summary: Configure git source (member); returns webhook secret once
       operationId: configureProjectGit
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "{webhook_secret, webhook_url, webhook_registered}" }
 
@@ -482,7 +604,7 @@ paths:
     get:
       summary: Live service status (compose ps)
       operationId: projectServices
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "{services, note?}" }
 
@@ -490,7 +612,7 @@ paths:
     get:
       summary: Container log stream (SSE)
       operationId: projectLogs
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       parameters:
         - { name: service, in: query, schema: { type: string } }
         - { name: follow, in: query, schema: { type: boolean, default: true } }
@@ -513,7 +635,7 @@ paths:
     post:
       summary: start | stop | restart (member)
       operationId: projectAction
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Done }
         "502": { description: Compose command failed }
@@ -522,13 +644,13 @@ paths:
     get:
       summary: List deployments
       operationId: listDeployments
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Array of deployments, newest first }
     post:
       summary: Deploy (member)
       operationId: createDeployment
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "201": { description: Deployment queued }
         "409": { description: A deployment is already running }
@@ -537,7 +659,7 @@ paths:
     get:
       summary: Get a deployment
       operationId: getDeployment
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Deployment }
 
@@ -545,7 +667,7 @@ paths:
     get:
       summary: Deployment event stream (SSE, replay + live, Last-Event-ID)
       operationId: deploymentEvents
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: text/event-stream; closes after terminal replay }
 
@@ -553,7 +675,7 @@ paths:
     post:
       summary: Roll back to this deployment's recorded image digests (member)
       operationId: rollback
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "201": { description: Rollback deployment queued }
 
@@ -561,13 +683,13 @@ paths:
     get:
       summary: List domains with routing status
       operationId: listDomains
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Array of domains }
     post:
       summary: Add a domain (member), Caddy routes + automatic HTTPS
       operationId: createDomain
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "201": { description: Created }
         "409": { description: Hostname already in use }
@@ -576,7 +698,7 @@ paths:
     delete:
       summary: Remove a domain (member)
       operationId: deleteDomain
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Removed; routes re-synced }
 
@@ -584,13 +706,13 @@ paths:
     get:
       summary: List backups
       operationId: listBackups
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Array of backups }
     post:
       summary: Back up now (member), archive + best-effort DB dump
       operationId: createBackup
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "201": { description: Backup record }
 
@@ -606,13 +728,13 @@ paths:
     get:
       summary: Get the backup schedule
       operationId: getBackupSchedule
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "{interval, destination, retention_count, enabled}" }
     put:
       summary: Set the backup schedule (member; hourly|daily|weekly)
       operationId: setBackupSchedule
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Saved }
 
@@ -620,7 +742,7 @@ paths:
     get:
       summary: List container registry credentials (admin; secrets never returned)
       operationId: listRegistryCredentials
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Array of credentials }
     put:
@@ -629,7 +751,7 @@ paths:
         Applied with a real docker login, so the host can pull whether or not
         Windlass is running.
       operationId: saveRegistryCredential
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200":
           description: >-
@@ -643,7 +765,7 @@ paths:
         An explicit action, not something that happens when a repository is
         connected.
       operationId: registryCredentialFromGit
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200":
           description: >-
@@ -654,7 +776,7 @@ paths:
     delete:
       summary: Delete a registry credential (admin)
       operationId: deleteRegistryCredential
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Deleted }
 
@@ -662,13 +784,13 @@ paths:
     get:
       summary: List git connections (admin)
       operationId: listGitConnections
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Array of connections (tokens never returned) }
     post:
       summary: Add a git connection (admin; token stored encrypted)
       operationId: createGitConnection
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "201": { description: Created }
 
@@ -676,7 +798,7 @@ paths:
     delete:
       summary: Delete a git connection (admin)
       operationId: deleteGitConnection
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Deleted }
 
@@ -684,7 +806,7 @@ paths:
     get:
       summary: List repositories the connection's token can access (admin)
       operationId: listGitConnectionRepos
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: "Array of {full_name, clone_url, default_branch, private}" }
         "502": { description: Provider API unreachable or rejected the token }
@@ -714,7 +836,7 @@ paths:
     get:
       summary: List one-click database templates
       operationId: listTemplates
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Array of templates }
 
@@ -722,7 +844,7 @@ paths:
     post:
       summary: Create + deploy a database project from a template (member)
       operationId: createFromTemplate
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "201": { description: "{project, deployment}; credentials in project env" }
 
@@ -730,7 +852,7 @@ paths:
     get:
       summary: List discovered plugins
       operationId: listPlugins
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "200": { description: Array of plugins with enabled/running state }
 
@@ -738,7 +860,7 @@ paths:
     post:
       summary: Enable and start a plugin (admin)
       operationId: enablePlugin
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Running }
 
@@ -746,7 +868,7 @@ paths:
     post:
       summary: Disable and stop a plugin (admin)
       operationId: disablePlugin
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Stopped; zero residual footprint }
 
@@ -754,7 +876,7 @@ paths:
     get:
       summary: Reverse proxy to the plugin process (all methods)
       operationId: pluginProxy
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "503": { description: Plugin not running }
 
@@ -762,7 +884,7 @@ paths:
     get:
       summary: Reverse proxy to the plugin process (all methods, any subpath)
       operationId: pluginProxyPath
-      security: [{ session: [] }]
+      security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "503": { description: Plugin not running }
 

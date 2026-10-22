@@ -7,7 +7,7 @@ import { useUpdateCheck } from "../api/system";
 import { Page, Callout, FormError } from "../ui/Page";
 import { Card, CardHeader, CardFooter } from "../ui/Card";
 import { Button, IconButton, btn } from "../ui/Button";
-import { Input, Select, Field } from "../ui/Field";
+import { Input, Select, Field, Switch } from "../ui/Field";
 import { StatusPill, Tag } from "../ui/Badge";
 import { Icon, type IconName } from "../ui/Icon";
 import { Segmented } from "../ui/Segmented";
@@ -16,7 +16,7 @@ import { useTheme, type ThemeMode } from "../ui/theme";
 import { useConfirm } from "../ui/Modal";
 import { useToast, errorText } from "../ui/Toast";
 import { cn } from "../ui/cn";
-import { formatBytes } from "../ui/format";
+import { formatBytes, formatDate, timeAgo } from "../ui/format";
 
 interface Connection {
   id: number;
@@ -30,6 +30,7 @@ interface Connection {
 const TABS: { value: string; label: string; icon: IconName; admin?: boolean }[] = [
   { value: "general", label: "General", icon: "settings" },
   { value: "auth", label: "Users and sign-in", icon: "users" },
+  { value: "tokens", label: "API tokens", icon: "key" },
   { value: "git", label: "Git", icon: "gitBranch", admin: true },
   { value: "registries", label: "Registries", icon: "package", admin: true },
   { value: "system", label: "System", icon: "server", admin: true },
@@ -92,6 +93,7 @@ export default function Settings() {
               <OAuthAppsSection />
             </>
           )}
+          {tab === "tokens" && <APITokensSection />}
           {tab === "git" && <GitConnections />}
           {tab === "registries" && <RegistryCredentials />}
           {tab === "system" && (
@@ -814,6 +816,176 @@ function RegistryCredentials() {
             }
           />
         )
+      )}
+    </Card>
+  );
+}
+
+// ---------- API tokens ----------
+
+interface APIToken {
+  id: number;
+  name: string;
+  prefix: string;
+  scope: "read" | "write" | "admin";
+  can_read_secrets: boolean;
+  expires_at: string;
+  expired: boolean;
+  last_used_at: string | null;
+  last_used_ip: string | null;
+  created_at: string;
+  revoked_at: string | null;
+}
+
+const SCOPE_LABEL: Record<APIToken["scope"], string> = {
+  read: "Read only",
+  write: "Deploy and edit",
+  admin: "Admin",
+};
+
+const EXPIRY_DAYS = [7, 30, 90, 180, 365];
+
+function APITokensSection() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const can = useCan();
+  const tokens = useQuery<APIToken[]>({ queryKey: ["tokens"], queryFn: () => api("/auth/tokens") });
+
+  const [name, setName] = useState("");
+  const [scope, setScope] = useState<APIToken["scope"]>("write");
+  const [days, setDays] = useState(90);
+  const [secrets, setSecrets] = useState(false);
+  const [created, setCreated] = useState<{ name: string; token: string } | null>(null);
+
+  const create = useMutation({
+    mutationFn: () =>
+      api<APIToken & { token: string }>("/auth/tokens", {
+        method: "POST",
+        body: JSON.stringify({ name, scope, expires_in_days: days, can_read_secrets: secrets && scope !== "read" }),
+      }),
+    onSuccess: (res) => {
+      setCreated({ name: res.name, token: res.token });
+      setName("");
+      setSecrets(false);
+      qc.invalidateQueries({ queryKey: ["tokens"] });
+    },
+  });
+  const revoke = useMutation({
+    mutationFn: (id: number) => api(`/auth/tokens/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["tokens"] }),
+    onError: (e) => toast.err("Could not revoke the token", errorText(e)),
+  });
+
+  return (
+    <Card>
+      <CardHeader
+        title="API tokens"
+        description="For scripts, CI and AI agents. A token acts as you, limited to the access you pick. It can never manage users, tokens or sign-in, change the panel domain, update Windlass, open a terminal or delete a project."
+      />
+      <div className="space-y-4 px-5 py-4">
+        {created && (
+          <Callout tone="ok" title={`Copy the ${created.name} token now`} onClose={() => setCreated(null)}>
+            <p>It is shown once. Keep it in a password manager or your secret store.</p>
+            <CopyField value={created.token} className="mt-2.5" />
+            <p className="mt-2 text-xs text-fg3">
+              Send it as <span className="font-mono">Authorization: Bearer &lt;token&gt;</span>.
+            </p>
+          </Callout>
+        )}
+
+        {can("admin") ? (
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              create.mutate();
+            }}
+          >
+            <div className="flex flex-wrap items-end gap-3">
+              <Field label="Name" className="min-w-[200px] flex-1">
+                <Input required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} placeholder="deploy-bot" />
+              </Field>
+              <Field label="Access" className="w-44">
+                <Select value={scope} onChange={(e) => setScope(e.target.value as APIToken["scope"])}>
+                  <option value="read">{SCOPE_LABEL.read}</option>
+                  <option value="write">{SCOPE_LABEL.write}</option>
+                  <option value="admin">{SCOPE_LABEL.admin}</option>
+                </Select>
+              </Field>
+              <Field label="Expires after" className="w-36">
+                <Select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+                  {EXPIRY_DAYS.map((d) => (
+                    <option key={d} value={d}>
+                      {d} days
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <Switch
+              checked={secrets}
+              onChange={setSecrets}
+              disabled={scope === "read"}
+              label="Can read env values"
+              description="Off, env values come back as ******** and writing them back keeps the stored value. A token that can deploy can still reach secrets through a container, so store it as carefully as the secrets."
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="submit" variant="primary" icon="plus" loading={create.isPending}>
+                Create token
+              </Button>
+              <FormError error={create.error} fallback="Failed" />
+            </div>
+          </form>
+        ) : (
+          <p className="text-sm text-fg3">Only admins can create tokens. You can see and revoke any you hold.</p>
+        )}
+      </div>
+
+      {tokens.data && tokens.data.length > 0 ? (
+        <ul className="divide-y divide-hairline border-t border-hairline">
+          {tokens.data.map((t) => {
+            const active = !t.revoked_at && !t.expired;
+            return (
+              <ListRow
+                key={t.id}
+                removeLabel={`Revoke ${t.name}`}
+                onRemove={
+                  active
+                    ? async () => {
+                        if (
+                          await confirm({
+                            title: `Revoke ${t.name}?`,
+                            body: "Anything using it stops working straight away. This cannot be undone.",
+                            confirmLabel: "Revoke token",
+                          })
+                        )
+                          revoke.mutate(t.id);
+                      }
+                    : undefined
+                }
+              >
+                <Icon name="key" size={16} className={active ? "text-fg2" : "text-fg3"} />
+                <span className={cn("font-medium", active ? "text-fg" : "text-fg3")}>{t.name}</span>
+                <span className="font-mono text-xs text-fg3">{t.prefix}…</span>
+                <Tag tone={t.scope === "admin" ? "accent" : "idle"}>{SCOPE_LABEL[t.scope]}</Tag>
+                {t.can_read_secrets && <Tag tone="warn">Env values</Tag>}
+                {t.revoked_at ? (
+                  <Tag tone="err">Revoked</Tag>
+                ) : t.expired ? (
+                  <Tag tone="err">Expired</Tag>
+                ) : (
+                  <span className="text-xs text-fg3">Expires {formatDate(t.expires_at)}</span>
+                )}
+                <span className="text-xs text-fg3">
+                  {t.last_used_at ? `Used ${timeAgo(t.last_used_at)}${t.last_used_ip ? ` from ${t.last_used_ip}` : ""}` : "Never used"}
+                </span>
+              </ListRow>
+            );
+          })}
+        </ul>
+      ) : (
+        tokens.data && <CardFooter note="No tokens yet." />
       )}
     </Card>
   );

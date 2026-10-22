@@ -74,15 +74,21 @@ func (a *API) Routes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireAuth)
 		r.Get("/auth/me", a.handleMe)
-		r.Post("/auth/totp/setup", a.handleTOTPSetup)
-		r.Post("/auth/totp/verify", a.handleTOTPVerify)
-		r.Post("/auth/totp/disable", a.handleTOTPDisable)
+		r.Get("/auth/tokens/current", a.handleCurrentToken)
+		// Browser-only: a token must never manage tokens or second factors.
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RejectToken)
+			r.Route("/auth/tokens", a.tokenRoutes)
+			r.Post("/auth/totp/setup", a.handleTOTPSetup)
+			r.Post("/auth/totp/verify", a.handleTOTPVerify)
+			r.Post("/auth/totp/disable", a.handleTOTPDisable)
+		})
 		r.Get("/events", a.handleGlobalEvents)
 		r.Get("/proxy/status", a.handleProxyStatus)
 		r.Get("/system/metrics", a.handleSystemMetrics)
 		// GitHub redirects the admin's browser here after authorizing the
 		// repo-scope connect flow; the session cookie authenticates it.
-		r.With(auth.RequireRole("admin")).
+		r.With(auth.RejectToken, auth.RequireRole("admin")).
 			Get("/auth/oauth/github/callback/git", a.handleGitConnectCallback)
 		r.Route("/projects", a.projectRoutes)
 		r.Route("/git", a.gitRoutes)
@@ -93,17 +99,23 @@ func (a *API) Routes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireRole("admin"))
 			r.Get("/system/backups/s3", a.handleGetS3Config)
-			r.Put("/system/backups/s3", a.handleSetS3Config)
 			r.Get("/system/update", a.handleCheckUpdate)
-			r.Post("/system/update", a.handleApplyUpdate)
 			r.Get("/system/docker/images", a.handleImageDiskUsage)
 			r.Post("/system/docker/images/prune", a.handlePruneImages)
 			r.Get("/system/panel-domain", a.handleGetPanelDomain)
-			r.Put("/system/panel-domain", a.handleSetPanelDomain)
-			r.Put("/system/oauth/{provider}", a.handleSetOAuthConfig)
 			r.Get("/system/github-app", a.handleGitHubAppStatus)
-			r.Get("/system/github-app/create", a.handleGitHubAppCreate)
-			r.Get("/system/github-app/callback", a.handleGitHubAppCallback)
+			// Browser-only. Each of these can move the panel, replace the
+			// binary, change who can sign in, or send every backup to
+			// another bucket: not something a leaked token should reach.
+			r.Group(func(r chi.Router) {
+				r.Use(auth.RejectToken)
+				r.Put("/system/backups/s3", a.handleSetS3Config)
+				r.Post("/system/update", a.handleApplyUpdate)
+				r.Put("/system/panel-domain", a.handleSetPanelDomain)
+				r.Put("/system/oauth/{provider}", a.handleSetOAuthConfig)
+				r.Get("/system/github-app/create", a.handleGitHubAppCreate)
+				r.Get("/system/github-app/callback", a.handleGitHubAppCallback)
+			})
 		})
 	})
 }

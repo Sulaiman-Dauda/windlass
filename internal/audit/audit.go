@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"log/slog"
 
+	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/store/db"
 )
 
@@ -22,7 +23,8 @@ func New(q *db.Queries, logger *slog.Logger) *Log {
 }
 
 // Write records an action. userID may be 0 for unauthenticated actions
-// (e.g. failed logins); detail is JSON-serialized when non-nil.
+// (e.g. failed logins); detail is JSON-serialized when non-nil. When the
+// request came in on an API token, the entry names that token too.
 func (l *Log) Write(ctx context.Context, userID int64, action, resourceType, resourceID, ip string, detail any) {
 	var detailStr sql.NullString
 	if detail != nil {
@@ -30,8 +32,13 @@ func (l *Log) Write(ctx context.Context, userID int64, action, resourceType, res
 			detailStr = sql.NullString{String: string(b), Valid: true}
 		}
 	}
+	var tokenID sql.NullInt64
+	if t, ok := auth.TokenFrom(ctx); ok {
+		tokenID = sql.NullInt64{Int64: t.ID, Valid: true}
+	}
 	err := l.q.InsertAudit(ctx, db.InsertAuditParams{
 		UserID:       sql.NullInt64{Int64: userID, Valid: userID != 0},
+		TokenID:      tokenID,
 		Action:       action,
 		ResourceType: sql.NullString{String: resourceType, Valid: resourceType != ""},
 		ResourceID:   sql.NullString{String: resourceID, Valid: resourceID != ""},

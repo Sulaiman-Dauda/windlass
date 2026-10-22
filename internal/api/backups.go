@@ -37,7 +37,9 @@ func (a *API) backupRoutes(r chi.Router) {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("member"))
 		r.Post("/", a.handleCreateBackup)
-		r.Post("/{id}/restore", a.handleRestoreBackup)
+		// Restoring writes old files over the live ones, .env included. A
+		// person does that in the panel, not a script holding a token.
+		r.With(auth.RejectToken).Post("/{id}/restore", a.handleRestoreBackup)
 		r.Put("/schedule", a.handleSetBackupSchedule)
 	})
 }

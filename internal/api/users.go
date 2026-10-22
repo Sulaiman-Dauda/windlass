@@ -16,9 +16,16 @@ import (
 func (a *API) userRoutes(r chi.Router) {
 	r.Use(auth.RequireRole("admin"))
 	r.Get("/", a.handleListUsers)
-	r.Post("/", a.handleCreateUser)
-	r.Put("/{id}/role", a.handleSetUserRole)
-	r.Delete("/{id}", a.handleDeleteUser)
+	// Changing who can sign in, and at what role, and managing tokens, stays
+	// with a person.
+	r.Group(func(r chi.Router) {
+		r.Use(auth.RejectToken)
+		r.Get("/{id}/tokens", a.handleListUserTokens)
+		r.Post("/", a.handleCreateUser)
+		r.Put("/{id}/role", a.handleSetUserRole)
+		r.Delete("/{id}", a.handleDeleteUser)
+		r.Delete("/{id}/tokens/{tokenID}", a.handleRevokeUserToken)
+	})
 }
 
 func (a *API) handleListUsers(w http.ResponseWriter, r *http.Request) {
