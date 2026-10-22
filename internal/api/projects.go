@@ -199,8 +199,13 @@ func (a *API) handleReadProjectFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	content := string(data)
-	if isEnvFile(rel) && !auth.CanReadSecrets(r.Context()) {
-		content = maskEnvFile(content)
+	if !auth.CanReadSecrets(r.Context()) {
+		switch {
+		case isEnvFile(rel):
+			content = maskEnvFile(content)
+		case isYAMLFile(rel):
+			content = maskComposeFile(content)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"path": rel, "content": content})
 }
@@ -223,9 +228,10 @@ func (a *API) handleWriteProjectFile(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	// A caller who read this file masked would write the mask back over
 	// every secret in it. Send them to PUT /env, which keeps masked values.
-	if isEnvFile(rel) && !auth.CanReadSecrets(r.Context()) && strings.Contains(req.Content, maskedEnvValue) {
+	if (isEnvFile(rel) || isYAMLFile(rel)) && !auth.CanReadSecrets(r.Context()) && strings.Contains(req.Content, maskedEnvValue) {
 		writeError(w, http.StatusBadRequest, "masked_values",
-			"this file contains masked values ("+maskedEnvValue+"); set variables with PUT /env instead, which keeps them")
+			"this file contains masked values ("+maskedEnvValue+"); set variables with PUT /env instead, which keeps them, "+
+				"and keep values out of compose files")
 		return
 	}
 	if err := a.Projects.WriteFile(r.Context(), name, rel, []byte(req.Content)); err != nil {

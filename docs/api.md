@@ -50,7 +50,9 @@ Env values come back masked (`********`) unless the token was created with **Can
 values**. Leave it off unless the job has to read secrets. A token without it can still
 send the masked map back to `PUT /projects/{name}/env` with one value changed: a key whose
 value is still `********` keeps what is stored. Writing a `.env` file that still holds
-masked values is refused with `400 masked_values`.
+masked values is refused with `400 masked_values`. Compose files are masked the same
+way: inline `environment:`, build `args:` and config `content:` values read as
+`********`, and writing a YAML file that still holds them is refused.
 
 The flag fully protects secrets only on a read-only token. A Deploy and edit token can
 change compose and deploy, and a container it starts can print its environment to the

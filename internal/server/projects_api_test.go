@@ -229,6 +229,53 @@ func TestViewerCannotReadEnvValues(t *testing.T) {
 	}
 }
 
+// Compose files can set values inline. A viewer sees the file's structure,
+// with environment and build args masked, and cannot write the masked copy
+// back over the real one.
+func TestViewerCannotReadComposeValues(t *testing.T) {
+	e := newTestEnv(t)
+	admin := e.login(t)
+	e.do(t, http.MethodPost, "/api/v1/projects", map[string]string{"name": "app"}, admin)
+	compose := "services:\n  web:\n    image: nginx\n    environment:\n      DB_PASSWORD: inline-sekret\n      FROM_ENV: ${API_KEY}\n    build:\n      args:\n        - NPM_TOKEN=npm-sekret\n"
+	if rec := e.do(t, http.MethodPut, "/api/v1/projects/app/files/compose.yaml",
+		map[string]string{"content": compose}, admin); rec.Code != http.StatusNoContent {
+		t.Fatalf("write compose = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	hashViewer(t, e, context.Background())
+	rec := e.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
+		"email": "viewer@example.com", "password": "viewerpassword",
+	})
+	viewer := sessionCookie(t, rec)
+
+	rec = e.do(t, http.MethodGet, "/api/v1/projects/app/files/compose.yaml", nil, viewer)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || strings.Contains(body, "sekret") || !strings.Contains(body, "DB_PASSWORD") ||
+		!strings.Contains(body, "image: nginx") || !strings.Contains(body, "${API_KEY}") {
+		t.Errorf("viewer compose = %d %s, want structure and references without values", rec.Code, body)
+	}
+	if rec := e.do(t, http.MethodGet, "/api/v1/projects/app/files/compose.yaml", nil, admin); !strings.Contains(rec.Body.String(), "inline-sekret") {
+		t.Errorf("admin compose = %s, want real values", rec.Body.String())
+	}
+
+	// A write token without the secrets flag reads the masked copy too, and
+	// sending it back is refused rather than overwriting the real values.
+	tok := e.createToken(t, admin, map[string]any{"name": "ci", "scope": "write"})
+	rec = e.doBearer(t, http.MethodGet, "/api/v1/projects/app/files/compose.yaml", tok.Token, nil)
+	if strings.Contains(rec.Body.String(), "sekret") {
+		t.Errorf("token compose read exposed a value: %s", rec.Body.String())
+	}
+	masked := strings.Replace(compose, "inline-sekret", `"********"`, 1)
+	rec = e.doBearer(t, http.MethodPut, "/api/v1/projects/app/files/compose.yaml", tok.Token,
+		map[string]string{"content": masked})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "masked_values") {
+		t.Errorf("masked compose write = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.do(t, http.MethodGet, "/api/v1/projects/app/files/compose.yaml", nil, admin); !strings.Contains(rec.Body.String(), "inline-sekret") {
+		t.Errorf("masked compose write changed the file: %s", rec.Body.String())
+	}
+}
+
 // Session cookies are SameSite=Lax, which browsers send on a cross-site GET.
 // The terminal is the one GET that acts (it opens a shell in a container),
 // so its WebSocket handshake must refuse a page on another origin.

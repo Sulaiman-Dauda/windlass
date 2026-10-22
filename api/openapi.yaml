@@ -579,7 +579,7 @@ paths:
 
   /projects/{name}/files/{path}:
     get:
-      summary: Read an editable file (yaml/env/conf/json/toml/txt/md; dotenv values masked for viewers and tokens without can_read_secrets)
+      summary: Read an editable file (yaml/env/conf/json/toml/txt/md). For viewers and tokens without can_read_secrets, dotenv values and Compose inline environment, build args and config content are masked
       operationId: readProjectFile
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
@@ -590,7 +590,7 @@ paths:
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "204": { description: Written atomically }
-        "400": { description: "masked_values: a dotenv file still holding ******** from a masked read" }
+        "400": { description: "masked_values: a dotenv or YAML file still holding ******** from a masked read, sent by a caller who cannot read secrets" }
 
   /projects/{name}/env:
     get:

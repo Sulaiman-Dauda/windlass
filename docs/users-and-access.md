@@ -19,6 +19,13 @@ Three roles, in increasing order:
 | `member` | Everything a viewer can, plus deploy, edit files and environment, manage domains and backups |
 | `admin` | Everything a member can, plus manage users, settings, credentials and updates |
 
+Viewers see which env keys a project sets, but not their values. The same goes for values
+a Compose file sets inline: `environment:`, build `args:` and inline config `content:`
+come back as `********`, while `${NAME}` references stay readable so a viewer can see
+where a value comes from. Comments inside those blocks are hidden too, and a masked file
+is shown reformatted. Secrets written elsewhere in a Compose file, such as in a
+`command:` line or a label, are not masked. Keep them in `.env`.
+
 Every state-changing request is checked against the role on the server and written to the
 audit log. The check is in the handler, not in whether the button was drawn, so a hidden
 control is not a permission and cannot be worked around by sending the request directly.
@@ -36,13 +43,6 @@ code, done. It is standard RFC 6238, so any authenticator works.
 Turn it on for administrators on any panel reachable from the internet. It is not
 mandatory, because a single-operator install on a private network gains little from it.
 
-## Signing in with GitHub
-
-OAuth can be enabled for sign-in. It signs in **existing** users matched by verified
-email, and does not create accounts. Someone with a GitHub account and an email you have
-never added cannot get in by being first to the login page.
-
-Create the account in the panel first, then let that person sign in with OAuth.
 Turning it off asks for a current code, so someone holding a stolen session cannot remove
 it. Accounts with TOTP that sign in with GitHub or Google are asked for a code too.
 
@@ -58,6 +58,13 @@ sudo sqlite3 /var/lib/windlass/data/windlass.db \
 sudo systemctl start windlass
 ```
 
+## Signing in with GitHub
+
+OAuth can be enabled for sign-in. It signs in **existing** users matched by verified
+email, and does not create accounts. Someone with a GitHub account and an email you have
+never added cannot get in by being first to the login page.
+
+Create the account in the panel first, then let that person sign in with OAuth.
 
 ## Sessions
 
