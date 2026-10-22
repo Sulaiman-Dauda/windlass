@@ -218,6 +218,15 @@ const (
 	syncRetryMax  = 2 * time.Minute
 )
 
+var (
+	// syncDebounce gathers a burst of container events into one sync.
+	syncDebounce = 2 * time.Second
+	// routeCheckInterval is how often Run looks for the routes object in
+	// Caddy. A Caddy reload or restart drops it without any event reaching
+	// Windlass.
+	routeCheckInterval = 30 * time.Second
+)
+
 // Sync pushes the full desired state of all domains into Caddy. Upstreams
 // resolve to the current container IP of each domain's service.
 //
@@ -339,11 +348,15 @@ func (s *Service) Run(ctx context.Context) {
 	// Initial sync on startup (Caddy restarts lose in-memory config).
 	s.RequestSync()
 
+	check := time.NewTicker(routeCheckInterval)
+	defer check.Stop()
+
 	debounce := time.NewTimer(0)
 	if !debounce.Stop() {
 		<-debounce.C
 	}
 	pending := false
+	synced := false
 	backoff := syncRetryBase
 
 	for {
@@ -357,10 +370,16 @@ func (s *Service) Run(ctx context.Context) {
 			default:
 				s.RequestSync()
 			}
+		case <-check.C:
+			// Until a sync succeeds the object is legitimately missing and
+			// the retry below is already on it.
+			if synced && !pending {
+				s.checkRoutes(ctx)
+			}
 		case <-s.syncCh:
 			if !pending {
 				pending = true
-				debounce.Reset(2 * time.Second)
+				debounce.Reset(syncDebounce)
 			}
 		case <-debounce.C:
 			pending = false
@@ -368,6 +387,7 @@ func (s *Service) Run(ctx context.Context) {
 			err := s.Sync(syncCtx)
 			cancelSync()
 			if err == nil {
+				synced = true
 				backoff = syncRetryBase
 				continue
 			}
@@ -383,6 +403,22 @@ func (s *Service) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// checkRoutes asks for a sync when Caddy is up but no longer holds the
+// routes object, which every successful sync installs. That happens when an
+// administrator reloads or restarts Caddy: it loads its own config file and
+// every site Windlass routes goes offline until the routes are put back.
+func (s *Service) checkRoutes(ctx context.Context) {
+	checkCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	installed, err := s.agent.Proxy().RoutesInstalled(checkCtx)
+	if err != nil || installed {
+		// Caddy down is the sync retry's job, and it logs that already.
+		return
+	}
+	s.logger.Warn("caddy no longer holds the windlass routes, restoring them")
+	s.RequestSync()
 }
 
 func validHostname(h string) bool {

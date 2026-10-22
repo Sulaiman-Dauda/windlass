@@ -204,6 +204,32 @@ func TestSPAFallback(t *testing.T) {
 	}
 }
 
+// An API client that asks for a path the running version lacks must get a
+// JSON error, not the panel's index.html with a 200.
+func TestUnknownAPIPathIsJSONNotFound(t *testing.T) {
+	e := newTestEnv(t)
+	for _, tc := range []struct {
+		method, path string
+		status       int
+		code         string
+	}{
+		{http.MethodGet, "/api/v1/no-such-endpoint", http.StatusNotFound, "not_found"},
+		{http.MethodGet, "/api/v1/auth/no-such-endpoint", http.StatusNotFound, "not_found"},
+		{http.MethodPost, "/api/v1/no-such-endpoint", http.StatusNotFound, "not_found"},
+		{http.MethodGet, "/api/v2/system/health", http.StatusNotFound, "not_found"},
+		{http.MethodGet, "/api", http.StatusNotFound, "not_found"},
+		{http.MethodDelete, "/api/v1/system/health", http.StatusMethodNotAllowed, "method_not_allowed"},
+	} {
+		rec := e.do(t, tc.method, tc.path, nil)
+		if rec.Code != tc.status || !strings.Contains(rec.Body.String(), `"code":"`+tc.code+`"`) {
+			t.Errorf("%s %s = %d %s, want %d %s", tc.method, tc.path, rec.Code, rec.Body.String(), tc.status, tc.code)
+		}
+		if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+			t.Errorf("%s %s Content-Type = %q", tc.method, tc.path, ct)
+		}
+	}
+}
+
 func TestSPACachePolicyRefreshesFrontendAfterUpdate(t *testing.T) {
 	dist := fstest.MapFS{
 		"index.html":             {Data: []byte(`<!doctype html><script src="/assets/index-abc123.js"></script>`)},

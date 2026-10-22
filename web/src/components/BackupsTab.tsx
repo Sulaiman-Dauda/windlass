@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useCan } from "../api/auth";
@@ -223,6 +224,19 @@ function ScheduleEditor({ project }: { project: string }) {
             />
           </Field>
         </div>
+        {current.destination === "s3" && (
+          <p className="text-sm text-fg3">
+            Backups go to the S3 bucket an admin sets in{" "}
+            {can("admin") ? (
+              <Link to="/settings/backups" className="text-accent hover:underline">
+                Settings, Backups
+              </Link>
+            ) : (
+              "Settings, Backups"
+            )}
+            . Until it is set, these backups fail.
+          </p>
+        )}
       </div>
       {editable && (
         <CardFooter note={draft ? "Unsaved changes." : undefined}>

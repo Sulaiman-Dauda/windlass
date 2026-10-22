@@ -53,6 +53,8 @@ func (a *API) Routes(r chi.Router) {
 	// Bound every API request before any JSON decoder or webhook verifier can
 	// allocate from it. Credential bodies have a much smaller nested limit.
 	r.Use(limitRequestBody(6 << 20))
+	r.NotFound(NotFound)
+	r.MethodNotAllowed(MethodNotAllowed)
 
 	// 20 credential attempts per IP per minute.
 	a.authLimiter = newAuthRateLimiter(20, time.Minute)

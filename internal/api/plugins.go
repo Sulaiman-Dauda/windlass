@@ -59,6 +59,20 @@ func (a *API) handleDisablePlugin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handlePluginProxy(w http.ResponseWriter, r *http.Request) {
+	// Reading through a plugin is open to any signed-in caller. Anything
+	// else needs a member, as it does across the rest of the API, so a
+	// viewer or a read-only token cannot change state through a plugin.
+	// A WebSocket starts as a GET but then carries writes too.
+	read := r.Header.Get("Upgrade") == ""
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+	default:
+		read = false
+	}
+	if !read && !auth.HasRole(r.Context(), "member") {
+		writeError(w, http.StatusForbidden, "forbidden", "insufficient role")
+		return
+	}
 	name := chi.URLParam(r, "name")
 	// Strip our prefix so plugins see clean paths.
 	prefix := "/api/v1/plugins/" + name + "/proxy"

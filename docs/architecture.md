@@ -9,7 +9,7 @@ Browser
   ▼
 Caddy ── user-owned configuration
   │      + windlass_panel_route
-  │      + windlass_routes / windlass_route_*
+  │      + windlass_routes / windlass_route_* / windlass_https_redirect
   ▼
 Windlass Go process
   ├── API, auth, audit, jobs, deploy, proxy, backup, plugin services
@@ -45,8 +45,10 @@ records.
 SQLite uses WAL mode and foreign keys. It stores:
 
 - users, sessions, roles, TOTP/OAuth state, audit entries, and settings;
+- API tokens, as a SHA-256 hash of the secret part only;
 - deployment/job state, events, image artifacts, backups, and schedules;
-- encrypted Git/S3/OAuth credentials;
+- encrypted Git connection, registry, S3 and OAuth credentials;
+- which plugins are enabled;
 - rebuildable project, domain, and environment indexes/caches.
 
 The database does not contain Compose YAML or replace the project files. A new database can
@@ -87,20 +89,32 @@ HTTP application checks      # when windlass.health.* labels exist
 ```
 
 Step checkpoints are recorded before execution. A restarted runner reclaims interrupted jobs
-and reruns the idempotent checkpoint. Rollback deployments use recorded image digests in a
-temporary Compose override.
+and reruns the idempotent checkpoint.
+
+A rollback is a new deployment. Pulled services are pinned to the target's recorded image
+digests in a generated `compose.rollback.yaml`, passed with `-f` after the files a plain
+deploy loads: those `COMPOSE_FILE` in `.env` lists, or else the project's compose file and
+its override file, such as `compose.override.yaml`. Services with a `build:` key are left
+out of the pin: on a Git project the target's commit is checked out in `src/` and rebuilt,
+and without Git they keep their current image, with a warning in the log. The rollback
+copies the target's artifacts, so it can be rolled back to in turn.
 
 ## Caddy ownership
 
 Windlass uses targeted admin-API requests and never calls `POST /load`:
 
-- `windlass_routes` is the application-domain subtree.
-- `windlass_route_<hostname>` is an individual application route.
+- `windlass_routes` is the application-domain subtree, placed first in the server that
+  listens on `:443` or `:80`.
+- `windlass_route_<hostname>` is an individual application route, dialling the running
+  container's IP and port.
+- `windlass_https_redirect` sends plain HTTP for Windlass hostnames to HTTPS.
 - `windlass_panel_route` is the Settings-managed panel hostname.
 
-Certificate automation names are merged with existing names. User routes and unrelated Caddy
-configuration remain untouched. Routes are reconciled at startup and after relevant Docker,
-deployment, project, or domain events.
+Certificate automation names are merged with existing names and never removed. User routes
+and unrelated Caddy configuration remain untouched. Routes are reconciled at startup and
+after relevant Docker, deployment, project, or domain events. Every 30 seconds Windlass
+also checks that `windlass_routes` still exists, and syncs when it does not, because a
+Caddy reload loads the Caddyfile and drops every route the admin API added.
 
 ## Events and UI safety
 

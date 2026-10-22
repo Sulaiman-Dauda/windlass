@@ -312,3 +312,45 @@ func itoa(n int64) string {
 	b, _ := json.Marshal(n)
 	return string(b)
 }
+
+// The plugin proxy forwards any method, so it applies the API's own rule:
+// reading needs a signed-in caller, changing anything needs a member. No
+// plugin is running, so a request that gets through answers 503.
+func TestPluginProxyWritesNeedMember(t *testing.T) {
+	e := newTestEnv(t)
+	cookie := e.login(t)
+	read := e.createToken(t, cookie, map[string]any{"name": "r", "scope": "read"})
+	write := e.createToken(t, cookie, map[string]any{"name": "w", "scope": "write"})
+
+	for _, c := range []struct {
+		token, method string
+		want          int
+	}{
+		{read.Token, http.MethodGet, http.StatusServiceUnavailable},
+		{read.Token, http.MethodPost, http.StatusForbidden},
+		{read.Token, http.MethodPut, http.StatusForbidden},
+		{read.Token, http.MethodDelete, http.StatusForbidden},
+		{write.Token, http.MethodPost, http.StatusServiceUnavailable},
+	} {
+		if rec := e.doBearer(t, c.method, "/api/v1/plugins/hello/proxy/items", c.token, nil); rec.Code != c.want {
+			t.Errorf("%s with a %s token = %d, want %d: %s", c.method, map[string]string{read.Token: "read", write.Token: "write"}[c.token], rec.Code, c.want, rec.Body.String())
+		}
+	}
+	if rec := e.do(t, http.MethodGet, "/api/v1/plugins/hello/proxy", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("signed out = %d, want 401", rec.Code)
+	}
+
+	// A WebSocket starts as a GET, but once upgraded it carries anything,
+	// writes included, so it needs a member too.
+	for token, want := range map[string]int{read.Token: http.StatusForbidden, write.Token: http.StatusServiceUnavailable} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/hello/proxy/ws", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "websocket")
+		rec := httptest.NewRecorder()
+		e.handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("WebSocket upgrade with a %s token = %d, want %d", map[string]string{read.Token: "read", write.Token: "write"}[token], rec.Code, want)
+		}
+	}
+}

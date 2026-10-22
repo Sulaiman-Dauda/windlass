@@ -124,11 +124,13 @@ paths:
                 password: { type: string, minLength: 10 }
       responses:
         "204": { description: Admin created, session cookie set }
+        "400": { description: "bad_request: invalid body, email or password" }
         "403":
-          description: Invalid token or instance already claimed
+          description: Invalid token (invalid_token) or instance already claimed (setup_complete)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "429": { description: "rate_limited: more than 20 credential attempts from this address in a minute" }
 
   /auth/login:
     post:
@@ -144,19 +146,24 @@ paths:
               properties:
                 email: { type: string, format: email }
                 password: { type: string }
+                totp_code:
+                  type: string
+                  description: A current authenticator code, for accounts with TOTP
       responses:
         "204": { description: Session cookie set }
         "401":
-          description: Invalid credentials
+          description: invalid_credentials, totp_required (send totp_code) or totp_invalid
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "429": { description: "rate_limited: more than 20 credential attempts from this address in a minute" }
 
   /auth/logout:
     post:
       summary: Sign out
       operationId: logout
-      security: [{ session: [] }, { bearerAuth: [] }]
+      description: Ends the session in the cookie, if there is one. It does not revoke API tokens.
+      security: [{ session: [] }, {}]
       responses:
         "204": { description: Session revoked, cookie cleared }
 
@@ -191,8 +198,18 @@ paths:
       summary: Confirm enrollment with a code; activates TOTP
       operationId: totpVerify
       security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
       responses:
         "204": { description: TOTP enabled }
+        "400": { description: "totp_invalid: the code was wrong, or enrolment was not started" }
 
   /auth/totp/disable:
     post:
@@ -211,6 +228,7 @@ paths:
       responses:
         "204": { description: TOTP disabled }
         "400": { description: "totp_invalid: the code was wrong" }
+        "429": { description: "rate_limited: more than 20 credential attempts from this address in a minute" }
 
   /auth/oauth/providers:
     get:
@@ -249,6 +267,7 @@ paths:
       responses:
         "204": { description: Signed in; session cookie set }
         "401": { description: "totp_expired (no ticket or it timed out), totp_required or totp_invalid" }
+        "429": { description: "rate_limited: more than 20 credential attempts from this address in a minute" }
 
   /auth/oauth/github/callback/git:
     get:
@@ -256,7 +275,7 @@ paths:
       operationId: gitConnectCallback
       security: [{ session: [] }]
       responses:
-        "302": { description: Redirect to /settings?git_connected=... (or ?git_error=...) }
+        "302": { description: "Redirect to /settings?git_connected=... (or ?git_error=...)" }
 
   /users:
     get:
@@ -505,17 +524,32 @@ paths:
 
   /system/backups/s3:
     get:
-      summary: S3 backup destination status (admin; never returns secrets)
+      summary: S3 backup destination status (admin; never returns the keys)
       operationId: getS3Config
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
-        "200": { description: "{configured, endpoint, bucket}" }
+        "200": { description: "{configured, endpoint, region, bucket, key_prefix}" }
     put:
-      summary: Configure the S3 backup destination (admin)
+      summary: Configure the S3 backup destination (admin); replaces the stored one, keys included
       operationId: setS3Config
       security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint, bucket, access_key, secret_key]
+              properties:
+                endpoint: { type: string, description: "Path-style endpoint without the bucket, e.g. https://s3.eu-west-2.amazonaws.com" }
+                region: { type: string, description: "Blank means auto" }
+                bucket: { type: string }
+                access_key: { type: string }
+                secret_key: { type: string }
+                key_prefix: { type: string, description: "Prepended to every object key, e.g. windlass/" }
       responses:
         "204": { description: Saved (credentials stored encrypted) }
+        "400": { description: "bad_request: endpoint, bucket, access_key and secret_key are required" }
 
   /projects:
     get:
@@ -560,6 +594,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "429": { description: "rate_limited: more than 20 credential attempts from this address in a minute" }
 
   /projects/scan:
     post:
@@ -711,11 +746,19 @@ paths:
 
   /projects/{name}/deployments/{number}/rollback:
     post:
-      summary: Roll back to this deployment's recorded image digests (member)
+      summary: Roll back to this succeeded deployment (member)
+      description: |
+        Queues a new deployment. Pulled services are pinned to this deployment's
+        recorded image digests. On a Git project its commit is checked out and
+        services with a build key are rebuilt from it; without Git they keep
+        their current image. The current compose file and .env are used.
       operationId: rollback
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "201": { description: Rollback deployment queued }
+        "400": { description: "bad_request: the deployment did not succeed, or has no image digests or Git commit" }
+        "404": { description: "not_found: no such deployment" }
+        "409": { description: "conflict: a deployment is already running" }
 
   /projects/{name}/domains:
     get:
@@ -751,8 +794,18 @@ paths:
       summary: Back up now (member), archive + best-effort DB dump
       operationId: createBackup
       security: [{ session: [] }, { bearerAuth: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                destination: { type: string, enum: [local, s3], description: "Defaults to local" }
       responses:
         "201": { description: Backup record }
+        "409": { description: "conflict: a backup of this project is already running" }
+        "502": { description: "The backup failed; the body is the failed backup record with its error" }
 
   /projects/{name}/backups/{id}/restore:
     post:
@@ -913,18 +966,32 @@ paths:
   /plugins/{name}/proxy:
     get:
       summary: Reverse proxy to the plugin process (all methods)
+      description: |
+        GET, HEAD and OPTIONS need any signed-in caller; every other method,
+        and a WebSocket upgrade, needs member. The caller's Authorization
+        header and session cookie are removed before the request reaches the
+        plugin.
       operationId: pluginProxy
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
-        "503": { description: Plugin not running }
+        "403": { description: "forbidden: a method other than GET, HEAD or OPTIONS, or a WebSocket upgrade, without member" }
+        "502": { description: "plugin_unreachable: the plugin is running but did not answer" }
+        "503": { description: "plugin_unavailable: the plugin is not running" }
 
   /plugins/{name}/proxy/{path}:
     get:
       summary: Reverse proxy to the plugin process (all methods, any subpath)
+      description: |
+        GET, HEAD and OPTIONS need any signed-in caller; every other method,
+        and a WebSocket upgrade, needs member. The caller's Authorization
+        header and session cookie are removed before the request reaches the
+        plugin.
       operationId: pluginProxyPath
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
-        "503": { description: Plugin not running }
+        "403": { description: "forbidden: a method other than GET, HEAD or OPTIONS, or a WebSocket upgrade, without member" }
+        "502": { description: "plugin_unreachable: the plugin is running but did not answer" }
+        "503": { description: "plugin_unavailable: the plugin is not running" }
 
   /openapi.yaml:
     get:

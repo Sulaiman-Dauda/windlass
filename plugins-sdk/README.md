@@ -23,8 +23,17 @@ A plugin is an optional external process installed under
   `WINDLASS_PLUGIN_ADDR`. The process must serve HTTP on exactly that address.
 - Requests under `/api/v1/plugins/<name>/proxy/*` are authenticated by Windlass, forwarded to
   the plugin, and have that prefix stripped.
-- Current plugin proxy authorization requires a signed-in user. A plugin needing finer roles
-  must implement additional authorization.
+- Any signed-in user or API token can send `GET`, `HEAD` and `OPTIONS` requests through the
+  proxy. Every other method needs the `member` role, or a token with Deploy and edit
+  access, and so does opening a WebSocket, because once open it carries writes too.
+  Anything less gets `403` from Windlass before the plugin sees it. This changed in v0.57:
+  before it, a viewer could send any method and open a WebSocket.
+- Windlass does not tell the plugin who the caller is. A plugin that needs to tell users
+  apart, or to allow some writes to members and not others, has to run its own sign-in.
+- Windlass starts enabled plugins when it starts, and starts a plugin when it is enabled.
+  It does not restart one that exits; until it is enabled again or Windlass restarts, the
+  proxy answers `503 plugin_unavailable`. A plugin that is running but not listening on
+  `WINDLASS_PLUGIN_ADDR` gets `502 plugin_unreachable` after two seconds.
 - Disabling a plugin or stopping Windlass terminates the process. Persist required state under
   the plugin directory; do not depend on in-memory state surviving.
 

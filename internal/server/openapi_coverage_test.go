@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"go.yaml.in/yaml/v3"
 
 	spec "github.com/windlass-dev/windlass/api"
 )
@@ -72,5 +73,33 @@ func TestEveryRouteIsDocumented(t *testing.T) {
 	}
 	if len(undocumented) > 0 {
 		t.Errorf("routes missing from api/openapi.yaml:\n  %s", strings.Join(undocumented, "\n  "))
+	}
+}
+
+// TestOpenAPISpecParses decodes the whole spec. specPaths reads it line by
+// line, which let a YAML error ship for months: clients that generate code
+// from /api/v1/openapi.yaml could not load it.
+func TestOpenAPISpecParses(t *testing.T) {
+	var doc struct {
+		OpenAPI string                               `yaml:"openapi"`
+		Paths   map[string]map[string]map[string]any `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(spec.Spec, &doc); err != nil {
+		t.Fatalf("api/openapi.yaml is not valid YAML: %v", err)
+	}
+	if doc.OpenAPI == "" || len(doc.Paths) == 0 {
+		t.Fatal("api/openapi.yaml has no openapi version or paths")
+	}
+	seen := map[string]string{}
+	for path, ops := range doc.Paths {
+		for method, op := range ops {
+			id, _ := op["operationId"].(string)
+			if id == "" {
+				t.Errorf("%s %s has no operationId", method, path)
+			} else if prev, dup := seen[id]; dup {
+				t.Errorf("operationId %s used by %s and %s %s", id, prev, method, path)
+			}
+			seen[id] = method + " " + path
+		}
 	}
 }

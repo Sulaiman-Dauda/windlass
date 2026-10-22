@@ -5,9 +5,11 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/windlass-dev/windlass/internal/store"
@@ -83,6 +85,34 @@ func TestProxyUnavailableWhenNotRunning(t *testing.T) {
 	s.Proxy("good", rec, httptest.NewRequest("GET", "/", nil))
 	if rec.Code != 503 {
 		t.Errorf("proxy to stopped plugin = %d, want 503", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want JSON like every other API error", ct)
+	}
+}
+
+// A plugin that is running but not listening answers in the API's error
+// shape, not with the reverse proxy's empty 502.
+func TestProxyUnreachablePluginAnswersJSON(t *testing.T) {
+	s, _ := newService(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	l.Close()
+	s.running["good"] = &instance{addr: addr, proxy: newPluginProxy(addr, s.logger)}
+
+	rec := httptest.NewRecorder()
+	s.Proxy("good", rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Code != 502 {
+		t.Fatalf("proxy to unreachable plugin = %d, want 502", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		t.Errorf("Content-Type = %q, want JSON", ct)
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"plugin_unreachable"`) {
+		t.Errorf("body = %q", rec.Body.String())
 	}
 }
 

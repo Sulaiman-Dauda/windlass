@@ -48,6 +48,9 @@ func New(cfg config.Config, logger *slog.Logger, a *api.API) (http.Handler, erro
 	r.Use(auth.Middleware(a.Auth))
 
 	r.Route("/api/v1", a.Routes)
+	// Any other /api path is a client's mistake, not a panel page.
+	r.HandleFunc("/api", api.NotFound)
+	r.HandleFunc("/api/*", api.NotFound)
 	r.NotFound(spaHandler(dist))
 
 	return r, nil

@@ -126,7 +126,8 @@ export default function OverviewTab({ project }: { project: string }) {
             note={
               <>
                 Limits come from <code className="font-mono text-fg2">mem_limit</code> and{" "}
-                <code className="font-mono text-fg2">cpus</code> in{" "}
+                <code className="font-mono text-fg2">cpus</code>, or{" "}
+                <code className="font-mono text-fg2">deploy.resources.limits</code>, in{" "}
                 <Link className="text-accent hover:underline" to={`/projects/${project}/files`}>
                   compose.yaml
                 </Link>

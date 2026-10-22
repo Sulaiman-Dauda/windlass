@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -36,26 +37,108 @@ func (c composeLocal) run(ctx context.Context, project string, out agent.LogSink
 		return err
 	}
 	if err := streamCmd(cmd, out); err != nil {
-		return fmt.Errorf("docker compose %s: %w", args[0], err)
+		return fmt.Errorf("docker compose %s: %w", subcommand(args), err)
 	}
 	return nil
 }
 
+// subcommand finds the Compose command in args, after any -f files, so an
+// error names "up" rather than "-f".
+func subcommand(args []string) string {
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "-f":
+			i++
+		case !strings.HasPrefix(args[i], "-"):
+			return args[i]
+		}
+	}
+	return strings.Join(args, " ")
+}
+
 func (c composeLocal) Up(ctx context.Context, req agent.ComposeUpReq, out agent.LogSink) error {
 	args := []string{}
+	if len(req.ExtraFiles) > 0 && agent.ValidProjectName(req.Project) {
+		// Naming any file with -f stops Compose finding the project's own
+		// and its override file, so name those first.
+		for _, f := range projectComposeFiles(filepath.Join(c.l.cfg.ProjectsDir, req.Project)) {
+			args = append(args, "-f", f)
+		}
+	}
 	for _, f := range req.ExtraFiles {
 		// Compose resolves -f relative to the project directory; reject
 		// anything that could escape it.
 		if strings.ContainsAny(f, "/\\") || strings.HasPrefix(f, ".") {
 			return fmt.Errorf("invalid extra compose file %q", f)
 		}
-		args = append(args, "-f", "compose.yaml", "-f", f)
+		args = append(args, "-f", f)
 	}
 	args = append(args, "up", "-d", "--quiet-pull")
 	if req.RemoveOrphans {
 		args = append(args, "--remove-orphans")
 	}
 	return c.run(ctx, req.Project, out, args...)
+}
+
+// projectComposeFiles names the files Compose loads in dir when none is
+// given: those COMPOSE_FILE lists, or else the project file, compose.yaml
+// or compose.yml (the two names projects are discovered by), then the first
+// override file that exists, in Compose's own order of preference.
+func projectComposeFiles(dir string) []string {
+	if files := composeFileSetting(dir); len(files) > 0 {
+		return files
+	}
+	files := []string{"compose.yaml"}
+	if _, err := os.Stat(filepath.Join(dir, "compose.yaml")); err != nil {
+		if _, err := os.Stat(filepath.Join(dir, "compose.yml")); err == nil {
+			files[0] = "compose.yml"
+		}
+	}
+	for _, name := range []string{"compose.override.yml", "compose.override.yaml",
+		"docker-compose.override.yml", "docker-compose.override.yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return append(files, name)
+		}
+	}
+	return files
+}
+
+// composeFileSetting splits COMPOSE_FILE as Compose reads it: from the
+// environment first, then from the project's .env, on
+// COMPOSE_PATH_SEPARATOR or ":".
+func composeFileSetting(dir string) []string {
+	env := map[string]string{}
+	if data, err := os.ReadFile(filepath.Join(dir, ".env")); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "export "))
+			key, value, ok := strings.Cut(line, "=")
+			key = strings.TrimSpace(key)
+			if !ok || (key != "COMPOSE_FILE" && key != "COMPOSE_PATH_SEPARATOR") {
+				continue
+			}
+			value = strings.TrimSpace(value)
+			if len(value) >= 2 && (value[0] == '"' || value[0] == '\'') && value[len(value)-1] == value[0] {
+				value = value[1 : len(value)-1]
+			}
+			env[key] = value
+		}
+	}
+	for _, key := range []string{"COMPOSE_FILE", "COMPOSE_PATH_SEPARATOR"} {
+		if v, ok := os.LookupEnv(key); ok {
+			env[key] = v
+		}
+	}
+	sep := env["COMPOSE_PATH_SEPARATOR"]
+	if sep == "" {
+		sep = string(os.PathListSeparator)
+	}
+	var files []string
+	for _, f := range strings.Split(env["COMPOSE_FILE"], sep) {
+		if f = strings.TrimSpace(f); f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
 }
 
 func (c composeLocal) Down(ctx context.Context, project string, removeVolumes bool, out agent.LogSink) error {
@@ -143,17 +226,41 @@ func (c composeLocal) PS(ctx context.Context, project string) ([]agent.ServiceSt
 // composeConfig matches the subset of `docker compose config --format json`
 // Windlass needs.
 type composeConfig struct {
-	Services map[string]struct {
-		Image  string          `json:"image"`
-		Build  json.RawMessage `json:"build"`
-		Expose []string        `json:"expose"`
-		Ports  []struct {
-			Target int `json:"target"`
-		} `json:"ports"`
-		Labels   map[string]string `json:"labels"`
-		MemLimit byteValue         `json:"mem_limit"`
-		CPUs     numberValue       `json:"cpus"`
-	} `json:"services"`
+	Services map[string]composeService `json:"services"`
+}
+
+type composeService struct {
+	Image  string          `json:"image"`
+	Build  json.RawMessage `json:"build"`
+	Expose []string        `json:"expose"`
+	Ports  []struct {
+		Target int `json:"target"`
+	} `json:"ports"`
+	Labels   map[string]string `json:"labels"`
+	MemLimit byteValue         `json:"mem_limit"`
+	CPUs     numberValue       `json:"cpus"`
+	Deploy   struct {
+		Resources struct {
+			Limits struct {
+				Memory byteValue   `json:"memory"`
+				CPUs   numberValue `json:"cpus"`
+			} `json:"limits"`
+		} `json:"resources"`
+	} `json:"deploy"`
+}
+
+// limits reports what Compose applies to the container. It honours
+// deploy.resources.limits outside Swarm as well as mem_limit and cpus, and
+// refuses a file that sets both to different values.
+func (s composeService) limits() (memory int64, cpus float64) {
+	memory, cpus = int64(s.MemLimit), float64(s.CPUs)
+	if memory == 0 {
+		memory = int64(s.Deploy.Resources.Limits.Memory)
+	}
+	if cpus == 0 {
+		cpus = float64(s.Deploy.Resources.Limits.CPUs)
+	}
+	return memory, cpus
 }
 
 // Compose versions have emitted resource numbers as both JSON numbers and
@@ -231,8 +338,9 @@ func (c composeLocal) Config(ctx context.Context, project string) (agent.Resolve
 		for _, published := range svc.Ports {
 			ports = append(ports, published.Target)
 		}
+		memory, cpus := svc.limits()
 		resolved.Services[name] = agent.ResolvedService{
-			Image: svc.Image, ContainerPorts: ports, MemoryLimit: int64(svc.MemLimit), CPULimit: float64(svc.CPUs),
+			Image: svc.Image, ContainerPorts: ports, MemoryLimit: memory, CPULimit: cpus,
 			Build: len(svc.Build) > 0 && string(svc.Build) != "null",
 		}
 		if rawURL := strings.TrimSpace(svc.Labels["windlass.health.url"]); rawURL != "" {

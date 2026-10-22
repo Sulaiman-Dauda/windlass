@@ -10,13 +10,26 @@ curl -fsSL https://get.windlass.run | sudo sh
 
 The installer:
 
-1. verifies Docker Compose v2 and Git, installing Docker when permitted and missing;
-2. installs Caddy from its official package repository unless `--no-caddy` is supplied;
-3. creates the `windlass` system user and `/var/lib/windlass/{projects,data,backups}`;
-4. installs `windlass-docker-proxy.service` on loopback port 2375 and does not grant the
+1. checks for Docker with the Compose v2 plugin, and if Docker is missing asks before
+   installing it from get.docker.com (`--yes` agrees without asking, `--no-docker` refuses);
+2. installs Git with apt, dnf or apk if it is missing;
+3. installs Caddy from its official package repository unless `--no-caddy` is supplied or
+   Caddy is already there. On a fresh Caddy install it replaces the packaged welcome
+   Caddyfile with one that only enables the admin API on `127.0.0.1:2019`, keeping the
+   original as `/etc/caddy/Caddyfile.default.bak`. An existing Caddy is left as it is;
+4. creates the `windlass` system user and `/var/lib/windlass/{projects,data,backups}`;
+5. installs `windlass-docker-proxy.service` on loopback port 2375 and does not grant the
    Windlass user direct socket or `docker`-group access;
-5. verifies the release checksum, installs the Windlass binary and hardened systemd unit,
+6. verifies the release checksum, installs the Windlass binary and hardened systemd unit,
    and starts both services.
+
+The installer only prompts when it would install Docker. Under `curl | sudo sh` it asks
+on your terminal; with no terminal at all, it treats the answer as no. To answer yes
+up front when piping:
+
+```sh
+curl -fsSL https://get.windlass.run | sudo sh -s -- --yes
+```
 
 Supported flags are `--yes`, `--version vX.Y.Z`, `--no-caddy`, `--no-docker`, and
 `--binary PATH` (local/CI installation).
@@ -62,14 +75,14 @@ The default service listens on port 8080. Claim it using the one-time token prin
 journal:
 
 ```sh
-journalctl -u windlass | grep setup_token
+sudo journalctl -u windlass | grep setup_token
 ```
 
 Open `http://<server-ip>:8080` temporarily, or use an SSH tunnel when port 8080 is firewalled.
 After signing in:
 
 1. create a DNS A/AAAA record such as `windlass.example.com` pointing at the server;
-2. open **Settings → Panel domain**;
+2. open **Settings, General, Panel domain**;
 3. enter the hostname without `https://` and save.
 
 Windlass creates the targeted Caddy object `windlass_panel_route` and adds the hostname to
@@ -92,7 +105,11 @@ After the HTTPS hostname works, firewall public port 8080 or add a systemd overr
 | `WINDLASS_PANEL_UPSTREAM` | `127.0.0.1:8080` | Address Caddy dials for the Settings-managed panel route |
 | `WINDLASS_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128` | Proxy IPs/CIDRs allowed to supply client forwarding headers |
 | `WINDLASS_NO_SELF_UPDATE` | unset | Disable binary self-update when set |
+| `WINDLASS_UPDATE_REPO` | `Sulaiman-Dauda/windlass` | Repository checked for releases |
+| `WINDLASS_UPDATE_TOKEN` | unset | GitHub token for a private update repository |
 | `DOCKER_HOST` | Docker client default | Installer sets `tcp://127.0.0.1:2375` in systemd |
+
+[Configuration](./configuration.md) explains each one.
 
 The Caddy admin API and Docker proxy must not be exposed publicly.
 
@@ -103,7 +120,14 @@ curl -fsSLO https://raw.githubusercontent.com/Sulaiman-Dauda/windlass/main/insta
 docker compose -f docker-compose.install.yaml up -d
 ```
 
-This starts Windlass and the restricted socket proxy. It does not bundle Caddy. Application
+This starts Windlass and the restricted socket proxy. Read the setup token from the
+container's log:
+
+```sh
+docker compose -f docker-compose.install.yaml logs windlass | grep setup_token
+```
+
+It does not bundle Caddy. Application
 domains and the panel-domain setting remain unavailable until Windlass can reach an existing
 Caddy admin API. Set `WINDLASS_CADDY_ADMIN` and `WINDLASS_PANEL_UPSTREAM` to addresses valid
 from the Caddy/Windlass networks.
@@ -132,10 +156,12 @@ and process supervision. The systemd installer is safer for normal servers.
 
 ## Updates and rollback
 
-The Settings update action is supported only by Linux binary installations when self-update
-is enabled. It downloads the release binary and `checksums.txt`, verifies SHA-256, keeps
-`/usr/local/bin/windlass.previous` when possible, atomically swaps the executable, and exits so
-systemd restarts it. Application containers are not restarted.
+The **Update now** button under Settings, System is offered only on Linux binary installations
+with self-update enabled. It downloads the release binary and `checksums.txt`, refuses the
+update unless the SHA-256 matches, and restarts. The hardened systemd unit cannot write
+`/usr/local/bin`, so the panel stages the binary in its data directory and the unit's start
+hook swaps it in, keeping the old one as `/usr/local/bin/windlass.previous`. Application
+containers are not restarted.
 
 Manual rollback:
 

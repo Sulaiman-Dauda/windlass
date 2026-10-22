@@ -7,7 +7,8 @@ Windlass follows from it.
 <projects>/<name>/
 ├── compose.yaml       # services, images, ports, volumes, networks, limits
 ├── .env               # optional dotenv file, mode 0600
-└── .windlass.json     # source repository, branch, auto-deploy, domains
+├── .windlass.json     # source repository, branch, auto-deploy, domains
+└── src/               # a Git project's checkout, when it has one
 ```
 
 The default projects directory is `/var/lib/windlass/projects`, which you can move with
@@ -35,14 +36,19 @@ changes. There is no sync step and no conflict resolution, because there is only
 
 SQLite holds platform state (users, sessions, audit entries, deployment history) and a
 rebuildable index of projects and domains. It is not a second copy of your configuration.
-Delete the database and your containers keep running; **Scan stacks directory** rebuilds
-the index from the filesystem.
+Delete the database and your containers keep running; **Scan directory** on the Projects
+page rebuilds the index from the filesystem.
 
 ## Adopting stacks you already have
 
-If the server already runs Compose projects, move or symlink their directories under the
-projects directory and use **Scan stacks directory**. Windlass indexes what it finds,
-including containers already running, without redeploying anything.
+If the server already runs Compose projects, move their directories under the projects
+directory and use **Scan directory**. Windlass indexes what it finds, including containers
+already running, without redeploying anything.
+
+A directory is picked up when its name is lowercase letters, digits, `-` and `_`, starting
+with a letter or digit, and it holds a `compose.yaml` or `compose.yml`. A file named
+`docker-compose.yml` is not recognised, so rename it. Symlinks are not followed: move the
+directory itself.
 
 This is also the recovery path after restoring a machine from a backup: put the
 directories back, scan, and the panel knows about them again.
@@ -50,14 +56,20 @@ directories back, scan, and the panel knows about them again.
 ## The environment file
 
 `.env` is a standard dotenv file, one `KEY=value` per line, written mode 0600. Compose
-substitutes it into `compose.yaml` the way it always does.
+substitutes it into `compose.yaml` the way it always does. Windlass reads it before every
+deploy and never rewrites it there, so a value changed over SSH is the value that deploys.
 
-The Environment tab edits the whole file at once rather than key by key. Pasting a block
-replaces the file wholesale, including removing keys that are not in what you pasted,
-which is the behaviour that matches what you see on screen.
+The Environment tab has two views of the same variables: **Table**, one row per key, and
+**.env text**, where you can paste a whole file. Saving replaces the file with what is on
+screen, so a key you removed is gone. Windlass writes the file sorted by key under a
+two-line header and does not keep comments, so keep notes somewhere else.
 
-Values are visible to anyone who can read the file on the server and to anyone with panel
-access at member level or above. Treat it as what it is: a secrets file on a host.
+Values are visible to anyone who can read the file on the server and to members and
+admins in the panel. Viewers, and API tokens without **Can read env values**, see each
+key with its value replaced by `********`. The same applies to the values a compose file
+sets inline in `environment:` or build args, which is one more reason to keep secrets in
+`.env` rather than in `compose.yaml`. Treat the file as what it is: a secrets file on a
+host.
 
 ## Resource limits
 
@@ -71,26 +83,61 @@ services:
     cpus: 0.5
 ```
 
-The project overview shows what each service is actually limited to. Note that
-`deploy.resources.limits` is a Swarm key: Compose ignores it outside Swarm, so a service
-configured that way runs unlimited, and the overview will correctly say so.
-
-## Application health
-
-Docker healthchecks are honoured. Beyond those, three labels let a deployment wait for
-your application rather than for the container process:
+Compose also applies `deploy.resources.limits` outside Swarm, so this works too:
 
 ```yaml
 services:
   api:
-    labels:
-      windlass.health.url: http://127.0.0.1:8081/
-      windlass.health.status: "200"
-      windlass.health.contains: "ok"
+    image: nginx:alpine
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
 ```
 
-A deployment is only reported succeeded once these pass. See
-[Deployments](./deployments.md) for how that fits into the sequence.
+The project overview shows the limit each service gets, from either form. When both are
+set, `mem_limit` and `cpus` are the ones shown.
+
+## Application health
+
+Docker healthchecks are honoured. Beyond those, labels let a deployment wait for your
+application rather than for the container process:
+
+```yaml
+services:
+  api:
+    ports:
+      - "127.0.0.1:8081:8080"
+    labels:
+      windlass.health.url: http://127.0.0.1:8081/health
+      windlass.health.status: "200"
+      windlass.health.contains: "ok"
+      windlass.health.stability_seconds: "10"
+```
+
+Only `windlass.health.url` is required. `status` defaults to 200, `contains` is optional,
+and `stability_seconds` (default 10) is how long the check must keep passing before it
+counts. Windlass fetches the URL itself, not from inside the container, so on a systemd
+install it needs a port the service publishes on the host, as above.
+
+A deployment is only reported succeeded once these pass, and it fails if they have not
+within two minutes. See [Deployments](./deployments.md) for how that fits into the
+sequence.
+
+## Git projects
+
+A Git project is still a project directory with its own `compose.yaml`. Windlass checks
+the repository out into `src/` inside that directory, and the project's `compose.yaml` is
+what runs, not a compose file in the repository. Point the build at the checkout:
+
+```yaml
+services:
+  web:
+    build: ./src
+```
+
+See [Deployments](./deployments.md#git-deployments) for connecting a repository.
 
 ## Templates
 

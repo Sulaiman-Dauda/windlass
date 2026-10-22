@@ -8,8 +8,9 @@ Budget about fifteen minutes, most of it waiting for image pulls.
 
 ## Before you start
 
-You need a Linux server with a public IP, root or sudo, and Docker installed. Windlass
-does not install Docker for you, and it will tell you so rather than guessing.
+You need a Linux server with a public IP and root or sudo. If Docker is missing, the
+installer asks before installing it from get.docker.com, and stops if you say no. To
+agree without the prompt, add `--yes`: `curl -fsSL https://get.windlass.run | sudo sh -s -- --yes`.
 
 If you want HTTPS on a real hostname, point an A record at the server now. DNS
 propagation is usually the slowest part of this page, so starting it first saves waiting
@@ -26,21 +27,29 @@ a restricted Docker socket proxy in front of the daemon. Windlass reaches Docker
 that proxy on loopback and is never added to the `docker` group, so a panel compromise
 does not hand over the daemon.
 
-When it finishes it prints the URL to open, which is the server's IP on port 8080.
+When it finishes it prints the URL to open, which is the server's IP on port 8080, and
+the command that shows the setup token.
 
 ## 2. Claim the instance
 
 ![The Windlass dashboard, showing host CPU, memory and disk above the project list](./screenshots/dashboard-light.png)
 
-Open that URL. The first visit asks you to create the first account, and only the first
-visit: once an account exists the setup route stops responding, so an instance cannot be
-claimed twice by whoever finds it next.
+Open that URL. Windlass asks for a one-time setup token, then the email and password of
+the first account. The token is printed to the server log at first start, so only someone
+who can read that log can claim the instance:
 
-Choose a real password. This account is an administrator on a machine that runs
-containers as root.
+```sh
+sudo journalctl -u windlass | grep setup_token
+```
 
-Turn on TOTP straight away under Settings if the panel will be reachable from the
-internet. See [Users and access](./users-and-access.md).
+Once an account exists, setup refuses every request, so the instance cannot be claimed
+twice.
+
+Choose a real password of at least ten characters. This account is an administrator on a
+machine that runs containers as root.
+
+Turn on two-factor authentication straight away under **Settings, Users and sign-in** if
+the panel will be reachable from the internet. See [Users and access](./users-and-access.md).
 
 ## 3. Create a project
 
@@ -61,11 +70,11 @@ Open the project, go to **Deployments**, press **Deploy**.
 A deployment runs a fixed sequence, and the log streams as it goes:
 
 ```
-env render -> validate -> sync -> pull -> build -> up -> verify
+Prepare -> Sync -> Pull -> Build -> Start -> Verify
 ```
 
 The last step matters. Windlass waits for Docker healthchecks to report healthy, and for
-any `windlass.health.*` labels you set, before calling a deployment succeeded. A stack
+any `windlass.health.*` checks you set, before calling a deployment succeeded. A stack
 that starts and immediately crash-loops is reported as failed rather than green.
 
 If the panel restarts mid-deployment, the deployment resumes on startup rather than
@@ -76,8 +85,9 @@ leaving the project half-updated.
 In the project's **Domains** tab, add your hostname and pick the service and port to
 route to.
 
-Windlass writes a route into Caddy, which obtains a certificate from Let's Encrypt on
-first request. There is no certificate paperwork to do and no renewal to remember.
+Once the service has a running container, Windlass writes a route into Caddy and adds the
+hostname to Caddy's certificate automation. Caddy then requests a certificate, from Let's
+Encrypt by default, and renews it on its own. There is no certificate paperwork to do.
 
 Windlass only ever touches its own Caddy objects, by ID. Routes you wrote by hand are
 left exactly as they are. See [Domains and HTTPS](./domains-and-https.md).

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { Link, NavLink, Navigate, useLocation, useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -33,6 +33,7 @@ const TABS: { value: string; label: string; icon: IconName; admin?: boolean }[] 
   { value: "tokens", label: "API tokens", icon: "key" },
   { value: "git", label: "Git", icon: "gitBranch", admin: true },
   { value: "registries", label: "Registries", icon: "package", admin: true },
+  { value: "backups", label: "Backups", icon: "archive", admin: true },
   { value: "system", label: "System", icon: "server", admin: true },
 ];
 
@@ -96,6 +97,7 @@ export default function Settings() {
           {tab === "tokens" && <APITokensSection />}
           {tab === "git" && <GitConnections />}
           {tab === "registries" && <RegistryCredentials />}
+          {tab === "backups" && <S3DestinationSection />}
           {tab === "system" && (
             <>
               <UpdateSection />
@@ -852,6 +854,105 @@ function RegistryCredentials() {
   );
 }
 
+// ---------- Backups ----------
+
+interface S3Status {
+  configured: boolean;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  key_prefix: string;
+}
+
+function S3DestinationSection() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const status = useQuery<S3Status>({
+    queryKey: ["system", "backups-s3"],
+    queryFn: () => api("/system/backups/s3"),
+  });
+  const [form, setForm] = useState({ endpoint: "", region: "", bucket: "", key_prefix: "", access_key: "", secret_key: "" });
+  useEffect(() => {
+    if (status.data?.configured) {
+      const { endpoint, region, bucket, key_prefix } = status.data;
+      setForm((f) => ({ ...f, endpoint, region, bucket, key_prefix }));
+    }
+  }, [status.data]);
+  const set = (key: keyof typeof form) => (e: ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [key]: e.target.value }));
+  const save = useMutation({
+    mutationFn: () => api("/system/backups/s3", { method: "PUT", body: JSON.stringify(form) }),
+    onSuccess: () => {
+      setForm((f) => ({ ...f, access_key: "", secret_key: "" }));
+      toast.ok("S3 destination saved");
+      qc.invalidateQueries({ queryKey: ["system", "backups-s3"] });
+    },
+  });
+
+  return (
+    <Card>
+      <CardHeader
+        title="S3 destination"
+        description="Where a project's backups go when its schedule stores them in S3. Works with AWS S3, Cloudflare R2, MinIO and other services that accept path-style requests."
+        actions={
+          status.data && (
+            <StatusPill tone={status.data.configured ? "ok" : "idle"}>
+              {status.data.configured ? "Configured" : "Not configured"}
+            </StatusPill>
+          )
+        }
+      />
+      <form
+        id="s3-destination"
+        className="space-y-4 px-5 py-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
+        <div className="flex flex-wrap items-start gap-3">
+          <Field label="Endpoint" hint="Without the bucket name." className="min-w-[240px] flex-[2]">
+            <Input
+              required
+              type="url"
+              value={form.endpoint}
+              onChange={set("endpoint")}
+              placeholder="https://s3.eu-west-2.amazonaws.com"
+              spellCheck={false}
+              className="font-mono"
+            />
+          </Field>
+          <Field label="Region" hint="Blank means auto, which R2 expects." className="min-w-[160px] flex-1">
+            <Input value={form.region} onChange={set("region")} placeholder="auto" spellCheck={false} className="font-mono" />
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-start gap-3">
+          <Field label="Bucket" className="min-w-[200px] flex-1">
+            <Input required value={form.bucket} onChange={set("bucket")} spellCheck={false} className="font-mono" />
+          </Field>
+          <Field label="Key prefix" hint="Optional, for sharing a bucket." className="min-w-[200px] flex-1">
+            <Input value={form.key_prefix} onChange={set("key_prefix")} placeholder="windlass/" spellCheck={false} className="font-mono" />
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-start gap-3">
+          <Field label="Access key ID" className="min-w-[200px] flex-1">
+            <Input required autoComplete="off" value={form.access_key} onChange={set("access_key")} spellCheck={false} className="font-mono" />
+          </Field>
+          <Field label="Secret access key" className="min-w-[200px] flex-1">
+            <Input required type="password" autoComplete="off" value={form.secret_key} onChange={set("secret_key")} />
+          </Field>
+        </div>
+        <FormError error={save.error} fallback="Could not save the S3 destination" />
+      </form>
+      <CardFooter note="Keys are stored encrypted and never shown again, so enter both each time you save.">
+        <Button type="submit" form="s3-destination" size="sm" variant="primary" loading={save.isPending}>
+          Save
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
 // ---------- API tokens ----------
 
 interface APIToken {
@@ -912,7 +1013,7 @@ function APITokensSection() {
     <Card>
       <CardHeader
         title="API tokens"
-        description="For scripts, CI and AI agents. A token acts as you, limited to the access you pick. It can never manage users, tokens or sign-in, change the panel domain, update Windlass, open a terminal or delete a project."
+        description="For scripts, CI and AI agents. A token acts as you, limited to the access you pick. It can never manage users, tokens or sign-in, change the panel domain or backup destination, update Windlass, open a terminal, delete a project or restore a backup."
       />
       <div className="space-y-4 px-5 py-4">
         {created && (

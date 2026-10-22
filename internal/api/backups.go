@@ -158,9 +158,10 @@ func (a *API) handleSetBackupSchedule(w http.ResponseWriter, r *http.Request) {
 // S3 settings (admin)
 
 func (a *API) handleGetS3Config(w http.ResponseWriter, r *http.Request) {
-	configured, endpoint, bucket := a.Backups.S3ConfigStatus(r.Context())
+	cfg, configured := a.Backups.S3ConfigStatus(r.Context())
 	writeJSON(w, http.StatusOK, map[string]any{
-		"configured": configured, "endpoint": endpoint, "bucket": bucket,
+		"configured": configured, "endpoint": cfg.Endpoint, "region": cfg.Region,
+		"bucket": cfg.Bucket, "key_prefix": cfg.KeyPrefix,
 	})
 }
 

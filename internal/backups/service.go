@@ -61,12 +61,15 @@ func (s *Service) SetS3Config(ctx context.Context, cfg S3Config) error {
 	return s.q.SetSetting(ctx, db.SetSettingParams{Key: s3SettingKey, Value: string(wrapped)})
 }
 
-func (s *Service) S3ConfigStatus(ctx context.Context) (configured bool, endpoint, bucket string) {
+// S3ConfigStatus returns the S3 destination with its keys removed, and
+// whether one is configured.
+func (s *Service) S3ConfigStatus(ctx context.Context) (S3Config, bool) {
 	cfg, err := s.s3Config(ctx)
 	if err != nil || !cfg.Configured() {
-		return false, "", ""
+		return S3Config{}, false
 	}
-	return true, cfg.Endpoint, cfg.Bucket
+	cfg.AccessKey, cfg.SecretKey = "", ""
+	return cfg, true
 }
 
 func (s *Service) s3Config(ctx context.Context) (S3Config, error) {
@@ -177,7 +180,7 @@ func (s *Service) execute(ctx context.Context, p db.Project, destination string)
 			return "", 0, err
 		}
 		if !cfg.Configured() {
-			return "", 0, errors.New("S3 is not configured (Settings → Backups)")
+			return "", 0, errors.New("S3 is not configured: an admin sets it in Settings, Backups")
 		}
 		key := p.Name + "/" + filepath.Base(info.Path)
 		if err := newS3(cfg).PutFile(ctx, key, info.Path); err != nil {

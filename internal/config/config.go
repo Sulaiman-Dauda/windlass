@@ -36,7 +36,12 @@ type Config struct {
 	TrustedProxies string
 }
 
+// Load reads the configuration from the environment. It then removes
+// WINDLASS_UPDATE_TOKEN, the one secret held there, so no child process
+// inherits it: Compose would substitute ${WINDLASS_UPDATE_TOKEN} into a
+// project a member can edit, and neither Git nor plugins need it.
 func Load() (Config, error) {
+	defer os.Unsetenv("WINDLASS_UPDATE_TOKEN")
 	cfg := Config{
 		Addr:           envOr("WINDLASS_ADDR", ":8080"),
 		DataDir:        envOr("WINDLASS_DATA", defaultDataDir()),

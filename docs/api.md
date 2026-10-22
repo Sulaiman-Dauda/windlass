@@ -32,10 +32,11 @@ A token acts as the person who made it, limited to the access chosen when it was
 | --- | --- | --- |
 | Read only | `viewer` | Read projects, deployments, logs and metrics |
 | Deploy and edit | `member` | Also create projects, edit compose and env, deploy, roll back, manage domains and backups |
-| Admin | `admin` | Also registries, Git connections, S3 settings and image pruning |
+| Admin | `admin` | Also registries, Git connections, reading the S3 settings, and image pruning |
 
-The limit is worked out on every request against the owner's current role, so demoting or
-disabling the owner reduces or ends their tokens at once.
+The limit is worked out on every request against the owner's current role, so demoting the
+owner reduces what their tokens can do at once, and deleting the owner deletes their
+tokens.
 
 Some things a token can never do, whatever its access. They need a person signed in to the
 panel, and the API answers `403 session_required`:
@@ -62,8 +63,8 @@ carefully as the secrets themselves.
 Every token expires, after 90 days by default and at most 365. Tokens can be revoked at
 any time in Settings, and an admin can see and revoke anyone's under
 `GET /users/{id}/tokens`. The audit log records which token made each change.
-Changing a password does not end tokens: revoke them in Settings if the account may have
-been compromised.
+Signing out does not end tokens. If an account may have been compromised, revoke its
+tokens in Settings as well.
 
 Tokens start with `wl_pat_` so secret scanners and people recognise one that has leaked.
 Windlass stores only a SHA-256 hash of the secret part.
@@ -71,10 +72,13 @@ Windlass stores only a SHA-256 hash of the secret part.
 ### Behind Cloudflare
 
 If the panel's hostname is proxied through Cloudflare with a bot challenge, Cloudflare
-answers API requests with its own 403 page before they reach Windlass: a script cannot
-solve a challenge. Add a WAF custom rule that skips the challenge for requests whose path
-starts with `/api/` and that carry an `Authorization` header. Windlass still checks every
-token.
+answers API requests with its own 403 page before they reach Windlass, because a script
+cannot solve a challenge.
+
+With Super Bot Fight Mode (Pro plans and above), add a WAF custom rule with the Skip
+action for Super Bot Fight Mode, matching requests whose path starts with `/api/` and
+that carry an `Authorization` header. The free plan's Bot Fight Mode cannot be skipped by
+any rule, so the API only works with it turned off. Windlass still checks every token.
 
 ### Sessions
 
@@ -108,6 +112,7 @@ Seventy-three paths, grouped roughly as:
 | Access | `GET/POST /users`, `PUT /users/{id}/role`, `POST /auth/totp/setup`, `GET/POST /auth/tokens` |
 | Git | `GET/POST /git/connections`, `PUT /projects/{name}/git`, `POST /webhooks/{provider}/{project}` |
 | Templates | `GET /templates`, `POST /templates/{key}` |
+| Plugins | `GET /plugins`, `POST /plugins/{name}/enable`, `/plugins/{name}/proxy/{path}` |
 
 ## Streaming
 
@@ -127,6 +132,15 @@ anything else holding a session or a token.
 
 State-changing requests that a browser sends from another origin are refused, including
 from other subdomains of the panel's own domain, where your apps may run.
+
+Errors are JSON with a stable code, `{"error":{"code":"...","message":"..."}}`. A path that
+does not exist under `/api/v1` answers `404 not_found`, and a known path called with the
+wrong method answers `405 method_not_allowed`, so a mistyped URL fails rather than
+returning the panel's HTML with a 200.
+
+Requests through a plugin's proxy follow the same roles: any signed-in user can read, and
+anything other than `GET`, `HEAD` or `OPTIONS` needs `member`, as does opening a WebSocket.
+Windlass does not pass the caller's cookie or `Authorization` header on to the plugin.
 
 Rate limiting applies to authentication endpoints. API tokens are not rate limited: the
 secret is 160 random bits, so guessing one is not a practical attack.

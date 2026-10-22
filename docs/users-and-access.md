@@ -2,12 +2,17 @@
 
 ## Claiming an instance
 
-The first visit to a new install creates the first account. After that the setup route
-stops responding, so an instance cannot be claimed a second time by whoever reaches it
-next.
+A new install has no accounts. Windlass prints a one-time setup token to its log, and the
+setup page asks for it before creating the first account, which is an admin:
 
-Claim a new install immediately. Until the first account exists, anyone who reaches the
-panel can create it.
+```sh
+sudo journalctl -u windlass | grep setup_token
+```
+
+Reading the server log proves you control the server, so whoever reaches the panel first
+cannot claim it. A restart before the instance is claimed prints a new token. Once the
+first account exists the setup route refuses every request, so an instance cannot be
+claimed twice.
 
 ## Roles
 
@@ -17,9 +22,10 @@ Three roles, in increasing order:
 | --- | --- |
 | `viewer` | Read projects, deployments, logs and metrics |
 | `member` | Everything a viewer can, plus deploy, edit files and environment, manage domains and backups |
-| `admin` | Everything a member can, plus manage users, settings, credentials and updates |
+| `admin` | Everything a member can, plus manage users, API tokens, settings, Git and registry credentials, and updates |
 
-Viewers see which env keys a project sets, but not their values. The same goes for values
+Viewers see which env keys a project sets, but not their values, and so do API tokens
+created without **Can read env values**. The same goes for values
 a Compose file sets inline: `environment:`, build `args:` and inline config `content:`
 come back as `********`, while `${NAME}` references stay readable so a viewer can see
 where a value comes from. Comments inside those blocks are hidden too, and a masked file
@@ -47,7 +53,7 @@ Turning it off asks for a current code, so someone holding a stolen session cann
 it. Accounts with TOTP that sign in with GitHub or Google are asked for a code too.
 
 If someone loses their authenticator, an admin can turn TOTP off for them under
-**Settings, Users, Reset 2FA**, and they enrol again after signing in. An admin cannot
+**Settings, Users and sign-in**, with **Reset 2FA**, and they enrol again after signing in. An admin cannot
 reset their own this way. If the only admin loses theirs, stop Windlass and clear it in
 the database. On a systemd install, with the `sqlite3` package installed:
 
@@ -58,18 +64,30 @@ sudo sqlite3 /var/lib/windlass/data/windlass.db \
 sudo systemctl start windlass
 ```
 
-## Signing in with GitHub
+## Signing in with GitHub or Google
 
-OAuth can be enabled for sign-in. It signs in **existing** users matched by verified
-email, and does not create accounts. Someone with a GitHub account and an email you have
-never added cannot get in by being first to the login page.
+An admin can turn on GitHub and Google sign-in under **Settings, Users and sign-in**, with
+the client ID and secret of an OAuth app made with the provider. The card shows the
+callback URL to register.
 
-Create the account in the panel first, then let that person sign in with OAuth.
+It signs in **existing** users matched by verified email, and does not create accounts.
+Someone with a GitHub or Google account and an email you have never added cannot get in
+by being first to the login page. Create the account in the panel first, then let that
+person sign in.
+
+## API tokens
+
+Scripts, CI jobs and AI agents use API tokens rather than a password. Only admins create
+them, under **Settings, API tokens**, and every token is limited to the access chosen
+when it was made and to its owner's current role. Anyone can see and revoke their own.
+Deleting a user deletes their tokens. See [the API guide](./api.md#api-tokens) for what a
+token can and cannot do.
 
 ## Sessions
 
-Sessions are server-side rows with an opaque cookie, not self-contained tokens, so signing
-someone out actually ends their session rather than waiting for a token to expire.
+Signing in starts a session that lasts seven days. The cookie is signed and refers to a
+row on the server, so signing out ends the session at once rather than waiting for it to
+expire, and deleting a user ends all of their sessions.
 
 ## Exposing the panel
 

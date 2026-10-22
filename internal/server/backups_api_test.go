@@ -97,8 +97,8 @@ func TestS3ConfigAPI(t *testing.T) {
 	}
 
 	rec = e.do(t, http.MethodPut, "/api/v1/system/backups/s3", map[string]string{
-		"endpoint": "https://s3.example.com", "region": "auto", "bucket": "backups",
-		"access_key": "AKIA123", "secret_key": "verysecret",
+		"endpoint": "https://s3.example.com", "region": "eu-west-2", "bucket": "backups",
+		"access_key": "AKIA123", "secret_key": "verysecret", "key_prefix": "windlass/",
 	}, cookie)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("set = %d: %s", rec.Code, rec.Body.String())
@@ -106,7 +106,14 @@ func TestS3ConfigAPI(t *testing.T) {
 
 	rec = e.do(t, http.MethodGet, "/api/v1/system/backups/s3", nil, cookie)
 	body := rec.Body.String()
-	if !strings.Contains(body, `"configured":true`) || !strings.Contains(body, "s3.example.com") {
+	// The settings form shows every field but the keys.
+	for _, want := range []string{`"configured":true`, `"endpoint":"https://s3.example.com"`, `"region":"eu-west-2"`,
+		`"bucket":"backups"`, `"key_prefix":"windlass/"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("after set, missing %s in %s", want, body)
+		}
+	}
+	if rec.Code != http.StatusOK {
 		t.Fatalf("after set = %s", body)
 	}
 	if strings.Contains(body, "verysecret") || strings.Contains(body, "AKIA123") {

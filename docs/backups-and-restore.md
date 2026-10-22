@@ -1,24 +1,32 @@
 # Backups and restore
 
 A backup is a compressed archive of the project directory: `compose.yaml`, `.env`, and
-whatever else lives alongside them. When the project has a Postgres, MySQL or MariaDB
-container, Windlass also takes a native dump and adds it to the archive as
+whatever else lives alongside them. `.git` directories are left out, since a Git project
+fetches its history again on the next deploy. When the project has a Postgres, MySQL or
+MariaDB container, Windlass also takes a native dump and adds it to the archive as
 `.windlass/backup/db_dump.sql`.
+
+Only Postgres, MySQL and MariaDB get a dump. Data outside the project directory, named
+Docker volumes included, is not in the archive, so a MongoDB or Redis that keeps its data
+in a volume needs a backup of its own.
 
 ## Taking one
 
-**Back up now** in the project's Backups tab. Backups are listed with their status, and an
-incomplete one cannot be restored.
+**Back up now** in the project's Backups tab stores the archive on this server, in the
+`backups` directory beside the projects directory. Backups are listed with their status,
+and an incomplete one cannot be restored. A one-off backup to S3 is available through the
+API, `POST /api/v1/projects/{name}/backups` with `{"destination": "s3"}`.
 
 The database container is recognised by its compose service name or its image, preferring
-one named exactly after the database (`postgres`, `postgis`, `pgvector`, `timescaledb`,
-`mysql`, `mariadb`, `percona-server`) over an image that only mentions it, such as
-`bitnami/postgresql-repmgr`. The dump runs inside that container with its own environment,
+one named exactly after the database (`postgres`, `postgresql`, `postgis`, `pgvector`,
+`timescaledb`, `timescaledb-ha`, `mysql`, `mysql-server`, `mariadb`, `percona-server`) over
+an image that only mentions it, such as `bitnami/postgresql-repmgr`. The dump runs inside that container with its own environment,
 so the credentials are found wherever you set them: in `compose.yaml`, in `.env` or in
 another `env_file`.
 
 Postgres is dumped with `pg_dump` as `POSTGRES_USER` (default `postgres`) from
-`POSTGRES_DB`, using `POSTGRES_PASSWORD` when it is set. Bitnami's `POSTGRESQL_USERNAME`,
+`POSTGRES_DB` (default the user name, as the image does), using `POSTGRES_PASSWORD` when
+it is set. Bitnami's `POSTGRESQL_USERNAME`,
 `POSTGRESQL_DATABASE` and `POSTGRESQL_PASSWORD` are read too. MySQL and MariaDB are dumped with `mysqldump` or `mariadb-dump
 --all-databases` as root, using `MYSQL_ROOT_PASSWORD` or `MARIADB_ROOT_PASSWORD`. A
 database whose credentials are not in its environment, such as a random root password or
@@ -31,26 +39,42 @@ is worth having even on a day the database was down.
 
 ## Scheduling
 
-Set an interval of hourly, daily or weekly, a destination, and how many to retain. Older
-backups beyond the retention count are removed as new ones succeed.
+Set an interval of hourly, daily or weekly, a destination, and how many to retain. After
+each scheduled backup succeeds, Windlass keeps the newest completed backups for that
+destination up to the retention count and deletes the rest. Backups taken with **Back up
+now** count towards that number and can be pruned with them.
 
 Pick a retention that matches what the archives cost you: they contain your `.env`, so
 they are secrets at rest wherever they land.
 
 ## Off-server storage with S3
 
-Configure an S3-compatible endpoint under Settings and choose S3 as a backup destination.
-Anything speaking the S3 API works, including MinIO, which is what the wire tests run
-against.
+An admin sets the bucket under **Settings, Backups**: the endpoint without the bucket
+name, a region (leave it blank for `auto`, which Cloudflare R2 expects), the bucket, an
+optional key prefix for sharing a bucket, and an access key pair. The keys are stored
+encrypted and never shown again. Then choose S3 as the destination of a project's backup
+schedule.
+
+Windlass uses path-style requests (`endpoint/bucket/key`), so anything speaking the S3 API
+works, including AWS S3, Cloudflare R2 and MinIO, which is what the wire tests run
+against. Until a bucket is set, S3 backups fail with a message saying so.
 
 Backups on a server are a hedge against a mistake. Backups off the server are a hedge
 against losing the server. If the data matters, use the second kind.
 
 ## Restoring
 
-Restore replays the **project directory** from the archive: compose file, environment
+Restore replaces the **project directory** with the archive: compose file, environment
 file, and the other files that were there, the database dump among them at
-`.windlass/backup/db_dump.sql`.
+`.windlass/backup/db_dump.sql`. Files added since the backup are removed. It extracts to a
+staging directory first, so a damaged archive leaves the project as it was.
+
+Restore does not redeploy. The running containers carry on as they were until you deploy,
+which is when the restored compose file and `.env` take effect. A Git project fetches its
+repository again on that deploy.
+
+Restore needs the member role and is done in the panel. API tokens are refused, because
+it overwrites `.env` and everything else in the directory.
 
 **It does not load the dump back into your database.** Restoring gives you the dump file
 in the project directory; putting its contents back is a deliberate act you perform, with
@@ -72,7 +96,7 @@ Platform state lives in SQLite: users, sessions, audit history, deployment histo
 settings and encrypted credentials. Project backups do not contain it.
 
 Restoring a project directory onto a fresh install gives you a working application, and
-**Scan stacks directory** indexes it. Your accounts and history need a platform backup,
+**Scan directory** indexes it. Your accounts and history need a platform backup,
 which is a copy of the data directory taken while the service is stopped:
 
 ```sh

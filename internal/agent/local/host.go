@@ -94,6 +94,31 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 		if err := run("checkout", "--force", "--detach", ref); err != nil {
 			return agent.GitSyncResult{}, fmt.Errorf("git checkout %s: %w", ref, err)
 		}
+	} else if entries, err := os.ReadDir(target); err == nil && len(entries) > 0 {
+		// Files but no repository: what a restore leaves, since backups skip
+		// .git. Clone refuses a non-empty directory, so make it a checkout in
+		// place. Nothing is deleted; the checkout overwrites tracked files.
+		ref := req.Commit
+		if ref == "" {
+			ref = "origin/" + req.Branch
+		}
+		steps := []struct {
+			name string
+			args []string
+		}{
+			{"git init", []string{"init", "-q"}},
+			{"git remote add", []string{"remote", "add", "-t", req.Branch, "origin", req.URL}},
+			{"git fetch", []string{"fetch", "--prune", "origin"}},
+			{"git checkout " + ref, []string{"checkout", "--force", "--detach", ref}},
+		}
+		for _, step := range steps {
+			if err := run(step.args...); err != nil {
+				// A half-made repository would pass for a checkout next
+				// time, and every sync would then fail on its remote.
+				_ = os.RemoveAll(filepath.Join(target, ".git"))
+				return agent.GitSyncResult{}, fmt.Errorf("%s: %w", step.name, err)
+			}
+		}
 	} else {
 		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", req.Branch, "--single-branch", req.URL, target)
 		cmd.Dir = dir

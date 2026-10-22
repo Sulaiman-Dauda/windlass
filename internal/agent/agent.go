@@ -224,6 +224,10 @@ type ProxyAgent interface {
 	Available(ctx context.Context) (ProxyInfo, error)
 	ApplyRoutes(ctx context.Context, routes []Route) error
 	CurrentRoutes(ctx context.Context) ([]Route, error)
+	// RoutesInstalled reports whether Caddy still holds the Windlass routes
+	// object. A Caddy reload or restart loads its own config file and drops
+	// every object added through the admin API.
+	RoutesInstalled(ctx context.Context) (bool, error)
 	// ApplyPanelDomain converges the separately owned panel route. An empty
 	// hostname removes that route without touching application/user routes.
 	ApplyPanelDomain(ctx context.Context, hostname string) error

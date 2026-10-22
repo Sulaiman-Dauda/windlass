@@ -3,6 +3,7 @@ package deploy
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"log/slog"
@@ -26,6 +27,7 @@ import (
 )
 
 type env struct {
+	sqlDB      *sql.DB
 	q          *db.Queries
 	agent      *fake.Fake
 	deploy     *Service
@@ -66,7 +68,7 @@ func newEnv(t *testing.T) *env {
 		"web": {Image: "nginx:alpine"},
 	}}
 
-	return &env{q: q, agent: ag, deploy: dep, runner: runner, project: p, registries: reg}
+	return &env{sqlDB: sqlDB, q: q, agent: ag, deploy: dep, runner: runner, project: p, registries: reg}
 }
 
 // runUntilFinished drives the job runner until the deployment reaches a

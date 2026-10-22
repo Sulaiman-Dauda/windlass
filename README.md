@@ -32,7 +32,7 @@ Application configuration lives under the projects directory:
 
 Windlass executes the real `docker compose` CLI in that directory. Hand-editing the files
 and running `docker compose up -d` is supported. The Files and Environment screens read the
-same files, and **Scan stacks directory** rebuilds the SQLite project/domain index.
+same files, and **Scan directory** rebuilds the SQLite project/domain index.
 
 SQLite is not application configuration. It contains platform state such as users, sessions,
 audit entries, deployment history, jobs, backup records, settings, encrypted credentials,
@@ -62,7 +62,9 @@ Stopping or removing Windlass does not stop deployed applications. See
 - Compose-native CPU/memory limit visibility and application readiness checks
 - Container logs, browser terminal, host/container metrics, and image cleanup
 - Local and S3-compatible backups with optional schedules
-- Local users, roles, TOTP, and optional OAuth configuration
+- Local users, roles, TOTP, and optional GitHub or Google sign-in
+- Personal API tokens, read-only or read-write, for scripts and CI
+- Private registry credentials, applied to the host with a real `docker login`
 - Optional external-process plugins
 
 Application readiness is configured with ordinary Compose labels:
@@ -83,8 +85,9 @@ services:
 curl -fsSL https://get.windlass.run | sudo sh
 ```
 
-Claim the instance using the one-time token in `journalctl -u windlass`, then open
-**Settings → Panel domain** after pointing a DNS record at the server. Caddy obtains and
+Claim the instance using the one-time token from `sudo journalctl -u windlass | grep
+setup_token`, then open **Settings, General, Panel domain** after pointing a DNS record at
+the server. Caddy obtains and
 renews the panel certificate automatically.
 
 See [Installation](docs/install.md) for systemd, container, configuration, update, and

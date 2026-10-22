@@ -199,9 +199,7 @@ func (s *Service) start(m Manifest) error {
 		return fmt.Errorf("start plugin: %w", err)
 	}
 
-	target, _ := url.Parse("http://" + addr)
-	inst := &instance{cmd: cmd, addr: addr, cancel: cancel,
-		proxy: httputil.NewSingleHostReverseProxy(target)}
+	inst := &instance{cmd: cmd, addr: addr, cancel: cancel, proxy: newPluginProxy(addr, s.logger)}
 	s.running[m.Name] = inst
 	s.logger.Info("plugin started", "plugin", m.Name, "addr", addr)
 
@@ -245,14 +243,32 @@ func (s *Service) StopAll() {
 	}
 }
 
+// newPluginProxy forwards to a plugin on addr. A plugin that is not
+// listening gets a JSON 502, the API's error shape, rather than an empty one.
+func newPluginProxy(addr string, logger *slog.Logger) *httputil.ReverseProxy {
+	target, _ := url.Parse("http://" + addr)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		logger.Warn("plugin proxy", "addr", addr, "error", err)
+		writeError(w, http.StatusBadGateway, `{"error":{"code":"plugin_unreachable","message":"plugin did not answer"}}`)
+	}
+	return proxy
+}
+
+func writeError(w http.ResponseWriter, status int, body string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(body))
+}
+
 // Proxy forwards a request to a running plugin, or 503s if it is not up.
 func (s *Service) Proxy(name string, w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	inst := s.running[name]
 	s.mu.Unlock()
 	if inst == nil {
-		http.Error(w, `{"error":{"code":"plugin_unavailable","message":"plugin is not running"}}`,
-			http.StatusServiceUnavailable)
+		writeError(w, http.StatusServiceUnavailable,
+			`{"error":{"code":"plugin_unavailable","message":"plugin is not running"}}`)
 		return
 	}
 	// Give slow plugin starts a moment on the very first request.

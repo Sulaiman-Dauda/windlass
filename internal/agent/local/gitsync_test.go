@@ -120,3 +120,87 @@ func TestGitConfigEnvAppends(t *testing.T) {
 		t.Fatalf("env = %q", env)
 	}
 }
+
+// TestGitSyncAfterRestore syncs a project whose src came back from a backup.
+// Backups skip .git and a restore replaces the whole directory, so src holds
+// the files but no repository, and a plain clone refuses the non-empty path.
+func TestGitSyncAfterRestore(t *testing.T) {
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command(gitBin, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(work, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(work, "compose.yaml"), []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(work, "add", ".")
+	git(work, "commit", "-q", "-m", "one")
+	bare := filepath.Join(root, "app.git")
+	git(root, "clone", "-q", "--bare", work, bare)
+
+	projects := t.TempDir()
+	l, err := New(Config{ProjectsDir: projects})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	req := agent.GitSyncReq{Project: "app", URL: bare, Branch: "main"}
+	if _, err := (hostLocal{l}).GitSync(ctx, req, nil); err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+
+	// What a restore leaves: the files, an edit, and no .git.
+	src := filepath.Join(projects, "app", "src")
+	if err := os.RemoveAll(filepath.Join(src, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "compose.yaml"), []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "compose.yaml"), []byte("services: {web: {image: nginx}}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(work, "commit", "-q", "-am", "two")
+	git(work, "push", "-q", bare, "main")
+	head := git(work, "rev-parse", "HEAD")
+
+	// A sync that fails partway must leave no half-made repository behind,
+	// or every later sync takes it for a checkout and fetches the bad remote.
+	bad := req
+	bad.URL = filepath.Join(root, "missing.git")
+	if _, err := (hostLocal{l}).GitSync(ctx, bad, nil); err == nil {
+		t.Fatal("sync from a missing remote succeeded")
+	}
+
+	got, err := (hostLocal{l}).GitSync(ctx, req, nil)
+	if err != nil {
+		t.Fatalf("sync after restore: %v", err)
+	}
+	if got.Commit != head {
+		t.Fatalf("commit = %s, want %s", got.Commit, head)
+	}
+	if b, _ := os.ReadFile(filepath.Join(src, "compose.yaml")); string(b) != "services: {web: {image: nginx}}\n" {
+		t.Fatalf("compose.yaml = %q, want the remote's", b)
+	}
+	// And the repaired checkout keeps working on the ordinary fetch path.
+	if again, err := (hostLocal{l}).GitSync(ctx, req, nil); err != nil || again.Commit != head {
+		t.Fatalf("next sync = %+v, %v", again, err)
+	}
+}

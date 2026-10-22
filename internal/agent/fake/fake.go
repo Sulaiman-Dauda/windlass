@@ -48,6 +48,9 @@ type Fake struct {
 	PanelDomain string
 	// ProxyAvailable controls Proxy().Available.
 	ProxyAvailable bool
+	// RoutesInstalled controls Proxy().RoutesInstalled. ApplyRoutes sets it;
+	// clear it to stand for a Caddy reload.
+	RoutesInstalled bool
 
 	// GitCommit is returned by Host().GitSync.
 	GitCommit string
@@ -93,6 +96,15 @@ func (f *Fake) record(op string, err error) error {
 		key = op[:i]
 	}
 	return f.Fail[key]
+}
+
+// DropRoutes forgets the applied routes, as a Caddy reload does. It is safe
+// to call while another goroutine uses the fake.
+func (f *Fake) DropRoutes() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Routes = nil
+	f.RoutesInstalled = false
 }
 
 func (f *Fake) emit(out agent.LogSink, lines ...string) {
@@ -250,7 +262,17 @@ func (p proxyFake) ApplyRoutes(ctx context.Context, routes []agent.Route) error 
 	p.f.mu.Lock()
 	defer p.f.mu.Unlock()
 	p.f.Routes = append([]agent.Route(nil), routes...)
+	p.f.RoutesInstalled = true
 	return nil
+}
+
+func (p proxyFake) RoutesInstalled(ctx context.Context) (bool, error) {
+	if err := p.f.record("proxy.installed", nil); err != nil {
+		return false, err
+	}
+	p.f.mu.Lock()
+	defer p.f.mu.Unlock()
+	return p.f.RoutesInstalled, nil
 }
 
 func (p proxyFake) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {

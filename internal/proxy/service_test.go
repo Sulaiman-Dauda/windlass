@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/agent/fake"
@@ -145,4 +146,73 @@ func TestDeleteRestoresIndexWhenManifestWriteFails(t *testing.T) {
 	if len(domains) != 1 || domains[0].Hostname != "shop.example.com" {
 		t.Fatalf("domain index was not restored: %+v", domains)
 	}
+}
+
+// A Caddy reload loads the Caddyfile and drops every object Windlass added
+// through the admin API. The check notices the routes object has gone and
+// asks for a sync; with the object in place, or Caddy down, it does nothing.
+func TestCheckRoutesAsksForSyncOnlyWhenCaddyLostThem(t *testing.T) {
+	s, ag, q := newTestService(t)
+	seedRoutedDomain(t, s, ag, q)
+	ctx := context.Background()
+	requested := func() bool {
+		select {
+		case <-s.syncCh:
+			return true
+		default:
+			return false
+		}
+	}
+
+	s.checkRoutes(ctx)
+	if requested() {
+		t.Fatal("asked for a sync while Caddy still holds the routes")
+	}
+
+	ag.Fail["proxy.installed"] = errors.New("connection refused")
+	ag.DropRoutes()
+	s.checkRoutes(ctx)
+	if requested() {
+		t.Fatal("asked for a sync while Caddy is down; that is the retry's job")
+	}
+
+	delete(ag.Fail, "proxy.installed")
+	s.checkRoutes(ctx)
+	if !requested() {
+		t.Fatal("did not ask for a sync after Caddy lost the routes")
+	}
+}
+
+// End to end through Run: routes dropped by a Caddy reload come back without
+// a deployment, a container event or a Windlass restart.
+func TestRunRestoresRoutesAfterCaddyReload(t *testing.T) {
+	s, ag, q := newTestService(t)
+	seedRoutedDomain(t, s, ag, q)
+	ag.DropRoutes()
+
+	oldDebounce, oldCheck := syncDebounce, routeCheckInterval
+	syncDebounce, routeCheckInterval = 10*time.Millisecond, 20*time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { s.Run(ctx); close(done) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+		syncDebounce, routeCheckInterval = oldDebounce, oldCheck
+	})
+
+	routed := func(what string) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if routes, _ := ag.Proxy().CurrentRoutes(ctx); len(routes) == 1 {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("routes not restored %s", what)
+	}
+	routed("by the boot sync")
+	ag.DropRoutes()
+	routed("after Caddy dropped them")
 }

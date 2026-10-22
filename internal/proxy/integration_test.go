@@ -240,6 +240,42 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 		t.Fatalf("current routes = %+v, %v", current, err)
 	}
 
+	// An administrator reloading Caddy loads its own config, which drops
+	// every Windlass object. The route check notices and a sync restores them.
+	loadResp, err := http.Post(admin+"/load", "application/json", strings.NewReader(userCaddyConfig))
+	if err != nil {
+		t.Fatalf("reload caddy: %v", err)
+	}
+	loadResp.Body.Close()
+	if installed, err := ag.Proxy().RoutesInstalled(ctx); err != nil || installed {
+		t.Fatalf("after a Caddy reload, installed = %v, %v", installed, err)
+	}
+	svc.checkRoutes(ctx)
+	select {
+	case <-svc.syncCh:
+	default:
+		t.Fatal("route check did not ask for a sync after the reload")
+	}
+	if err := svc.Sync(ctx); err != nil {
+		t.Fatalf("sync after reload: %v", err)
+	}
+	body = ""
+	for i := 0; i < 20; i++ {
+		resp, err := httpsClient.Do(req)
+		if err == nil {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			body = string(b)
+			if resp.StatusCode == http.StatusOK && strings.Contains(body, "nginx") {
+				break
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if !strings.Contains(body, "nginx") {
+		t.Fatalf("routes not restored after a Caddy reload; body: %.200s", body)
+	}
+
 	// A brand-new SQLite file rebuilds its application index from the same
 	// stacks directory while the already-running Compose app remains healthy.
 	rebuiltDB, err := store.Open(filepath.Join(dir, "rebuilt.db"))

@@ -48,8 +48,15 @@ esac
 
 confirm() {
   [ "$ASSUME_YES" = "1" ] && return 0
-  printf '%s [y/N] ' "$1"
-  read -r answer
+  # Under curl | sh, stdin is this script, so ask the terminal instead.
+  # With no terminal at all, the answer is no; rerun with --yes.
+  answer=""
+  if (true </dev/tty) 2>/dev/null; then
+    printf '%s [y/N] ' "$1" >/dev/tty
+    read -r answer </dev/tty || answer=""
+  else
+    printf '%s [y/N] no terminal to ask, rerun with --yes\n' "$1" >&2
+  fi
   [ "$answer" = "y" ] || [ "$answer" = "Y" ]
 }
 

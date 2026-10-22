@@ -456,6 +456,22 @@ func (p proxyLocal) routesState(ctx context.Context, target string) (routesShape
 	return routesPopulated, nil
 }
 
+func (p proxyLocal) RoutesInstalled(ctx context.Context) (bool, error) {
+	resp, err := p.do(ctx, http.MethodGet, "/id/"+routesID, nil)
+	if err != nil {
+		return false, fmt.Errorf("caddy admin unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("caddy admin: %s", resp.Status)
+	}
+}
+
 func (p proxyLocal) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {
 	resp, err := p.do(ctx, http.MethodGet, "/id/"+routesID, nil)
 	if err != nil {

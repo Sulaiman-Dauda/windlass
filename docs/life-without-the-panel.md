@@ -15,7 +15,8 @@ running and Caddy keeps its active configuration when the Windlass process stops
 ├── data/
 │   ├── windlass.db        # platform state and rebuildable indexes/caches
 │   ├── secret.key         # encryption key, mode 0600
-│   └── session.key        # session-signing key, mode 0600
+│   ├── session.key        # session-signing key, mode 0600
+│   └── windlass.lock      # held while Windlass runs
 ├── backups/               # local project archives
 └── plugins/               # optional plugin directories
 ```
@@ -48,7 +49,7 @@ Docker config rather than inside the panel. That is deliberate: holding it only
 in Windlass would make the panel required to start your applications, which is
 the one thing it promises not to be.
 
-Set one in **Settings → Registries**, or by hand without the panel:
+Set one in **Settings, Registries**, or by hand without the panel:
 
 ```sh
 echo "$TOKEN" | sudo docker login ghcr.io --username <user> --password-stdin
@@ -74,14 +75,15 @@ registry and no deployment will succeed either.
 
 ## Rebuild the application index
 
-If `windlass.db` is replaced with a new database, create/claim a new administrator and choose
-**Scan stacks directory**. Windlass discovers directories containing `compose.yaml` or
-`compose.yml`, reads `.windlass.json`, imports `.env`, and rebuilds project/domain indexes.
-Running containers are unaffected throughout.
+If `windlass.db` is replaced with a new database, claim the instance again with the setup
+token from the log and choose **Scan directory** on the Projects page. Windlass discovers
+directories containing `compose.yaml` or `compose.yml`, reads `.windlass.json`, imports
+`.env`, and rebuilds project/domain indexes. Running containers are unaffected throughout.
 
 The following are platform state and cannot be reconstructed from project files: users,
-sessions, audit history, deployment/event history, jobs, backup records/schedules, settings,
-plugin enablement, and encrypted Git/S3/OAuth credentials. Back up the complete `data`
+sessions, API tokens, audit history, deployment/event history, jobs, backup
+records/schedules, settings, plugin enablement, and encrypted Git, registry, S3 and OAuth
+credentials. Back up the complete `data`
 directory when those records matter.
 
 ## Caddy without Windlass
@@ -94,9 +96,11 @@ curl http://127.0.0.1:2019/id/windlass_panel_route
 ```
 
 Application routes and the panel route remain in Caddy's active in-memory configuration when
-Windlass stops. A Caddy reload/restart reconstructs configuration from the administrator's
-persistent Caddy config, then Windlass normally reapplies its desired routes. If Windlass has
-been permanently removed, add any routes that must survive Caddy restarts to the Caddyfile.
+Windlass stops. A Caddy reload or restart loads the administrator's own config file, which
+drops them. While Windlass runs it checks for its routes every 30 seconds and puts them back,
+so a reload costs at most that long. If Caddy restarts while Windlass is stopped, the sites
+it routes are offline until Windlass starts again. If Windlass has been permanently removed,
+add any routes that must survive Caddy restarts to the Caddyfile.
 
 To remove only Windlass-owned routes manually:
 
@@ -111,12 +115,13 @@ Unrelated Caddy objects are not touched.
 
 Compose requires `.env` values in plaintext on disk, protected by filesystem ownership and
 mode `0600`. The encrypted SQLite environment copy is a cache, not the source of truth. Git,
-OAuth, TOTP, and S3 credentials remain encrypted platform state and need `secret.key` for
-recovery.
+registry, OAuth, TOTP, and S3 credentials remain encrypted platform state and need
+`secret.key` for recovery.
 
 ## Project backups
 
 Local backups are ordinary archives under `/var/lib/windlass/backups`. Restore through the UI,
 or inspect/extract one with standard archive tools. Windlass attempts a native SQL dump for
-recognized PostgreSQL/MySQL template stacks before archiving; failure of that best-effort dump
-does not prevent the filesystem archive.
+any project with a PostgreSQL, MySQL or MariaDB container, recognised by service or image
+name, before archiving; failure of that best-effort dump does not prevent the filesystem
+archive.
