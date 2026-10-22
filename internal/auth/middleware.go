@@ -47,6 +47,13 @@ func ClaimsFrom(ctx context.Context) (Claims, bool) {
 // roleRank orders roles by privilege for RequireRole.
 var roleRank = map[string]int{"viewer": 0, "member": 1, "admin": 2}
 
+// HasRole reports whether the request's user holds at least role, for
+// handlers that shape a response by role rather than refusing it.
+func HasRole(ctx context.Context, role string) bool {
+	u, ok := UserFrom(ctx)
+	return ok && roleRank[u.Role] >= roleRank[role]
+}
+
 // RequireAuth rejects unauthenticated requests with 401.
 func RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

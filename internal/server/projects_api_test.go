@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/store/db"
 )
@@ -177,5 +179,86 @@ func TestViewerIsReadOnly(t *testing.T) {
 	}
 	if rec := e.do(t, http.MethodDelete, "/api/v1/projects/app", nil, viewer); rec.Code != http.StatusForbidden {
 		t.Errorf("viewer delete = %d, want 403", rec.Code)
+	}
+}
+
+// Env values are secrets (database URLs, API keys). A viewer can see which
+// keys a project sets, but not their values, through either the env endpoint
+// or the file viewer.
+func TestViewerCannotReadEnvValues(t *testing.T) {
+	e := newTestEnv(t)
+	admin := e.login(t)
+	e.do(t, http.MethodPost, "/api/v1/projects", map[string]string{"name": "app"}, admin)
+	if rec := e.do(t, http.MethodPut, "/api/v1/projects/app/env",
+		map[string]string{"DATABASE_URL": "postgres://u:sekret@db/x", "EMPTY": ""}, admin); rec.Code != http.StatusNoContent {
+		t.Fatalf("set env = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.do(t, http.MethodPut, "/api/v1/projects/app/files/prod.env",
+		map[string]string{"content": "# prod\nexport API_KEY='other-sekret'\n"}, admin); rec.Code != http.StatusNoContent {
+		t.Fatalf("write prod.env = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	hashViewer(t, e, context.Background())
+	rec := e.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
+		"email": "viewer@example.com", "password": "viewerpassword",
+	})
+	viewer := sessionCookie(t, rec)
+
+	rec = e.do(t, http.MethodGet, "/api/v1/projects/app/env", nil, viewer)
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || strings.Contains(body, "sekret") || !strings.Contains(body, "DATABASE_URL") {
+		t.Errorf("viewer env = %d %s, want keys without values", rec.Code, body)
+	}
+	if !strings.Contains(body, `"EMPTY":""`) {
+		t.Errorf("viewer env = %s, want an unset value to stay visibly empty", body)
+	}
+	for _, path := range []string{".env", "prod.env", "./.env"} {
+		rec = e.do(t, http.MethodGet, "/api/v1/projects/app/files/"+path, nil, viewer)
+		if strings.Contains(rec.Body.String(), "sekret") {
+			t.Errorf("viewer read %s exposed a value: %s", path, rec.Body.String())
+		}
+	}
+	rec = e.do(t, http.MethodGet, "/api/v1/projects/app/files/prod.env", nil, viewer)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "API_KEY") || !strings.Contains(rec.Body.String(), "# prod") {
+		t.Errorf("viewer read prod.env = %d %s, want keys and comments kept", rec.Code, rec.Body.String())
+	}
+
+	// Members and admins still see and edit the real values.
+	if rec := e.do(t, http.MethodGet, "/api/v1/projects/app/env", nil, admin); !strings.Contains(rec.Body.String(), "sekret") {
+		t.Errorf("admin env = %s, want real values", rec.Body.String())
+	}
+}
+
+// Session cookies are SameSite=Lax, which browsers send on a cross-site GET.
+// The terminal is the one GET that acts (it opens a shell in a container),
+// so its WebSocket handshake must refuse a page on another origin.
+func TestTerminalRefusesCrossOriginHandshake(t *testing.T) {
+	e := newTestEnv(t)
+	admin := e.login(t)
+	e.do(t, http.MethodPost, "/api/v1/projects", map[string]string{"name": "app"}, admin)
+	e.agent.Containers = []agent.Container{{
+		ID: "c1", Name: "app-web-1", State: "running", ComposeProject: "app", ComposeService: "web",
+	}}
+
+	handshake := func(origin string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/app/terminal?service=web", nil)
+		req.Host = "panel.example.com"
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "websocket")
+		req.Header.Set("Sec-WebSocket-Version", "13")
+		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==") // gitleaks:allow, a handshake nonce
+		req.AddCookie(admin)
+		rec := httptest.NewRecorder()
+		e.handler.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := handshake("https://evil.example"); rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin terminal handshake = %d %s, want 403", rec.Code, rec.Body.String())
+	}
+	// Control: the panel's own origin gets past the origin check (the recorder
+	// cannot be hijacked, so it fails later, but not with 403).
+	if rec := handshake("https://panel.example.com"); rec.Code == http.StatusForbidden {
+		t.Fatalf("same-origin terminal handshake = 403 %s: the test is not exercising the origin check", rec.Body.String())
 	}
 }

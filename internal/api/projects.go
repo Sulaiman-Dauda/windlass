@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -194,7 +195,11 @@ func (a *API) handleReadProjectFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"path": rel, "content": string(data)})
+	content := string(data)
+	if isEnvFile(rel) && !auth.HasRole(r.Context(), "member") {
+		content = maskEnvFile(content)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"path": rel, "content": content})
 }
 
 func (a *API) handleWriteProjectFile(w http.ResponseWriter, r *http.Request) {
@@ -230,6 +235,74 @@ func (a *API) handleWriteProjectFile(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 // Env
 
+const maskedEnvValue = "********"
+
+// isEnvFile matches the files editableFile treats as dotenv: .env and *.env.
+func isEnvFile(rel string) bool {
+	return strings.HasSuffix(strings.ToLower(rel), ".env")
+}
+
+var envKeyRe = regexp.MustCompile(`^\s*(export\s+)?[A-Za-z_][A-Za-z0-9_.-]*\s*$`)
+
+// maskEnvFile hides every non-empty value in a dotenv file and keeps keys,
+// comments and layout, so a viewer reading the file learns what the env
+// endpoint would tell them and nothing more. A quoted value can run over
+// several lines (a PEM key), so its continuation lines are hidden too, as
+// are commented-out assignments (an old password left as "# KEY=...") and
+// any line that is not KEY=value, such as the YAML-style "KEY: value".
+func maskEnvFile(content string) string {
+	lines := strings.Split(content, "\n")
+	var open byte
+	for i, line := range lines {
+		if open != 0 {
+			if strings.IndexByte(line, open) >= 0 {
+				open = 0
+			}
+			lines[i] = maskedEnvValue
+			continue
+		}
+		t := strings.TrimSpace(line)
+		if t == "" {
+			continue
+		}
+		if strings.HasPrefix(t, "#") {
+			if key, _, ok := strings.Cut(line, "="); ok {
+				lines[i] = key + "=" + maskedEnvValue
+			}
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || !envKeyRe.MatchString(key) {
+			lines[i] = maskedEnvValue
+			continue
+		}
+		value = strings.TrimSpace(value)
+		switch value {
+		case "", `""`, "''":
+			continue
+		}
+		if strings.IndexByte("\"'`", value[0]) >= 0 && !closesQuote(value) {
+			open = value[0]
+		}
+		lines[i] = key + "=" + maskedEnvValue
+	}
+	return strings.Join(lines, "\n")
+}
+
+// closesQuote reports whether the quoted value at the start of v ends on
+// this line, skipping escaped quotes.
+func closesQuote(v string) bool {
+	for j := 1; j < len(v); j++ {
+		switch v[j] {
+		case '\\':
+			j++
+		case v[0]:
+			return true
+		}
+	}
+	return false
+}
+
 func (a *API) handleGetProjectEnv(w http.ResponseWriter, r *http.Request) {
 	vars, err := a.Projects.GetEnv(r.Context(), chi.URLParam(r, "name"))
 	if errors.Is(err, projects.ErrNotFound) {
@@ -239,6 +312,15 @@ func (a *API) handleGetProjectEnv(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.internalError(w, "get env", err)
 		return
+	}
+	// Viewers see which keys are set, never the values: they are the
+	// project's credentials. An unset value stays empty so it still shows.
+	if !auth.HasRole(r.Context(), "member") {
+		for k, v := range vars {
+			if v != "" {
+				vars[k] = maskedEnvValue
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, vars)
 }

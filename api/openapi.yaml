@@ -420,7 +420,7 @@ paths:
 
   /projects/{name}/files/{path}:
     get:
-      summary: Read an editable file (yaml/env/conf/json/toml/txt/md)
+      summary: Read an editable file (yaml/env/conf/json/toml/txt/md; dotenv values masked for viewers)
       operationId: readProjectFile
       security: [{ session: [] }]
       responses:
@@ -434,7 +434,7 @@ paths:
 
   /projects/{name}/env:
     get:
-      summary: Read env vars (decrypted)
+      summary: Read env vars (decrypted for members and admins; viewers get keys with values masked)
       operationId: getProjectEnv
       security: [{ session: [] }]
       responses:
