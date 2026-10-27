@@ -57,7 +57,7 @@ func TestNormaliseHost(t *testing.T) {
 		{"ghcr.io", "ghcr.io"},
 		{"GHCR.IO", "ghcr.io"},
 		{"https://ghcr.io/", "ghcr.io"},
-		{"ghcr.io/sulaiman-dauda", "ghcr.io"},
+		{"ghcr.io/example-org", "ghcr.io"},
 		{"  ghcr.io  ", "ghcr.io"},
 	} {
 		if got := NormaliseHost(tc.in); got != tc.want {
@@ -68,12 +68,12 @@ func TestNormaliseHost(t *testing.T) {
 
 func TestRegistryOf(t *testing.T) {
 	for _, tc := range []struct{ image, want string }{
-		{"ghcr.io/sulaiman-dauda/perch:latest", "ghcr.io"},
+		{"ghcr.io/example-org/app:latest", "ghcr.io"},
 		{"registry.gitlab.com/group/app", "registry.gitlab.com"},
 		{"localhost:5000/app:1", "localhost:5000"},
 		// Docker Hub, which needs no login for a public image.
 		{"postgres:18-alpine", ""},
-		{"sulaimandauda/app:latest", ""},
+		{"example/app:latest", ""},
 		{"", ""},
 	} {
 		if got := RegistryOf(tc.image); got != tc.want {
@@ -143,7 +143,7 @@ func TestListNeverReturnsTheSecret(t *testing.T) {
 func TestApplyLogsTheHostIn(t *testing.T) {
 	s := testService(t)
 	ctx := context.Background()
-	if _, err := s.Upsert(ctx, "ghcr.io", "sulaiman", "tok"); err != nil {
+	if _, err := s.Upsert(ctx, "ghcr.io", "deploy-bot", "tok"); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestApplyLogsTheHostIn(t *testing.T) {
 		t.Fatalf("got %d logins, want 1", len(docker.logins))
 	}
 	got := docker.logins[0]
-	if got.host != "ghcr.io" || got.username != "sulaiman" || got.secret != "tok" {
+	if got.host != "ghcr.io" || got.username != "deploy-bot" || got.secret != "tok" {
 		t.Errorf("logged in as %+v", got)
 	}
 
@@ -244,12 +244,12 @@ func TestFillFromStoresAndSignsIn(t *testing.T) {
 	s := testService(t)
 	docker := &recordingDocker{}
 
-	if err := s.FillFrom(context.Background(), "ghcr.io", "sulaiman", "gh-token", docker); err != nil {
+	if err := s.FillFrom(context.Background(), "ghcr.io", "deploy-bot", "gh-token", docker); err != nil {
 		t.Fatalf("fill: %v", err)
 	}
 
 	creds, _ := s.List(context.Background())
-	if len(creds) != 1 || creds[0].Username != "sulaiman" {
+	if len(creds) != 1 || creds[0].Username != "deploy-bot" {
 		t.Fatalf("credential not stored: %+v", creds)
 	}
 	if creds[0].VerifiedAt == "" {
@@ -267,7 +267,7 @@ func TestFillFromKeepsACredentialThatCannotSignIn(t *testing.T) {
 	s := testService(t)
 	docker := &recordingDocker{fail: errors.New("denied: read:packages scope required")}
 
-	if err := s.FillFrom(context.Background(), "ghcr.io", "sulaiman", "repo-only", docker); err != nil {
+	if err := s.FillFrom(context.Background(), "ghcr.io", "deploy-bot", "repo-only", docker); err != nil {
 		t.Fatalf("fill must not fail the connection: %v", err)
 	}
 

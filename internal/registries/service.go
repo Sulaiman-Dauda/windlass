@@ -56,7 +56,7 @@ type Credential struct {
 
 // NormaliseHost turns what somebody types into the registry host Docker uses.
 //
-// "https://ghcr.io/", "ghcr.io/sulaiman-dauda" and "GHCR.IO" are all the same
+// "https://ghcr.io/", "ghcr.io/example-org" and "GHCR.IO" are all the same
 // registry, and storing them as three rows would mean two of them never get
 // applied while the panel cheerfully lists all three.
 func NormaliseHost(raw string) string {

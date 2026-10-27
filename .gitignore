@@ -47,3 +47,6 @@ Thumbs.db
 *~
 .idea/
 .vscode/
+
+# Local agent settings
+/.claude/

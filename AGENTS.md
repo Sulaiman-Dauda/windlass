@@ -7,10 +7,10 @@ module `github.com/windlass-dev/windlass`. See `README.md` for the product model
 
 ## Status: IN PRODUCTION
 
-**Windlass is in real use — it is not a prototype.** Abio deploys other projects with it,
-including Stockroom. A regression here doesn't break a demo, it breaks the thing that runs
-other live services. Treat every change to deployment, proxy, domain or backup logic as
-high-consequence, and prefer additive changes over rewrites.
+**Windlass is in real use, it is not a prototype.** Real projects are deployed with it. A
+regression here doesn't break a demo, it breaks the thing that runs other live services.
+Treat every change to deployment, proxy, domain or backup logic as high-consequence, and
+prefer additive changes over rewrites.
 
 ## Run it
 
