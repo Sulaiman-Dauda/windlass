@@ -45,7 +45,11 @@ func newRecreateFixture(t *testing.T) recreateFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { sqlDB.Close() })
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	if err := store.Migrate(sqlDB, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
