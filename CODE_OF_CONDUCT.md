@@ -34,8 +34,10 @@ anyone representing the project elsewhere.
 
 ## Enforcement
 
-Report a problem to **abiodauda@gmail.com**. Reports are handled privately, and the reporter's
-identity is not disclosed.
+Report a problem privately through
+[Security → Report a vulnerability](https://github.com/Sulaiman-Dauda/windlass/security/advisories/new),
+which only the maintainers can see; it takes conduct reports as well as security ones. Reports
+are handled privately, and the reporter's identity is not disclosed.
 
 Maintainers may edit or delete comments, close issues and pull requests, or ban an account,
 proportionate to the situation. Sustained or serious breaches lead to a permanent ban.
