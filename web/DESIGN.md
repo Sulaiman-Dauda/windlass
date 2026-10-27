@@ -12,8 +12,8 @@ Source of truth: `web/src/index.css` (the `@theme` block and the light and dark 
 The website's `scripts/sync-brand.mjs` reads that file, so keep its markers (see `AGENTS.md`).
 
 - fonts: Manrope, Windlass Mono
-- colours (light): #f3f4f6, #ffffff, #f8f9fa, #f1f2f4, #0c0e12, #0e1116, #4a515c, #858b96, #0d6f97, #0a5c7f, #12804a, #a15e00, #c4382a
-- colours (dark): #08090a, #0e0f11, #131416, #18191c, #0a0b0d, #f2f3f5, #a0a5ae, #6b717b, #3aa9d6, #1786b8, #3ccf85, #f0a83a, #ff6b5b
+- colours (light): #f3f4f6, #ffffff, #f8f9fa, #f1f2f4, #0c0e12, #0e1116, #4a515c, #676c77, #0d6f97, #0a5c7f, #12804a, #a15e00, #c4382a
+- colours (dark): #08090a, #0e0f11, #131416, #18191c, #0a0b0d, #f2f3f5, #a0a5ae, #878d97, #3aa9d6, #1786b8, #3ccf85, #f0a83a, #ff6b5b
 - radii: 8px (controls), 12px (cards), 16px (dialogs), full (pills, dots, switches)
 - accent: #0d6f97 light, #3aa9d6 dark. The primary action, the selected row, links and focus.
 
@@ -29,7 +29,7 @@ Density: table rows 36 to 48px, side cards in a 340px column beside the main car
 | --- | --- | --- |
 | Ink | --fg | names, values, headings |
 | Secondary | --fg2 | supporting values |
-| Muted | --fg3 | labels, hints, timestamps |
+| Muted | --fg3 | labels, hints, timestamps; at least 4.5:1 on every background in both themes |
 | Canvas | --canvas | page background |
 | Surface | --surface, --surface2 | cards; table heads and footers |
 | Line | --hairline, --edge | 1px rules; control borders |
