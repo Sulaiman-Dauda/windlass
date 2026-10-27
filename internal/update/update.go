@@ -247,9 +247,11 @@ func download(ctx context.Context, url, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-	_, err = io.Copy(out, resp.Body)
-	return err
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		_ = out.Close() // the copy's error is the one to report
+		return err
+	}
+	return out.Close()
 }
 
 func fetch(ctx context.Context, url string) ([]byte, error) {

@@ -56,7 +56,7 @@ func (h hostLocal) HTTPCheck(ctx context.Context, req agent.HTTPCheckReq) (agent
 // argv: any user on the host can read a process's argv from /proc, while its
 // environment is readable only by the same user and root.
 func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.LogSink) (agent.GitSyncResult, error) {
-	fs := fsLocal{h.l}
+	fs := fsLocal(h)
 	dir, err := fs.EnsureProject(ctx, req.Project)
 	if err != nil {
 		return agent.GitSyncResult{}, err

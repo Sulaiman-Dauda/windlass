@@ -25,7 +25,7 @@ func TestEnsureTLSMergesWithoutClobberingUserNames(t *testing.T) {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			json.NewEncoder(w).Encode(names)
+			_ = json.NewEncoder(w).Encode(names)
 		case http.MethodPatch:
 			body, _ := io.ReadAll(r.Body)
 			if err := json.Unmarshal(body, &names); err != nil {
@@ -167,7 +167,7 @@ func TestInstallCreatesServerWithTLSPolicy(t *testing.T) {
 		// Every GET returns an empty object: no servers exist yet (forcing the
 		// create-server path) and all config parents already exist.
 		if r.Method == http.MethodGet {
-			io.WriteString(w, "{}")
+			_, _ = io.WriteString(w, "{}")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -279,11 +279,11 @@ func TestInstallHandlesServerWithoutRoutesArray(t *testing.T) {
 				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/servers"):
 					// One existing server that terminates TLS, so install grafts
 					// onto it rather than creating its own.
-					io.WriteString(w, `{"tlssrv":{"listen":[":443"],"tls_connection_policies":[{}]}}`)
+					_, _ = io.WriteString(w, `{"tlssrv":{"listen":[":443"],"tls_connection_policies":[{}]}}`)
 				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/routes"):
-					io.WriteString(w, tc.routes)
+					_, _ = io.WriteString(w, tc.routes)
 				case r.Method == http.MethodGet:
-					io.WriteString(w, "{}")
+					_, _ = io.WriteString(w, "{}")
 				case (r.Method == http.MethodPut || r.Method == http.MethodPost) && strings.Contains(r.URL.Path, "/servers/tlssrv/routes"):
 					gotMethod, gotPath = r.Method, r.URL.Path
 					gotBody, _ = io.ReadAll(r.Body)

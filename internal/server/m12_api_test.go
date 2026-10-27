@@ -27,7 +27,9 @@ func TestTOTPEnrollmentAndLogin(t *testing.T) {
 		Secret     string `json:"secret"`
 		OTPAuthURL string `json:"otpauth_url"`
 	}
-	json.NewDecoder(rec.Body).Decode(&setup)
+	if err := json.NewDecoder(rec.Body).Decode(&setup); err != nil {
+		t.Fatal(err)
+	}
 	if setup.Secret == "" || !strings.Contains(setup.OTPAuthURL, "otpauth://") {
 		t.Fatalf("setup = %+v", setup)
 	}

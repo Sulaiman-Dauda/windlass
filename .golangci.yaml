@@ -6,7 +6,19 @@ linters:
     - depguard
     - misspell
     - unconvert
+  exclusions:
+    # golangci's standard set: Close, Flush, os.Remove(All), fmt print calls
+    # and Setenv, where a failed call has nothing left to act on. Close on a
+    # file that was written is checked by hand, because it can lose data.
+    presets:
+      - std-error-handling
   settings:
+    errcheck:
+      exclude-functions:
+        # Rollback runs after the error that is already being returned.
+        - (*database/sql.Tx).Rollback
+        # CloseNow is the websocket's Close: the peer is gone either way.
+        - (*github.com/coder/websocket.Conn).CloseNow
     depguard:
       rules:
         # Principle 11: only the local agent implementation may talk to

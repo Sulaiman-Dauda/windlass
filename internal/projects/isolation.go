@@ -194,7 +194,7 @@ func hostChar(c byte) bool {
 }
 
 func hostBoundaryBefore(s string, i int) bool {
-	return i == 0 || !(hostChar(s[i-1]) || s[i-1] == '.')
+	return i == 0 || !hostChar(s[i-1]) && s[i-1] != '.'
 }
 
 // hostBoundaryAfter allows a full stop that ends a sentence but not one that

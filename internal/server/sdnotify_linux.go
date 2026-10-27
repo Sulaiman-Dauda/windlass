@@ -19,5 +19,5 @@ func NotifySystemd(state string) {
 		return
 	}
 	defer conn.Close()
-	conn.Write([]byte(state))
+	_, _ = conn.Write([]byte(state))
 }

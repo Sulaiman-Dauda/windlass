@@ -916,6 +916,7 @@ paths:
                 destination: { type: string, enum: [local, s3], description: "Defaults to local" }
       responses:
         "201": { description: Backup record }
+        "400": { description: The body is not valid JSON }
         "409": { description: "conflict: a backup of this project is already running" }
         "502": { description: "The backup failed; the body is the failed backup record with its error" }
 

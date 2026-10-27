@@ -77,7 +77,7 @@ func (e *env) runUntilFinished(t *testing.T, deploymentID int64) db.Deployment {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go e.runner.Run(ctx)
+	go func() { _ = e.runner.Run(ctx) }()
 
 	deadline := time.After(10 * time.Second)
 	for {
@@ -251,7 +251,9 @@ func TestResumeAfterCrash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.q.MarkDeploymentStarted(ctx, db.MarkDeploymentStartedParams{Status: "applying", ID: d.ID})
+	if err := e.q.MarkDeploymentStarted(ctx, db.MarkDeploymentStartedParams{Status: "applying", ID: d.ID}); err != nil {
+		t.Fatal(err)
+	}
 
 	// The crashed process left the job mid-flight.
 	job, err := e.q.EnqueueJob(ctx, db.EnqueueJobParams{
@@ -263,7 +265,9 @@ func TestResumeAfterCrash(t *testing.T) {
 	if _, err := e.q.ClaimNextJob(ctx); err != nil { // moves it to running
 		t.Fatal(err)
 	}
-	e.q.CheckpointJob(ctx, db.CheckpointJobParams{Step: stepApplying, ID: job.ID})
+	if err := e.q.CheckpointJob(ctx, db.CheckpointJobParams{Step: stepApplying, ID: job.ID}); err != nil {
+		t.Fatal(err)
+	}
 
 	final := e.runUntilFinished(t, d.ID)
 	if final.Status != "succeeded" {

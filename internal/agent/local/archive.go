@@ -225,7 +225,9 @@ func (f fsLocal) RestoreProject(ctx context.Context, project, archivePath string
 				w.Close()
 				return err
 			}
-			w.Close()
+			if err := w.Close(); err != nil {
+				return err
+			}
 		default:
 			// symlinks etc. are not produced by ArchiveProject
 		}

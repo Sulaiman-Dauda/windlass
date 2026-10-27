@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -25,6 +26,15 @@ func TestBackupRestoreAPI(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"status":"done"`) {
 		t.Fatalf("backup body = %s", rec.Body.String())
+	}
+
+	// A body that does not parse is refused, not run as a local backup.
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/app/backups", strings.NewReader(`{"destination":"s3"`))
+	req.AddCookie(cookie)
+	bad := httptest.NewRecorder()
+	e.handler.ServeHTTP(bad, req)
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("malformed backup body = %d: %s", bad.Code, bad.Body.String())
 	}
 
 	rec = e.do(t, http.MethodPut, "/api/v1/projects/app/files/compose.yaml",

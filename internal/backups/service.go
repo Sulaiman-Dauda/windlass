@@ -220,7 +220,11 @@ func (s *Service) Restore(ctx context.Context, projectName string, backupID int6
 		if err := newS3(cfg).GetFile(ctx, b.Path, archivePath); err != nil {
 			return err
 		}
-		defer s.agent.FS().RemoveArchive(ctx, archivePath)
+		defer func() {
+			if err := s.agent.FS().RemoveArchive(ctx, archivePath); err != nil {
+				s.logger.Warn("remove downloaded backup", "path", archivePath, "error", err)
+			}
+		}()
 	}
 
 	if err := s.agent.FS().RestoreProject(ctx, projectName, archivePath); err != nil {
@@ -365,7 +369,11 @@ func (s *Service) tick(ctx context.Context) {
 				continue
 			}
 		}
-		s.q.TouchScheduleRun(ctx, sched.ID)
+		// Without the touch the schedule stays due and would run every tick.
+		if err := s.q.TouchScheduleRun(ctx, sched.ID); err != nil {
+			s.logger.Error("record schedule run", "project", sched.ProjectName, "error", err)
+			continue
+		}
 		if _, err := s.Run(ctx, sched.ProjectName, "scheduled", sched.Destination); err != nil {
 			continue // already logged
 		}

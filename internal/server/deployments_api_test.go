@@ -34,7 +34,9 @@ func waitForStatus(t *testing.T, e *testEnv, cookie *http.Cookie, name string, n
 			Status string `json:"status"`
 			Error  string `json:"error"`
 		}
-		json.NewDecoder(rec.Body).Decode(&dto)
+		if err := json.NewDecoder(rec.Body).Decode(&dto); err != nil {
+			t.Fatal(err)
+		}
 		if dto.Status == want {
 			return
 		}

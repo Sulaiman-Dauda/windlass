@@ -98,7 +98,7 @@ func newTestEnv(t *testing.T) *testEnv {
 
 	runnerCtx, stopRunner := context.WithCancel(context.Background())
 	t.Cleanup(stopRunner)
-	go runner.Run(runnerCtx)
+	go func() { _ = runner.Run(runnerCtx) }()
 
 	proxySvc := proxy.New(queries, ag, projectSvc, bus, logger)
 	a := &api.API{

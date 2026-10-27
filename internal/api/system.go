@@ -129,5 +129,5 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/yaml")
-	w.Write(spec.Spec)
+	_, _ = w.Write(spec.Spec)
 }

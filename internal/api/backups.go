@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -65,7 +66,12 @@ func (a *API) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Destination string `json:"destination"`
 	}
-	json.NewDecoder(r.Body).Decode(&req) // empty body = local
+	// An empty body means a local backup. A body that does not parse must
+	// not quietly become one when it named another destination.
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
 
 	name := chi.URLParam(r, "name")
 	b, err := a.Backups.Run(r.Context(), name, "manual", req.Destination)

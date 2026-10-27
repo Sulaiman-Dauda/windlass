@@ -128,7 +128,7 @@ func (a *API) handleGitHubAppCreate(w http.ResponseWriter, r *http.Request) {
 		"default-src 'none'; script-src 'nonce-"+nonce+"'; form-action https://github.com")
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	manifestPage.Execute(w, map[string]string{
+	_ = manifestPage.Execute(w, map[string]string{
 		"Action":   "https://github.com/settings/apps/new?state=" + state,
 		"Manifest": string(manifest),
 		"Nonce":    nonce,

@@ -107,7 +107,7 @@ func parseAPIToken(s string) (publicID, secret string, ok bool) {
 	}
 	rest := s[len(TokenPrefix):]
 	for _, c := range rest {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return "", "", false
 		}
 	}

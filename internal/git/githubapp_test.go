@@ -75,7 +75,7 @@ func TestConvertAppManifestPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotMethod = r.URL.Path, r.Method
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": 42, "slug": "windlass-test", "client_id": "cid",
 			"client_secret": "csec", "webhook_secret": "whsec", "pem": "KEY",
 			"owner": map[string]string{"login": "acme"},
@@ -106,7 +106,7 @@ func TestConvertAppManifestPath(t *testing.T) {
 func TestConvertAppManifestReportsBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		w.Write([]byte(`{"message":"Code has expired"}`))
+		_, _ = w.Write([]byte(`{"message":"Code has expired"}`))
 	}))
 	defer srv.Close()
 
@@ -152,7 +152,7 @@ func TestFetchAppIdentity(t *testing.T) {
 	var gotPath, gotMethod, gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath, gotMethod, gotAuth = r.URL.Path, r.Method, r.Header.Get("Authorization")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"slug": "acme-windlass", "html_url": "https://github.com/apps/acme-windlass",
 			"owner": map[string]string{"login": "acme-org"},
 		})

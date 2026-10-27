@@ -50,11 +50,11 @@ func (a *API) handleProjectLogs(w http.ResponseWriter, r *http.Request) {
 	// SSE writes fan out line by line.
 	err = a.Agent.Docker().Logs(r.Context(), target.ID, agent.LogOpts{Follow: follow, Tail: tail},
 		func(line agent.LogLine) {
-			sse.event("", "log", map[string]string{
+			_ = sse.event("", "log", map[string]string{
 				"stream": line.Stream, "text": line.Text,
 			})
 		})
 	if err != nil && r.Context().Err() == nil {
-		sse.event("", "error", map[string]string{"text": err.Error()})
+		_ = sse.event("", "error", map[string]string{"text": err.Error()})
 	}
 }

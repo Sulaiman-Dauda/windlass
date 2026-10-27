@@ -121,7 +121,7 @@ func (a *API) streamDeploymentEvents(w http.ResponseWriter, r *http.Request, dep
 		}
 		terminal := false
 		for _, ev := range stored {
-			sse.event(strconv.FormatInt(ev.Seq, 10), "deployment."+ev.Type, map[string]any{
+			_ = sse.event(strconv.FormatInt(ev.Seq, 10), "deployment."+ev.Type, map[string]any{
 				"seq": ev.Seq, "type": ev.Type, "message": ev.Message, "ts": ev.Ts,
 			})
 			lastSent = ev.Seq

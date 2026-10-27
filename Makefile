@@ -31,8 +31,11 @@ test:
 test-integration:
 	go test -tags integration -count=1 ./...
 
+# Pinned and built with the local Go, so it matches CI and reads the v2 config.
+GOLANGCI_LINT ?= go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+
 lint:
-	golangci-lint run
+	$(GOLANGCI_LINT) run ./...
 
 clean:
 	rm -rf bin web/dist

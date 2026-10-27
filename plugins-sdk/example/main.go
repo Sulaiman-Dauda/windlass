@@ -25,7 +25,7 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"plugin": "hello",
 			"uptime": time.Since(start).Seconds(),
 		})

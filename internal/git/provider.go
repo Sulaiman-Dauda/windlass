@@ -279,7 +279,7 @@ func decodeJSON(resp *http.Response, provider string, v any) error {
 
 func checkStatus(resp *http.Response, provider string) error {
 	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return fmt.Errorf("%s webhook registration failed (HTTP %d)", provider, resp.StatusCode)
 	}

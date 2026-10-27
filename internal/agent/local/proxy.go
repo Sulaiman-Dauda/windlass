@@ -215,7 +215,7 @@ func (p proxyLocal) ensureTLS(ctx context.Context, routes []agent.Route) error {
 
 	const path = "/config/apps/tls/certificates/automate"
 	var names []string
-	method := http.MethodPut
+	var method string
 	resp, err := p.do(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return fmt.Errorf("read caddy TLS automation: %w", err)

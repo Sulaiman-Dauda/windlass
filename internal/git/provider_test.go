@@ -41,7 +41,7 @@ func TestListReposGitHub(t *testing.T) {
 		if r.URL.Path != "/user/repos" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		json.NewEncoder(w).Encode([]map[string]any{{
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
 			"full_name": "acme/app", "clone_url": "https://github.com/acme/app.git",
 			"default_branch": "main", "private": true,
 		}})
@@ -64,7 +64,7 @@ func TestListReposGitLab(t *testing.T) {
 		if got := r.Header.Get("PRIVATE-TOKEN"); got != "tok" {
 			t.Errorf("token header = %q", got)
 		}
-		json.NewEncoder(w).Encode([]map[string]any{{
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
 			"path_with_namespace": "group/app",
 			"http_url_to_repo":    "https://gitlab.com/group/app.git",
 			"default_branch":      "master", "visibility": "public",
@@ -87,11 +87,13 @@ func TestEnsureWebhookGitHubCreates(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/hooks":
-			w.Write([]byte(`[]`))
+			_, _ = w.Write([]byte(`[]`))
 		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/app/hooks":
-			json.NewDecoder(r.Body).Decode(&created)
+			if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
+				t.Errorf("decode hook: %v", err)
+			}
 			w.WriteHeader(http.StatusCreated)
-			w.Write([]byte(`{}`))
+			_, _ = w.Write([]byte(`{}`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -118,10 +120,10 @@ func TestEnsureWebhookGitHubUpdatesExisting(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/hooks":
-			w.Write([]byte(`[{"id": 7, "config": {"url": "https://panel.example/api/v1/webhooks/github/app"}}]`))
+			_, _ = w.Write([]byte(`[{"id": 7, "config": {"url": "https://panel.example/api/v1/webhooks/github/app"}}]`))
 		case r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/app/hooks/7":
 			patched = true
-			w.Write([]byte(`{}`))
+			_, _ = w.Write([]byte(`{}`))
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -149,11 +151,13 @@ func TestEnsureWebhookGitLab(t *testing.T) {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			w.Write([]byte(`[]`))
+			_, _ = w.Write([]byte(`[]`))
 		case http.MethodPost:
-			json.NewDecoder(r.Body).Decode(&created)
+			if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
+				t.Errorf("decode hook: %v", err)
+			}
 			w.WriteHeader(http.StatusCreated)
-			w.Write([]byte(`{}`))
+			_, _ = w.Write([]byte(`{}`))
 		}
 	}))
 	defer srv.Close()

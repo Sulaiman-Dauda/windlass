@@ -67,7 +67,7 @@ func (e *env) runUntilIdle(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go e.runner.Run(ctx)
+	go func() { _ = e.runner.Run(ctx) }()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		var n int

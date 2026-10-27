@@ -141,5 +141,5 @@ func RejectToken(next http.Handler) http.Handler {
 func writeAuthError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	w.Write([]byte(`{"error":{"code":"` + code + `","message":"` + message + `"}}`))
+	_, _ = w.Write([]byte(`{"error":{"code":"` + code + `","message":"` + message + `"}}`))
 }

@@ -46,7 +46,9 @@ func TestTemplateCreatesAndDeploys(t *testing.T) {
 	// Credentials were generated into the env, encrypted.
 	rec = e.do(t, http.MethodGet, "/api/v1/projects/mydb/env", nil, cookie)
 	var env map[string]string
-	json.NewDecoder(rec.Body).Decode(&env)
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatal(err)
+	}
 	if env["POSTGRES_PASSWORD"] == "" || env["POSTGRES_DB"] != "mydb" {
 		t.Errorf("env = %v", env)
 	}

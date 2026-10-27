@@ -24,7 +24,9 @@ func configureGit(t *testing.T, e *testEnv, cookie *http.Cookie, project string,
 	var resp struct {
 		WebhookSecret string `json:"webhook_secret"`
 	}
-	json.NewDecoder(rec.Body).Decode(&resp)
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
 	if resp.WebhookSecret == "" {
 		t.Fatal("no webhook secret returned")
 	}
