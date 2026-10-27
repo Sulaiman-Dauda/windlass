@@ -73,6 +73,7 @@ test("recreation keeps its confirmation through a missing pair and shows the rot
   await expect.poll(() => submitted).toEqual({ password: "memberpassword123", acknowledged: true });
   await page.clock.fastForward(16_000);
   await expect.poll(() => fixture.gapReads()).toBeGreaterThan(0);
+  await expect(page.getByText("No succeeded deployment yet")).toHaveCount(0);
   await expect(dialog.getByText("Recreating…")).toBeVisible();
   finish();
   await expect(dialog.getByText("Created app-staging", { exact: true })).toBeVisible();
