@@ -82,6 +82,7 @@ export interface StagingStatus {
   promotable: DeploymentRef | null;
   /** Why Promote is unavailable; absent when it is available. */
   promote_blocked?: string;
+  can_recreate: boolean;
   rewrites: HostnameRewrite[];
   drift: { file: string; state: "changed" | "staging_only" | "live_only" }[];
 }
@@ -146,6 +147,20 @@ export function useSetAutoPromote(staging: string) {
     mutationFn: (auto_promote: boolean) =>
       api(`/projects/${staging}/staging`, { method: "PUT", body: JSON.stringify({ auto_promote }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["staging"] }),
+  });
+}
+
+export function useRecreateStaging(staging: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (req: { password?: string; acknowledged: boolean }) =>
+      api<CreateResult>(`/projects/${staging}/staging/recreate`, { method: "POST", body: JSON.stringify(req) }),
+    onSuccess: () => {
+      // Deployment numbers restart at one for the replacement project.
+      qc.removeQueries({ queryKey: ["projects", staging, "deployments"], type: "inactive" });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      qc.invalidateQueries({ queryKey: ["staging"] });
+    },
   });
 }
 

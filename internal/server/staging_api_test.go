@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -12,8 +13,84 @@ import (
 	"testing"
 
 	"github.com/windlass-dev/windlass/internal/agent"
+	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/store/db"
 )
+
+func TestRecreateInterruptedStaging(t *testing.T) {
+	e := newTestEnv(t)
+	cookie := e.login(t)
+	e.prepareDeployableProject(t, cookie, "app")
+	ctx := context.Background()
+	old, err := e.api.Projects.CreateStagingCopy(ctx, projects.CopyReq{
+		Live: "app", Env: map[string]string{"VALUE": "keep-staging"}, AutoPromote: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := e.queries.CreateDeployment(ctx, db.CreateDeploymentParams{
+		ProjectID: old.Project.ID, ProjectID_2: old.Project.ID, TriggeredBy: "manual",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.queries.FinishDeployment(ctx, db.FinishDeploymentParams{
+		ID: first.ID, Status: "failed",
+		Error: sql.NullString{String: "data copy was interrupted; delete staging and create it again", Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.agent.Resolved["app-staging"] = e.agent.Resolved["app"]
+	e.agent.Statuses["app-staging"] = []agent.ServiceStatus{{Service: "web", State: "running"}}
+	path := "/api/v1/projects/app-staging/staging/recreate"
+	for _, tc := range []struct{ password, code string }{
+		{"", "password_required"}, {"wrong-password", "invalid_password"},
+	} {
+		rec := e.do(t, http.MethodPost, path, map[string]any{"password": tc.password, "acknowledged": true}, cookie)
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), tc.code) {
+			t.Fatalf("password guard = %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+	viewer := e.viewerCookie(t, cookie)
+	if rec := e.do(t, http.MethodPost, path, map[string]any{"password": "viewerpassword123", "acknowledged": true}, viewer); rec.Code != http.StatusForbidden {
+		t.Fatalf("viewer recreate = %d: %s", rec.Code, rec.Body.String())
+	}
+	if slices.Contains(e.agent.Calls, "compose.down(app-staging)") {
+		t.Fatal("authorization failure stopped staging")
+	}
+	rec := e.do(t, http.MethodPost, "/api/v1/users", map[string]string{
+		"email": "member@example.com", "password": "memberpassword123", "role": "member",
+	}, cookie)
+	if rec.Code != http.StatusCreated {
+		t.Fatal(rec.Body.String())
+	}
+	rec = e.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
+		"email": "member@example.com", "password": "memberpassword123",
+	})
+	if rec.Code != http.StatusNoContent {
+		t.Fatal(rec.Body.String())
+	}
+	member := sessionCookie(t, rec)
+	rec = e.do(t, http.MethodPost, path, map[string]any{
+		"password": "memberpassword123", "acknowledged": true,
+	}, member)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("recreate = %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"name":"app-staging"`) {
+		t.Fatalf("recreated = %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "keep-staging") {
+		t.Fatal("recreate response exposed an environment value")
+	}
+	var count int
+	if err := e.sqlDB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'project.staging_recreate' AND resource_id = 'app-staging'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("recreate audit events = %d", count)
+	}
+}
 
 // prepareStagingLive makes a deployable Git project "app" with one domain
 // and an outside-world secret in its env, and returns its webhook secret.

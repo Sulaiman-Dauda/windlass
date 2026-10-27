@@ -109,6 +109,10 @@ type Preflight struct {
 // Preflight checks live for a staging copy. req may be empty, in which case
 // the defaults are checked: live's branch, staging- domains and a data copy.
 func (s *Service) Preflight(ctx context.Context, liveName string, req Request) (Preflight, error) {
+	return s.preflight(ctx, liveName, req, nil)
+}
+
+func (s *Service) preflight(ctx context.Context, liveName string, req Request, retained *retainedSettings) (Preflight, error) {
 	live, err := s.projects.Get(ctx, liveName)
 	if err != nil {
 		return Preflight{}, err
@@ -175,6 +179,12 @@ func (s *Service) Preflight(ctx context.Context, liveName string, req Request) (
 		return Preflight{}, err
 	}
 	pf.Domains = domainMap(liveDomains, req.Domains)
+	if retained != nil {
+		pf.Domains = make([]DomainMap, 0, len(retained.domains))
+		for _, d := range retained.domains {
+			pf.Domains = append(pf.Domains, DomainMap{Staging: d.Hostname})
+		}
+	}
 	for _, d := range pf.Domains {
 		if d.Staging == "" {
 			block(fmt.Sprintf("%s has no staging domain", d.Live), "Give it one, such as "+DefaultHostname(d.Live)+".")
@@ -187,7 +197,12 @@ func (s *Service) Preflight(ctx context.Context, liveName string, req Request) (
 		if err := s.proxy.CheckHostname(ctx, d.Staging); err != nil {
 			block(err.Error(), "Choose another staging domain.")
 		}
-		pf.Rewrites = append(pf.Rewrites, projects.HostnameRewrite{From: d.Live, To: strings.ToLower(d.Staging)})
+		if retained == nil {
+			pf.Rewrites = append(pf.Rewrites, projects.HostnameRewrite{From: d.Live, To: strings.ToLower(d.Staging)})
+		}
+	}
+	if retained != nil {
+		pf.Rewrites = append([]projects.HostnameRewrite{}, retained.rewrites...)
 	}
 	if pf.Rewrites == nil {
 		pf.Rewrites = []projects.HostnameRewrite{}
@@ -206,7 +221,7 @@ func (s *Service) Preflight(ctx context.Context, liveName string, req Request) (
 	}
 	pf.Blockers = append(pf.Blockers, projects.HealthURLsOnHosts(stagingCfg, hosts)...)
 
-	env, err := s.stagingEnv(ctx, live.Name, pf.Rewrites, req.Env)
+	env, err := s.plannedEnv(ctx, live.Name, pf.Rewrites, req.Env, retained)
 	if err != nil {
 		return Preflight{}, err
 	}
@@ -337,7 +352,11 @@ type Result struct {
 // the panel's external base URL, for the webhook. Anything that fails before
 // the deployment is queued is undone.
 func (s *Service) Create(ctx context.Context, liveName string, req Request, origin string) (Result, error) {
-	pf, err := s.Preflight(ctx, liveName, req)
+	return s.create(ctx, liveName, req, origin, nil)
+}
+
+func (s *Service) create(ctx context.Context, liveName string, req Request, origin string, retained *retainedSettings) (Result, error) {
+	pf, err := s.preflight(ctx, liveName, req, retained)
 	if err != nil {
 		return Result{}, err
 	}
@@ -363,7 +382,7 @@ func (s *Service) Create(ctx context.Context, liveName string, req Request, orig
 	if err != nil {
 		return Result{}, err
 	}
-	env, err := s.stagingEnv(ctx, live.Name, pf.Rewrites, req.Env)
+	env, err := s.plannedEnv(ctx, live.Name, pf.Rewrites, req.Env, retained)
 	if err != nil {
 		return Result{}, err
 	}
@@ -389,9 +408,17 @@ func (s *Service) Create(ctx context.Context, liveName string, req Request, orig
 	for _, d := range pf.Domains {
 		targets[d.Live] = strings.ToLower(d.Staging)
 	}
+	domains := make([]projects.DomainConfig, 0, len(liveDomains))
 	for _, d := range liveDomains {
-		if _, err := s.proxy.Add(ctx, staging.ID, targets[d.Hostname], d.Service, d.ContainerPort); err != nil {
-			return undo(fmt.Errorf("add staging domain %s: %w", targets[d.Hostname], err))
+		d.Hostname = targets[d.Hostname]
+		domains = append(domains, d)
+	}
+	if retained != nil {
+		domains = retained.domains
+	}
+	for _, d := range domains {
+		if _, err := s.proxy.Add(ctx, staging.ID, d.Hostname, d.Service, d.ContainerPort); err != nil {
+			return undo(fmt.Errorf("add staging domain %s: %w", d.Hostname, err))
 		}
 	}
 
@@ -581,6 +608,7 @@ type DeploymentRef struct {
 
 	id           int64
 	promotedFrom int64 // the staging deployment's ID, for a promoted live deployment
+	recreatable  bool
 }
 
 // DriftFile is a compose file that differs between live and staging once
@@ -603,6 +631,7 @@ type Status struct {
 	Promotable  *DeploymentRef `json:"promotable"`
 	// PromoteBlocked says why Promote is unavailable; empty when it is.
 	PromoteBlocked string                     `json:"promote_blocked,omitempty"`
+	CanRecreate    bool                       `json:"can_recreate"`
 	Rewrites       []projects.HostnameRewrite `json:"rewrites"`
 	Drift          []DriftFile                `json:"drift"`
 }
@@ -638,6 +667,7 @@ func (s *Service) Status(ctx context.Context, name string) (Status, error) {
 	if st.Latest, err = s.latest(ctx, staging.Name); err != nil {
 		return Status{}, err
 	}
+	st.CanRecreate = st.Latest != nil && st.Latest.recreatable
 	st.PromoteBlocked = promoteBlocked(st)
 
 	if st.Drift, err = s.drift(ctx, live.Name, staging.Name, st.Rewrites); err != nil {
@@ -687,7 +717,7 @@ func (s *Service) latest(ctx context.Context, project string) (*DeploymentRef, e
 
 func ref(d db.Deployment) *DeploymentRef {
 	return &DeploymentRef{Number: d.Number, Status: d.Status, Commit: d.GitCommit.String,
-		id: d.ID, promotedFrom: d.PromotedFrom.Int64}
+		id: d.ID, promotedFrom: d.PromotedFrom.Int64, recreatable: recreatable(d)}
 }
 
 // drift lists the top-level compose files that differ, comparing live's

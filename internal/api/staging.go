@@ -122,6 +122,46 @@ func (a *API) handleGetStaging(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+func (a *API) handleRecreateStaging(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	var req struct {
+		Password     string `json:"password"`
+		Acknowledged bool   `json:"acknowledged"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	if !a.confirmProjectDeletion(w, r, req.Password, "project.staging_recreate_denied") {
+		return
+	}
+	res, err := a.Staging.Recreate(r.Context(), name, req.Acknowledged, a.requestOrigin(r))
+	switch {
+	case errors.Is(err, projects.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "project not found")
+		return
+	case errors.Is(err, staging.ErrNotRecreatable):
+		writeError(w, http.StatusConflict, "not_recreatable", err.Error())
+		return
+	case errors.Is(err, projects.ErrSharedVolume):
+		writeError(w, http.StatusConflict, "shared_volume", err.Error())
+		return
+	case errors.Is(err, staging.ErrNotAcknowledged):
+		writeError(w, http.StatusBadRequest, "acknowledgement_required", err.Error())
+		return
+	case errors.Is(err, staging.ErrBlocked):
+		writeError(w, http.StatusConflict, "staging_blocked", err.Error())
+		return
+	case err != nil:
+		a.internalError(w, "recreate staging", err)
+		return
+	}
+	user, _ := auth.UserFrom(r.Context())
+	a.Audit.Write(r.Context(), user.ID, "project.staging_recreate", "project", name, remoteIP(r),
+		map[string]any{"branch": res.Project.GitBranch.String, "deployment": res.Deployment})
+	writeJSON(w, http.StatusCreated, map[string]any{"project": toProjectDTO(res.Project), "result": res})
+}
+
 func (a *API) handleStagingDiff(w http.ResponseWriter, r *http.Request) {
 	d, err := a.Staging.Diff(r.Context(), chi.URLParam(r, "name"), chi.URLParam(r, "file"))
 	switch {

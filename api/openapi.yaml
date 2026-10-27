@@ -809,7 +809,7 @@ paths:
       operationId: getStaging
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
-        "200": { description: "{live, staging, auto_promote, live_current, promotable, promote_blocked, rewrites, drift}" }
+        "200": { description: "{live, staging, auto_promote, live_current, promotable, promote_blocked, can_recreate, rewrites, drift}; can_recreate is true only for an interrupted first data-copy deployment" }
         "404": { description: The project has no staging }
     post:
       summary: Create the project's staging (member)
@@ -859,6 +859,41 @@ paths:
       responses:
         "204": { description: Updated }
         "404": { description: The project is not a staging }
+
+  /projects/{name}/staging/recreate:
+    post:
+      summary: Recreate staging after its interrupted first data copy (member, session only)
+      description: |
+        Called on staging, only when its latest deployment is number 1 and failed with
+        "data copy was interrupted; delete staging and create it again". Retains its
+        branch, domains, environment, hostname rewrites and auto-promote setting, deletes
+        staging through the existing guarded deletion path, then creates it again with
+        a fresh preflight and data copy from live. A failed container/volume removal
+        leaves the old staging in place. A failure after deletion may leave no staging.
+        Audited as project.staging_recreate. API tokens cannot call this endpoint.
+      operationId: recreateStaging
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  description: The caller's account password, required when the account has one.
+                acknowledged:
+                  type: boolean
+                  description: Confirms reuse of staging's environment values; required when they include flagged values.
+      responses:
+        "201": { description: "{project, result: {deployment, rewritten, skipped, webhook_secret?, webhook_registered}}" }
+        "400": { description: "acknowledgement_required, or invalid JSON" }
+        "403": { description: "forbidden, session_required, password_required, or invalid_password" }
+        "404": { description: Project not found }
+        "409": { description: "not_recreatable, shared_volume, or staging_blocked" }
+        "429": { description: Credential attempt rate limit exceeded }
+        "503": { description: Password check capacity exhausted }
 
   /projects/{name}/staging/diff/{file}:
     get:

@@ -37,6 +37,26 @@ confirm, and the dialog shows everything it is about to do:
 
 Staging then deploys for the first time and its log opens.
 
+### Recovering an interrupted first data copy
+
+If Windlass stops during the first data copy, that deployment fails with
+"data copy was interrupted; delete staging and create it again". Loading it a second
+time into the partial database or volume would be unsafe.
+
+On that staging project's overview, a member can choose **Recreate staging**. Confirm the
+project name, re-enter your account password if you have one, and confirm reuse of the
+current environment values. Windlass reads staging's branch, domains, `.env`, hostname
+rewrites and auto-promote setting before deleting it, then creates it with those settings
+and copies live's data from the beginning. Live keeps running. Staging's other file edits
+are replaced with live's current files. A manually installed push webhook may need its new
+secret; the dialog shows it once if Windlass cannot register the webhook automatically.
+
+The existing deletion and creation checks still apply. If removing staging's containers
+and volumes fails, its directory and history are kept so you can try again. Once deletion
+succeeds it cannot be undone: if the new creation preflight finds a blocker, staging stays
+deleted. This action is only available for that interrupted first copy, not for another
+failed deployment or a staging that has already been used.
+
 If Windlass cannot add the push webhook to the repository itself, the dialog shows the
 payload URL and secret once so you can add it by hand. Projects connected through the
 Windlass GitHub App need no webhook.
