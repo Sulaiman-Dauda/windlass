@@ -47,9 +47,9 @@ for (const tc of [
   });
 }
 
-test("recreation keeps its confirmation through a missing pair and shows the rotated webhook secret", async ({ page }) => {
+test("recreation confirms flagged keys, survives missing status and shows the new webhook secret", async ({ page }) => {
   await page.clock.install();
-  const fixture = await panel(page);
+  const fixture = await panel(page, { flaggedKeys: ["SMTP_HOST", "STRIPE_SECRET_KEY"] });
   let finish!: () => void;
   const wait = new Promise<void>((resolve) => { finish = resolve; });
   let submitted: unknown;
@@ -64,28 +64,6 @@ test("recreation keeps its confirmation through a missing pair and shows the rot
   await page.goto("/projects/app-staging");
   await page.getByRole("button", { name: "Recreate staging", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  const submit = dialog.getByRole("button", { name: "Recreate staging", exact: true });
-  await expect(submit).toBeDisabled();
-  await dialog.getByLabel(/Type app-staging to confirm/).fill("app-staging");
-  await dialog.getByLabel("Your password").fill("memberpassword123");
-  await expect(submit).toBeDisabled();
-  await dialog.getByRole("switch", { name: "Reuse staging's current environment values" }).click();
-  await submit.click();
-  await expect.poll(() => submitted).toEqual({ password: "memberpassword123", acknowledged: true });
-  await page.clock.fastForward(16_000);
-  await expect.poll(() => fixture.gapReads()).toBeGreaterThan(0);
-  await expect(page.getByText("No succeeded deployment yet")).toHaveCount(0);
-  await expect(dialog.getByText("Recreating…")).toBeVisible();
-  finish();
-  await expect(dialog.getByText("Created app-staging", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("fresh-webhook-secret", { exact: true })).toBeVisible();
-});
-
-test("recreation names the flagged staging values before confirmation", async ({ page }) => {
-  await panel(page, { flaggedKeys: ["SMTP_HOST", "STRIPE_SECRET_KEY"] });
-  await page.goto("/projects/app-staging");
-  await page.getByRole("button", { name: "Recreate staging", exact: true }).click();
-  const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("SMTP_HOST", { exact: true })).toBeVisible();
   await expect(dialog.getByText("STRIPE_SECRET_KEY", { exact: true })).toBeVisible();
   await expect(dialog.getByText(/Check these in staging's Environment tab/)).toBeVisible();
@@ -96,6 +74,15 @@ test("recreation names the flagged staging values before confirmation", async ({
   await expect(submit).toBeDisabled();
   await dialog.getByRole("switch", { name: "Reuse staging's current environment values" }).click();
   await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect.poll(() => submitted).toEqual({ password: "memberpassword123", acknowledged: true });
+  await page.clock.fastForward(16_000);
+  await expect.poll(() => fixture.gapReads()).toBeGreaterThan(0);
+  await expect(page.getByText("No succeeded deployment yet")).toHaveCount(0);
+  await expect(dialog.getByText("Recreating…")).toBeVisible();
+  finish();
+  await expect(dialog.getByText("Created app-staging", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("fresh-webhook-secret", { exact: true })).toBeVisible();
 });
 
 test("failed deletion stays visible for retry", async ({ page }) => {
