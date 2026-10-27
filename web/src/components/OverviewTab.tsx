@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { useCan } from "../api/auth";
 import { Link } from "react-router";
 import { useProject } from "../api/projects";
 import { useDeployments, useServices, deploymentTone, isActive, isCompleted } from "../api/deployments";
@@ -10,6 +11,9 @@ import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
 import { elapsed, formatBytes, formatDuration, timeAgo } from "../ui/format";
 import { repoName } from "./ProjectsTable";
+import StagingCard from "./StagingCard";
+import CreateStagingDialog from "./CreateStagingDialog";
+import { Button } from "../ui/Button";
 
 function stateTone(state: string): { tone: Tone; live?: boolean } {
   switch (state) {
@@ -43,6 +47,7 @@ export default function OverviewTab({ project }: { project: string }) {
             <span className="break-words font-mono text-xs">{services.data.note}</span>
           </Callout>
         )}
+        <StagingCard project={project} />
         <Card>
           <CardHeader
             title="Services"
@@ -144,6 +149,7 @@ export default function OverviewTab({ project }: { project: string }) {
         <LatestDeployment project={project} />
         <DomainsSummary project={project} />
         <SourceSummary project={project} />
+        <StagingOffer project={project} />
       </div>
     </div>
   );
@@ -189,7 +195,7 @@ function LatestDeployment({ project }: { project: string }) {
       <dl className="mt-3 space-y-1.5 text-sm">
         <div className="flex justify-between gap-3">
           <dt className="text-fg3">Triggered by</dt>
-          <dd className="truncate text-fg2">{d.triggered_by}</dd>
+          <dd className="truncate text-fg2">{d.promoted_from_number ? `promoted from staging #${d.promoted_from_number}` : d.triggered_by}</dd>
         </div>
         {d.git_commit && (
           <div className="flex justify-between gap-3">
@@ -257,7 +263,19 @@ function SourceSummary({ project }: { project: string }) {
           </div>
           <p className="text-fg3">
             Branch <span className="font-mono text-xs text-fg2">{p.git_branch || "main"}</span>
-            {p.auto_deploy ? ", deploys on every push." : ", deploys when you press Deploy."}
+            {p.staging ? (
+              <>
+                , deploys through{" "}
+                <Link to={`/projects/${p.staging}`} className="text-accent hover:underline">
+                  {p.staging}
+                </Link>
+                . Pushes go there first.
+              </>
+            ) : p.auto_deploy ? (
+              ", deploys on every push."
+            ) : (
+              ", deploys when you press Deploy."
+            )}
           </p>
         </div>
       ) : (
@@ -269,6 +287,26 @@ function SourceSummary({ project }: { project: string }) {
           , or connect a repository to deploy on push.
         </p>
       )}
+    </SideCard>
+  );
+}
+
+/** The offer to create a staging, for a member on a project that has none and is not one. */
+function StagingOffer({ project }: { project: string }) {
+  const p = useProject(project).data;
+  const can = useCan();
+  const [open, setOpen] = useState(false);
+  if (!p || p.staging || p.staging_of || !can("member")) return null;
+  return (
+    <SideCard title="Staging">
+      <p className="text-sm text-fg3">
+        Try changes on a copy of {project} with its own domains and data. Pushes then deploy to the copy, and {project} changes
+        only when you promote what passed.
+      </p>
+      <Button size="sm" icon="layers" className="mt-3" onClick={() => setOpen(true)}>
+        Create staging
+      </Button>
+      {open && <CreateStagingDialog live={project} onClose={() => setOpen(false)} />}
     </SideCard>
   );
 }

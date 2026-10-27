@@ -576,6 +576,10 @@ paths:
         "404": { description: Not found }
     delete:
       summary: Delete a project, containers stopped, directory removed (member; requires password re-entry unless the account is OAuth-only)
+      description: |
+        Deleting a staging also removes its volumes (compose down -v); a live
+        project keeps them. A live project that has a staging cannot be
+        deleted until the staging is.
       operationId: deleteProject
       security: [{ session: [] }]
       requestBody:
@@ -594,6 +598,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+        "409": { description: "has_staging: delete the project's staging first; shared_volume: a staging's compose file names a volume with a fixed name: that deleting would remove" }
         "429": { description: "rate_limited: more than 20 credential attempts from this address in a minute" }
 
   /projects/scan:
@@ -759,6 +764,113 @@ paths:
         "400": { description: "bad_request: the deployment did not succeed, or has no image digests or Git commit" }
         "404": { description: "not_found: no such deployment" }
         "409": { description: "conflict: a deployment is already running" }
+
+  /projects/{name}/deployments/{number}/promote:
+    post:
+      summary: Promote this staging deployment to live (member)
+      description: |
+        Called on the staging project. Queues a live deployment that runs the
+        commit and image digests this succeeded staging deployment ran,
+        through the rollback path. The commit must be on live's branch.
+        Digests are kept only for services live's compose file defines.
+      operationId: promote
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "201": { description: "Live deployment queued, with promoted_from_number" }
+        "404": { description: "not_found: no such deployment" }
+        "409": { description: "conflict: live is deploying; not_promotable: the reason, such as a commit not on live's branch" }
+
+  /projects/{name}/staging/preflight:
+    post:
+      summary: Check a project for a staging copy (member)
+      description: |
+        Changes nothing. Returns blockers with their fix, warnings, environment
+        values that probably reach the outside world (masked without secrets
+        access), the default staging domains and hostname rewrites, what a
+        data copy moves with sizes, and the free disk. The optional body is the
+        create request, to check the person's choices.
+      operationId: stagingPreflight
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: "{blockers, warnings, flagged_env, domains, rewrites, data, projects_free_bytes, docker_free_bytes, can_create}" }
+        "404": { description: Not found }
+
+  /projects/{name}/staging:
+    get:
+      summary: Compare a project with its staging
+      description: |
+        name may be the live project or its staging. Returns both deployments,
+        the promotable staging deployment or why Promote is unavailable, the
+        hostname rewrites and the compose files that differ.
+      operationId: getStaging
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: "{live, staging, auto_promote, live_current, promotable, promote_blocked, rewrites, drift}" }
+        "404": { description: The project has no staging }
+    post:
+      summary: Create the project's staging (member)
+      description: |
+        Copies live's files, environment and, with copy_data, its volumes and
+        database into <name>-staging, gives it its own domains and queues its
+        first deployment. From then on pushes deploy staging, not live.
+        acknowledged is required when the preflight flags environment values.
+      operationId: createStaging
+      security: [{ session: [] }, { bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch: { type: string }
+                domains:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      live: { type: string }
+                      staging: { type: string }
+                env: { type: object, additionalProperties: { type: string } }
+                copy_data: { type: boolean }
+                auto_promote: { type: boolean }
+                acknowledged: { type: boolean }
+      responses:
+        "201": { description: "{project, result: {deployment, rewritten, skipped, webhook_secret?, webhook_registered}}" }
+        "400": { description: "acknowledgement_required, or bad_request" }
+        "404": { description: Not found }
+        "409": { description: "staging_blocked: the preflight found a blocker; conflict: the staging already exists" }
+    put:
+      summary: Change a staging's settings (member)
+      description: Called on the staging project.
+      operationId: updateStaging
+      security: [{ session: [] }, { bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [auto_promote]
+              properties:
+                auto_promote: { type: boolean }
+      responses:
+        "204": { description: Updated }
+        "404": { description: The project is not a staging }
+
+  /projects/{name}/staging/diff/{file}:
+    get:
+      summary: One compose file from live and from staging (member)
+      description: |
+        name may be the live project or its staging. for_live is staging's
+        file with the staging hostnames put back to live's, which is what
+        writing it to live with PUT /projects/{live}/files/{file} copies
+        across. A side without the file is an empty string. Values are not
+        masked, so this is member only.
+      operationId: stagingDiff
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: "{file, live, for_live}" }
+        "400": { description: Not a compose file the drift list compares }
+        "404": { description: The project has no staging }
 
   /projects/{name}/domains:
     get:

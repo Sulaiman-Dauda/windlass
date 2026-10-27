@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -82,10 +84,52 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 		return streamCmd(cmd, out)
 	}
 
+	// requireOnBranch runs after a fetch and before any checkout, so a
+	// refused commit leaves the working tree as it was.
+	requireOnBranch := func() error {
+		if !req.RequireOnBranch {
+			return nil
+		}
+		if !commitRe.MatchString(req.Commit) {
+			return fmt.Errorf("invalid commit %q", req.Commit)
+		}
+		check := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", req.Commit, "origin/"+req.Branch) //nolint:gosec // G204: commit is checked hex
+		check.Dir = target
+		check.Env = env
+		err := check.Run()
+		var exit *exec.ExitError
+		if err == nil {
+			return nil
+		}
+		if !errors.As(err, &exit) {
+			return fmt.Errorf("git merge-base: %w", err)
+		}
+		// 1 means not an ancestor. A commit the branch's fetch did not bring
+		// is on no branch here at all, so that is the same answer.
+		if exit.ExitCode() == 1 {
+			return agent.ErrNotOnBranch
+		}
+		known := exec.CommandContext(ctx, "git", "cat-file", "-e", req.Commit+"^{commit}") //nolint:gosec // G204: as above
+		known.Dir = target
+		if known.Run() != nil {
+			return agent.ErrNotOnBranch
+		}
+		return fmt.Errorf("git merge-base: %w", err)
+	}
+
 	if _, err := os.Stat(filepath.Join(target, ".git")); err == nil {
-		// Existing checkout: fetch and hard-reset to the requested ref.
-		if err := run("fetch", "--prune", "origin"); err != nil {
+		// Existing checkout: fetch and hard-reset to the requested ref. The
+		// first clone is single-branch, so a plain fetch brings only that
+		// branch; naming the branch also fetches one chosen since.
+		fetch := []string{"fetch", "--prune", "origin"}
+		if req.Branch != "" {
+			fetch = append(fetch, "+refs/heads/"+req.Branch+":refs/remotes/origin/"+req.Branch)
+		}
+		if err := run(fetch...); err != nil {
 			return agent.GitSyncResult{}, fmt.Errorf("git fetch: %w", err)
+		}
+		if err := requireOnBranch(); err != nil {
+			return agent.GitSyncResult{}, err
 		}
 		ref := req.Commit
 		if ref == "" {
@@ -109,14 +153,21 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 			{"git init", []string{"init", "-q"}},
 			{"git remote add", []string{"remote", "add", "-t", req.Branch, "--", "origin", req.URL}},
 			{"git fetch", []string{"fetch", "--prune", "origin"}},
+			{"", nil}, // requireOnBranch
 			{"git checkout " + ref, []string{"checkout", "--force", "--detach", ref}},
 		}
 		for _, step := range steps {
-			if err := run(step.args...); err != nil {
+			var err error
+			if step.args == nil {
+				err = requireOnBranch()
+			} else if err = run(step.args...); err != nil {
+				err = fmt.Errorf("%s: %w", step.name, err)
+			}
+			if err != nil {
 				// A half-made repository would pass for a checkout next
 				// time, and every sync would then fail on its remote.
 				_ = os.RemoveAll(filepath.Join(target, ".git"))
-				return agent.GitSyncResult{}, fmt.Errorf("%s: %w", step.name, err)
+				return agent.GitSyncResult{}, err
 			}
 		}
 	} else {
@@ -127,6 +178,9 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 		cmd.Env = env
 		if err := streamCmd(cmd, out); err != nil {
 			return agent.GitSyncResult{}, fmt.Errorf("git clone: %w", err)
+		}
+		if err := requireOnBranch(); err != nil {
+			return agent.GitSyncResult{}, err
 		}
 		if req.Commit != "" {
 			if err := run("checkout", "--force", "--detach", req.Commit); err != nil {
@@ -160,6 +214,10 @@ func gitConfigEnv(env []string, key, value string) []string {
 	}
 	return append(env, name+param)
 }
+
+// commitRe matches an abbreviated or full commit hash, which cannot be read
+// as an option.
+var commitRe = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 
 func basicAuth(user, pass string) string {
 	return base64Encode(user + ":" + pass)

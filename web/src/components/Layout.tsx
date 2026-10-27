@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, NavLink, Outlet, useLocation, useMatch } from "react-router";
 import { useCan, useLogout, type User } from "../api/auth";
-import { useProjects } from "../api/projects";
+import { useProjects, withStagingNested } from "../api/projects";
 import { useMetrics, useUpdateCheck } from "../api/system";
 import { Wordmark } from "../ui/Logo";
 import { Icon, type IconName } from "../ui/Icon";
@@ -108,7 +108,7 @@ function Sidebar({ user, onSearch }: { user: User; onSearch: () => void }) {
   const projects = useProjects();
   const update = useUpdateCheck(user.role === "admin");
   const list = projects.data ?? [];
-  const shown = list.slice(0, 12);
+  const shown = withStagingNested(list).slice(0, 12);
 
   return (
     <div className="flex h-full flex-col px-3 pb-3 pt-4">
@@ -171,7 +171,7 @@ function Sidebar({ user, onSearch }: { user: User; onSearch: () => void }) {
       </div>
       <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
         {shown.map((p) => (
-          <ProjectLink key={p.name} name={p.name} />
+          <ProjectLink key={p.name} name={p.name} nested={!!p.staging_of && list.some((x) => x.name === p.staging_of)} />
         ))}
         {list.length > shown.length && (
           <Link to="/projects" className="flex h-8 items-center px-2.5 text-xs font-medium text-fg3 hover:text-fg">
@@ -197,13 +197,14 @@ function Sidebar({ user, onSearch }: { user: User; onSearch: () => void }) {
   );
 }
 
-function ProjectLink({ name }: { name: string }) {
+function ProjectLink({ name, nested }: { name: string; nested?: boolean }) {
   const active = useMatch({ path: `/projects/${name}`, end: false });
   return (
     <Link
       to={`/projects/${name}`}
       className={cn(
-        "flex h-8 items-center gap-2.5 rounded-control px-2.5 text-sm transition-colors duration-150",
+        "flex h-8 items-center gap-2.5 rounded-control pr-2.5 text-sm transition-colors duration-150",
+        nested ? "pl-7" : "pl-2.5",
         active ? "bg-[color-mix(in_oklab,var(--fg)_6%,transparent)] font-semibold text-fg" : "font-medium text-fg2 hover:bg-[color-mix(in_oklab,var(--fg)_5%,transparent)] hover:text-fg",
       )}
     >

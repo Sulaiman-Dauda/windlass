@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/proxy"
 	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/secrets"
+	"github.com/windlass-dev/windlass/internal/staging"
 	"github.com/windlass-dev/windlass/internal/store"
 	"github.com/windlass-dev/windlass/internal/store/db"
 	"github.com/windlass-dev/windlass/migrations"
@@ -35,6 +37,7 @@ import (
 
 type testEnv struct {
 	handler    http.Handler
+	sqlDB      *sql.DB
 	queries    *db.Queries
 	agent      *fake.Fake
 	api        *api.API
@@ -97,12 +100,14 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(stopRunner)
 	go runner.Run(runnerCtx)
 
+	proxySvc := proxy.New(queries, ag, projectSvc, bus, logger)
 	a := &api.API{
 		Auth:       authSvc,
 		Audit:      audit.New(queries, logger),
 		Projects:   projectSvc,
 		Deploy:     deploySvc,
-		Proxy:      proxy.New(queries, ag, projectSvc, bus, logger),
+		Proxy:      proxySvc,
+		Staging:    staging.New(queries, ag, projectSvc, deploySvc, gitSvc, proxySvc, logger),
 		Git:        gitSvc,
 		Registries: registries.New(queries, box, logger),
 		Backups:    backups.New(queries, ag, projectSvc, box, bus, logger),
@@ -117,7 +122,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	return &testEnv{handler: h, queries: queries, agent: ag, api: a, setupToken: token}
+	return &testEnv{handler: h, sqlDB: sqlDB, queries: queries, agent: ag, api: a, setupToken: token}
 }
 
 // login creates the admin (if needed) and returns a session cookie.

@@ -26,6 +26,8 @@ type deploymentDTO struct {
 	StartedAt   string `json:"started_at,omitempty"`
 	FinishedAt  string `json:"finished_at,omitempty"`
 	CreatedAt   string `json:"created_at"`
+	// PromotedFromNumber is the staging deployment this one promoted.
+	PromotedFromNumber int64 `json:"promoted_from_number,omitempty"`
 }
 
 func toDeploymentDTO(d db.Deployment) deploymentDTO {
@@ -42,6 +44,18 @@ func toDeploymentDTO(d db.Deployment) deploymentDTO {
 	}
 }
 
+// deploymentDTO is toDeploymentDTO with the number of the staging
+// deployment a promotion came from, which belongs to another project.
+func (a *API) deploymentDTO(ctx context.Context, d db.Deployment) deploymentDTO {
+	dto := toDeploymentDTO(d)
+	if d.PromotedFrom.Valid {
+		if from, err := a.Queries.GetDeploymentByID(ctx, d.PromotedFrom.Int64); err == nil {
+			dto.PromotedFromNumber = from.Number
+		}
+	}
+	return dto
+}
+
 func (a *API) deploymentRoutes(r chi.Router) {
 	r.Get("/", a.handleListDeployments)
 	r.Get("/{number}", a.handleGetDeployment)
@@ -50,6 +64,7 @@ func (a *API) deploymentRoutes(r chi.Router) {
 		r.Use(auth.RequireRole("member"))
 		r.Post("/", a.handleCreateDeployment)
 		r.Post("/{number}/rollback", a.handleRollback)
+		r.Post("/{number}/promote", a.handlePromote)
 	})
 }
 
@@ -81,7 +96,7 @@ func (a *API) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]deploymentDTO, 0, len(list))
 	for _, d := range list {
-		out = append(out, toDeploymentDTO(d))
+		out = append(out, a.deploymentDTO(r.Context(), d))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -109,7 +124,7 @@ func (a *API) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, toDeploymentDTO(d))
+	writeJSON(w, http.StatusOK, a.deploymentDTO(r.Context(), d))
 }
 
 func (a *API) handleDeploymentEvents(w http.ResponseWriter, r *http.Request) {

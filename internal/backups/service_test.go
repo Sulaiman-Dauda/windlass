@@ -11,6 +11,7 @@ import (
 
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/agent/fake"
+	"github.com/windlass-dev/windlass/internal/dbdetect"
 	"github.com/windlass-dev/windlass/internal/store"
 	"github.com/windlass-dev/windlass/internal/store/db"
 	"github.com/windlass-dev/windlass/migrations"
@@ -59,9 +60,9 @@ func TestDatabaseEngine(t *testing.T) {
 		{"web", "ghost:5-alpine", "", false},
 		{"cache", "redis:7", "", false},
 	} {
-		got, exact := databaseEngine(agent.Container{ComposeService: tt.service, Image: tt.image})
+		got, exact := dbdetect.Engine(tt.service, tt.image)
 		if got != tt.want || exact != tt.exact {
-			t.Errorf("databaseEngine(%s, %s) = %q exact=%v, want %q exact=%v", tt.service, tt.image, got, exact, tt.want, tt.exact)
+			t.Errorf("Engine(%s, %s) = %q exact=%v, want %q exact=%v", tt.service, tt.image, got, exact, tt.want, tt.exact)
 		}
 	}
 }

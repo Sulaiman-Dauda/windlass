@@ -26,9 +26,10 @@ func (e execLocal) Start(ctx context.Context, req agent.ExecReq) (agent.ExecSess
 		cmd = []string{"/bin/sh"}
 	}
 	exec, err := cli.ExecCreate(ctx, req.ContainerID, client.ExecCreateOptions{
-		// Only a terminal takes input. Without a TTY, an attached stdin that
-		// nobody writes to leaves a password prompt waiting forever.
-		AttachStdin:  req.TTY,
+		// Only a terminal, or a caller that streams data in and then ends it
+		// with CloseWrite, takes input. Without either, an attached stdin
+		// that nobody writes to leaves a password prompt waiting forever.
+		AttachStdin:  req.TTY || req.Stdin,
 		AttachStdout: true,
 		AttachStderr: true,
 		TTY:          req.TTY,
@@ -141,6 +142,10 @@ func (t *tailBuffer) String() string {
 func (s *execSession) Write(p []byte) error {
 	_, err := s.attach.Conn.Write(p)
 	return err
+}
+
+func (s *execSession) CloseWrite() error {
+	return s.attach.CloseWrite()
 }
 
 func (s *execSession) Resize(cols, rows uint16) error {

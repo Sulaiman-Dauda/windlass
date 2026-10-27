@@ -164,3 +164,17 @@ func TestSubcommandSkipsFiles(t *testing.T) {
 		}
 	}
 }
+
+// compose config folds env_file values into environment, and prints a key
+// set without a value as null.
+func TestComposeConfigReadsEnvironment(t *testing.T) {
+	var cfg composeConfig
+	payload := `{"services":{"web":{"image":"nginx","environment":{"STRIPE_SECRET_KEY":"sk_x","UNSET":null}}}}`
+	if err := json.Unmarshal([]byte(payload), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	env := cfg.Services["web"].Environment
+	if len(env) != 2 || env["STRIPE_SECRET_KEY"] == nil || *env["STRIPE_SECRET_KEY"] != "sk_x" || env["UNSET"] != nil {
+		t.Errorf("environment = %v", env)
+	}
+}

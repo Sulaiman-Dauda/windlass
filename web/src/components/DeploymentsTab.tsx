@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useCan } from "../api/auth";
+import { useProject } from "../api/projects";
+import { useStagingStatus } from "../api/staging";
+import { usePromoteAction } from "./StagingCard";
 import {
   PIPELINE,
   useDeploymentEvents,
@@ -80,7 +83,9 @@ export default function DeploymentsTab({ project }: { project: string }) {
                   <span className="ml-auto text-xs text-fg3">{timeAgo(d.created_at)}</span>
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 pl-5 text-xs text-fg3">
-                  <span className="truncate">{d.triggered_by}</span>
+                  <span className="truncate">
+                    {d.promoted_from_number ? `promoted from #${d.promoted_from_number}` : d.triggered_by}
+                  </span>
                   {d.git_commit && <span className="font-mono">· {d.git_commit.slice(0, 7)}</span>}
                   <Duration d={d} className="ml-auto" />
                 </div>
@@ -123,6 +128,11 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
   const stages = stageStates(eventLog, d.status);
   const active = isActive(d.status);
   const canRollBack = can("member") && d.status === "succeeded" && d.number !== latest;
+  const p = useProject(project).data;
+  const staging = useStagingStatus(project, !!(p?.staging || p?.staging_of)).data;
+  const promote = usePromoteAction(staging);
+  const canPromote =
+    can("member") && !!p?.staging_of && !!staging && !staging.promote_blocked && staging.promotable?.number === d.number;
 
   const doRollback = async () => {
     const ok = await confirm({
@@ -155,6 +165,14 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
             <span className="inline-flex items-center gap-1.5">
               <Icon name="user" size={13} /> {d.triggered_by}
             </span>
+            {d.promoted_from_number && p?.staging && (
+              <Link
+                to={`/projects/${p.staging}/deployments?d=${d.promoted_from_number}`}
+                className="inline-flex items-center gap-1.5 hover:text-accent"
+              >
+                <Icon name="layers" size={13} /> Promoted from staging #{d.promoted_from_number}
+              </Link>
+            )}
             {d.git_commit && (
               <span className="inline-flex items-center gap-1.5 font-mono">
                 <Icon name="gitCommit" size={13} /> {d.git_commit.slice(0, 7)}
@@ -171,6 +189,11 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          {canPromote && (
+            <Button size="sm" icon="deploy" onClick={promote.run} loading={promote.pending}>
+              Promote to {staging!.live}
+            </Button>
+          )}
           {canRollBack && (
             <Button size="sm" icon="rollback" onClick={doRollback} loading={rollback.isPending}>
               Roll back to this

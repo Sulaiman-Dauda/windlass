@@ -16,6 +16,8 @@ A Compose control plane that does not own your containers.
   deployments
 - [Domains and HTTPS](./domains-and-https.md), Caddy routes, certificates, and exactly
   what Windlass will and will not touch
+- [Staging](./staging.md), a copy of a project that pushes reach first, promotion, and what
+  a staging copy does and does not keep away from live
 - [Backups and restore](./backups-and-restore.md), archives, database dumps, S3 and what a
   restore does not do
 - [Users and access](./users-and-access.md), roles, TOTP, OAuth sign-in and the privilege

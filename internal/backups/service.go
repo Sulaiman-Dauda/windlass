@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/windlass-dev/windlass/internal/agent"
+	"github.com/windlass-dev/windlass/internal/dbdetect"
 	"github.com/windlass-dev/windlass/internal/events"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/secrets"
@@ -262,7 +263,7 @@ func (s *Service) dumpDatabase(ctx context.Context, project string) ([]byte, boo
 	defer cancel()
 	sess, err := s.agent.Exec().Start(dumpCtx, agent.ExecReq{
 		ContainerID: target.ID,
-		Cmd:         []string{"sh", "-c", dumpCommands[engine]},
+		Cmd:         []string{"sh", "-c", dbdetect.DumpCommands[engine]},
 	})
 	if err != nil {
 		s.logger.Warn("db dump exec", "project", project, "error", err)
@@ -285,81 +286,9 @@ func (s *Service) dumpDatabase(ctx context.Context, project string) ([]byte, boo
 	return []byte(out.String()), true
 }
 
-// dumpCommands run inside the database container through sh, so the
-// variables expand from the container's environment. They read the official
-// images' variables and, for Postgres, Bitnami's POSTGRESQL_* names, so the
-// dump is of the application's database rather than an empty default one.
-// Postgres falls back to the postgres user and a database named after the
-// user, and MariaDB 11 ships mariadb-dump without the mysqldump name. Neither
-// may prompt: pg_dump gets -w, and each password is passed only when the
-// environment has one, so a database without usable credentials fails at once
-// instead of waiting.
-var dumpCommands = map[string]string{
-	"postgres": `u="${POSTGRES_USER:-${POSTGRESQL_USERNAME:-postgres}}"; ` +
-		`db="${POSTGRES_DB:-${POSTGRESQL_DATABASE:-$u}}"; ` +
-		`pw="${POSTGRES_PASSWORD:-$POSTGRESQL_PASSWORD}"; ` +
-		`[ -n "$pw" ] && export PGPASSWORD="$pw"; ` +
-		`exec pg_dump -w -U "$u" "$db"`,
-	"mysql": `dump=mysqldump; command -v mariadb-dump >/dev/null 2>&1 && dump=mariadb-dump; ` +
-		`pw="${MYSQL_ROOT_PASSWORD:-$MARIADB_ROOT_PASSWORD}"; ` +
-		`set -- --all-databases -uroot; [ -n "$pw" ] && set -- "$@" -p"$pw"; ` +
-		`exec "$dump" "$@"`,
-}
-
 // databaseContainer returns the project's database container and its engine.
-// The engine is empty when the project has none. A running container beats a
-// stopped one, and an exact name match beats a looser one, so a real database
-// is chosen over something like postgres-exporter in the same project.
 func databaseContainer(containers []agent.Container) (agent.Container, string) {
-	var best agent.Container
-	var bestEngine string
-	bestRank := 0
-	for _, c := range containers {
-		engine, exact := databaseEngine(c)
-		if engine == "" {
-			continue
-		}
-		rank := 1
-		if exact {
-			rank++
-		}
-		if c.State == "running" {
-			rank += 2
-		}
-		if rank > bestRank {
-			best, bestEngine, bestRank = c, engine, rank
-		}
-	}
-	return best, bestEngine
-}
-
-// databaseEngine recognises a database container by its compose service name
-// or image. An exact match is a service or image named after the database,
-// ignoring registry, namespace and tag. A looser match is any image whose
-// repository path mentions it, such as mysql/community-server or
-// bitnami/postgresql-repmgr.
-func databaseEngine(c agent.Container) (engine string, exact bool) {
-	repo := strings.ToLower(c.Image)
-	repo, _, _ = strings.Cut(repo, "@")
-	if i := strings.LastIndex(repo, ":"); i > strings.LastIndex(repo, "/") {
-		repo = repo[:i]
-	}
-	name := repo[strings.LastIndex(repo, "/")+1:]
-	for _, n := range []string{strings.ToLower(c.ComposeService), name} {
-		switch n {
-		case "postgres", "postgresql", "postgis", "pgvector", "timescaledb", "timescaledb-ha":
-			return "postgres", true
-		case "mysql", "mysql-server", "mariadb", "percona-server":
-			return "mysql", true
-		}
-	}
-	switch {
-	case strings.Contains(repo, "postgres"):
-		return "postgres", false
-	case strings.Contains(repo, "mysql") || strings.Contains(repo, "mariadb"):
-		return "mysql", false
-	}
-	return "", false
+	return dbdetect.Best(containers)
 }
 
 // ---------------------------------------------------------------------------

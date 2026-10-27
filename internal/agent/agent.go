@@ -12,6 +12,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"regexp"
 	"time"
@@ -79,6 +80,11 @@ type ComposeAgent interface {
 	// Config validates and resolves the project via `compose config`,
 	// returning the fully-resolved model (for image refs, ports, volumes).
 	Config(ctx context.Context, project string) (ResolvedConfig, error)
+	// Create runs `compose create`, which makes the project's network,
+	// volumes and containers without starting anything. A staging seed uses
+	// it so the volumes exist, labelled as Compose's own, before data is
+	// copied into them.
+	Create(ctx context.Context, project string, out LogSink) error
 }
 
 type ComposeUpReq struct {
@@ -87,6 +93,10 @@ type ComposeUpReq struct {
 	// e.g. compose.rollback.yaml for digest-pinned rollbacks.
 	ExtraFiles    []string `json:"extra_files,omitempty"`
 	RemoveOrphans bool     `json:"remove_orphans"`
+	// Services limits the up to these services; empty means all of them.
+	Services []string `json:"services,omitempty"`
+	// NoDeps starts only the named services, not what they depend on.
+	NoDeps bool `json:"no_deps,omitempty"`
 }
 
 type ServiceStatus struct {
@@ -110,6 +120,43 @@ type PortBinding struct {
 type ResolvedConfig struct {
 	Services     map[string]ResolvedService `json:"services"`
 	HealthChecks []ApplicationHealthCheck   `json:"health_checks,omitempty"`
+	// Volumes and Networks are the top-level declarations, keyed by the
+	// name the compose file uses.
+	Volumes  map[string]ResolvedVolume  `json:"volumes,omitempty"`
+	Networks map[string]ResolvedNetwork `json:"networks,omitempty"`
+	// WorkingDir is the project directory on the node. Bind mounts inside it
+	// belong to the project; anything outside it is shared with the host.
+	WorkingDir string `json:"working_dir,omitempty"`
+}
+
+// ResolvedVolume is a top-level volume. Name is the Docker volume name:
+// "<project>_<key>" unless the file sets name:, in which case two projects
+// using the file share the one volume.
+type ResolvedVolume struct {
+	Name     string `json:"name"`
+	External bool   `json:"external,omitempty"`
+}
+
+type ResolvedNetwork struct {
+	Name     string `json:"name"`
+	External bool   `json:"external,omitempty"`
+}
+
+// Mount is one entry of a service's volumes. Source is the volume key for
+// a named volume, an absolute path for a bind, and empty for an anonymous
+// volume or tmpfs.
+type Mount struct {
+	Type     string `json:"type"` // "volume" | "bind" | "tmpfs" | ...
+	Source   string `json:"source,omitempty"`
+	Target   string `json:"target"`
+	ReadOnly bool   `json:"read_only,omitempty"`
+}
+
+// PublishedPort is a port the service binds on the host.
+type PublishedPort struct {
+	HostIP    string `json:"host_ip,omitempty"`
+	Published string `json:"published"`
+	Target    int    `json:"target"`
 }
 
 type ApplicationHealthCheck struct {
@@ -126,6 +173,16 @@ type ResolvedService struct {
 	ContainerPorts []int   `json:"container_ports,omitempty"`
 	MemoryLimit    int64   `json:"memory_limit,omitempty"`
 	CPULimit       float64 `json:"cpu_limit,omitempty"`
+
+	ContainerName  string          `json:"container_name,omitempty"`
+	PublishedPorts []PublishedPort `json:"published_ports,omitempty"`
+	NetworkMode    string          `json:"network_mode,omitempty"`
+	// Networks are the keys of the top-level networks the service joins.
+	Networks []string `json:"networks,omitempty"`
+	Mounts   []Mount  `json:"mounts,omitempty"`
+	// Environment is what the container gets, env_file values included. It
+	// holds secrets, so it is never encoded.
+	Environment map[string]string `json:"-"`
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +208,15 @@ type DockerAgent interface {
 	// Holding it only inside the panel would make the panel load-bearing for
 	// the application runtime, which is the one thing it promises not to be.
 	RegistryLogin(ctx context.Context, host, username, secret string) error
+	// CopyVolume copies every file of volume from into volume to, keeping
+	// ownership and modes, in a short-lived helper container with no
+	// network that mounts from read-only. Both volumes must exist.
+	CopyVolume(ctx context.Context, from, to string, out LogSink) error
+	// VolumeSizes reports the size in bytes of each volume Docker knows,
+	// keyed by volume name. A size Docker cannot tell is left out.
+	VolumeSizes(ctx context.Context) (map[string]int64, error)
+	// FreeSpace reports the bytes free where Docker keeps its volumes.
+	FreeSpace(ctx context.Context) (uint64, error)
 }
 
 type ImageDiskUsage struct {
@@ -245,6 +311,9 @@ type Route struct {
 	// Upstream is the dial target, e.g. "crm-web-1:3000" or "127.0.0.1:3000".
 	Upstream string `json:"upstream"`
 	TLS      bool   `json:"tls"` // automatic HTTPS
+	// NoIndex adds "X-Robots-Tag: noindex" to every response, so search
+	// engines leave a staging site out.
+	NoIndex bool `json:"no_index,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +346,16 @@ type FSAgent interface {
 	BackupsDir(ctx context.Context) (string, error)
 	// RemoveArchive deletes an archive file inside the backups dir.
 	RemoveArchive(ctx context.Context, archivePath string) error
+	// CopyProject copies project from into project to, which must exist,
+	// leaving out the top-level entries named in skip. Symbolic links are
+	// kept only when they point inside to. Entries that cannot be read are
+	// returned rather than failing the copy.
+	CopyProject(ctx context.Context, from, to string, skip []string) (skipped []string, err error)
+	// Usage reports the bytes a project directory holds, leaving out the
+	// top-level entries named in skip.
+	Usage(ctx context.Context, project string, skip []string) (int64, error)
+	// FreeSpace reports the bytes free on the projects volume.
+	FreeSpace(ctx context.Context) (uint64, error)
 }
 
 type ArchiveInfo struct {
@@ -307,6 +386,9 @@ type ExecReq struct {
 	TTY         bool     `json:"tty"`
 	Cols        uint16   `json:"cols"`
 	Rows        uint16   `json:"rows"`
+	// Stdin attaches standard input without a TTY, for streaming data into
+	// a command. The caller ends the input with CloseWrite.
+	Stdin bool `json:"stdin,omitempty"`
 }
 
 type ExecSession interface {
@@ -319,6 +401,9 @@ type ExecSession interface {
 	// Wait blocks until the session ends and returns the exit code. Without a
 	// TTY, a non-zero exit also returns an error carrying the end of stderr.
 	Wait() (int, error)
+	// CloseWrite ends the command's input, as end of file, while its output
+	// keeps flowing.
+	CloseWrite() error
 	Close() error
 }
 
@@ -364,7 +449,14 @@ type GitSyncReq struct {
 	// Token is injected as HTTP basic auth for private repositories. It is
 	// never written to disk.
 	Token string `json:"token,omitempty"`
+	// RequireOnBranch refuses Commit, before anything is checked out, unless
+	// it is on Branch at the remote. A promotion uses it so live only ever
+	// runs code that has been merged into the branch it deploys.
+	RequireOnBranch bool `json:"require_on_branch,omitempty"`
 }
+
+// ErrNotOnBranch is returned by GitSync when RequireOnBranch refuses a commit.
+var ErrNotOnBranch = errors.New("commit is not on the branch")
 
 type GitSyncResult struct {
 	Commit string `json:"commit"` // resolved HEAD after sync

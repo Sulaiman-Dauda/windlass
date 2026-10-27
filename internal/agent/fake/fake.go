@@ -7,7 +7,9 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -54,6 +56,30 @@ type Fake struct {
 
 	// GitCommit is returned by Host().GitSync.
 	GitCommit string
+	// OffBranch lists commits GitSync treats as not on their branch, for
+	// requests that set RequireOnBranch.
+	OffBranch map[string]bool
+
+	// DownVolumes records the projects taken down with their volumes.
+	DownVolumes []string
+	// UpRequests records every Compose().Up request in order.
+	UpRequests []agent.ComposeUpReq
+	// CopiedVolumes records Docker().CopyVolume calls as "from>to".
+	CopiedVolumes []string
+	// Volumes is what Docker().VolumeSizes reports.
+	Volumes map[string]int64
+	// DockerFree and ProjectsFree are the free bytes reported for Docker's
+	// root directory and the projects volume.
+	DockerFree   uint64
+	ProjectsFree uint64
+
+	// ExecScripts answer exec in a container, keyed by container ID, with
+	// fixed output and exit code instead of the echo. ExecInput collects what
+	// was written to a scripted session started with Stdin, and ExecCmds the
+	// shell command each scripted session ran.
+	ExecScripts map[string]ExecScript
+	ExecInput   map[string][]byte
+	ExecCmds    map[string][]string
 
 	// Archives maps archive paths to project-file snapshots.
 	Archives map[string]map[string][]byte
@@ -80,6 +106,13 @@ func New() *Fake {
 		GitCommit:      "0000000000000000000000000000000000000000",
 		Archives:       map[string]map[string][]byte{},
 		HTTPResponses:  map[string]agent.HTTPCheckResult{},
+		OffBranch:      map[string]bool{},
+		Volumes:        map[string]int64{},
+		ExecScripts:    map[string]ExecScript{},
+		ExecInput:      map[string][]byte{},
+		ExecCmds:       map[string][]string{},
+		DockerFree:     100 << 30,
+		ProjectsFree:   100 << 30,
 	}
 }
 
@@ -135,12 +168,27 @@ func (c composeFake) Up(ctx context.Context, req agent.ComposeUpReq, out agent.L
 	if err := c.f.record(fmt.Sprintf("compose.up(%s)", req.Project), nil); err != nil {
 		return err
 	}
+	c.f.mu.Lock()
+	c.f.UpRequests = append(c.f.UpRequests, req)
+	c.f.mu.Unlock()
 	c.f.emit(out, c.f.ComposeLog...)
 	return nil
 }
 
+func (c composeFake) Create(ctx context.Context, project string, out agent.LogSink) error {
+	return c.f.record(fmt.Sprintf("compose.create(%s)", project), nil)
+}
+
 func (c composeFake) Down(ctx context.Context, project string, removeVolumes bool, out agent.LogSink) error {
-	return c.f.record(fmt.Sprintf("compose.down(%s)", project), nil)
+	if err := c.f.record(fmt.Sprintf("compose.down(%s)", project), nil); err != nil {
+		return err
+	}
+	if removeVolumes {
+		c.f.mu.Lock()
+		c.f.DownVolumes = append(c.f.DownVolumes, project)
+		c.f.mu.Unlock()
+	}
+	return nil
 }
 
 func (c composeFake) Stop(ctx context.Context, project string, out agent.LogSink) error {
@@ -442,6 +490,53 @@ func (s fsFake) RestoreProject(ctx context.Context, project, archivePath string)
 	return nil
 }
 
+func (s fsFake) CopyProject(ctx context.Context, from, to string, skip []string) ([]string, error) {
+	if err := s.f.record(fmt.Sprintf("fs.copy(%s,%s)", from, to), nil); err != nil {
+		return nil, err
+	}
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	src, ok := s.f.Files[from]
+	if !ok {
+		return nil, fs.ErrNotExist
+	}
+	if s.f.Files[to] == nil {
+		return nil, fs.ErrNotExist
+	}
+	for name, data := range src {
+		top, _, _ := strings.Cut(name, "/")
+		if !slices.Contains(skip, top) {
+			s.f.Files[to][name] = append([]byte(nil), data...)
+		}
+	}
+	return nil, nil
+}
+
+func (s fsFake) Usage(ctx context.Context, project string, skip []string) (int64, error) {
+	if err := s.f.record(fmt.Sprintf("fs.usage(%s)", project), nil); err != nil {
+		return 0, err
+	}
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	var total int64
+	for name, data := range s.f.Files[project] {
+		top, _, _ := strings.Cut(name, "/")
+		if !slices.Contains(skip, top) {
+			total += int64(len(data))
+		}
+	}
+	return total, nil
+}
+
+func (s fsFake) FreeSpace(ctx context.Context) (uint64, error) {
+	if err := s.f.record("fs.free", nil); err != nil {
+		return 0, err
+	}
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	return s.f.ProjectsFree, nil
+}
+
 func (s fsFake) RemoveProject(ctx context.Context, project string) error {
 	if err := s.f.record(fmt.Sprintf("fs.remove(%s)", project), nil); err != nil {
 		return err
@@ -461,7 +556,97 @@ func (e execFake) Start(ctx context.Context, req agent.ExecReq) (agent.ExecSessi
 	if err := e.f.record(fmt.Sprintf("exec.start(%s)", req.ContainerID), nil); err != nil {
 		return nil, err
 	}
+	e.f.mu.Lock()
+	script, ok := e.f.ExecScripts[req.ContainerID]
+	if ok {
+		e.f.ExecCmds[req.ContainerID] = append(e.f.ExecCmds[req.ContainerID], strings.Join(req.Cmd, " "))
+	}
+	e.f.mu.Unlock()
+	if ok {
+		return newScriptedSession(ctx, e.f, req, script), nil
+	}
 	return newEchoSession(), nil
+}
+
+// ExecScript is a scripted exec session's output and exit code.
+type ExecScript struct {
+	Output string
+	Exit   int
+}
+
+// scriptedSession prints its script and exits. With Stdin it first reads
+// until CloseWrite, keeping the input in Fake.ExecInput.
+type scriptedSession struct {
+	f      *Fake
+	id     string
+	script ExecScript
+	out    chan []byte
+	inDone chan struct{}
+	// done is closed by Close; finished once the output has ended. Only the
+	// session's goroutine closes out, so a send never meets a closed channel.
+	done     chan struct{}
+	finished chan struct{}
+	once     sync.Once
+	inOnce   sync.Once
+}
+
+func newScriptedSession(ctx context.Context, f *Fake, req agent.ExecReq, script ExecScript) *scriptedSession {
+	s := &scriptedSession{f: f, id: req.ContainerID, script: script, out: make(chan []byte, 1),
+		inDone: make(chan struct{}), done: make(chan struct{}), finished: make(chan struct{})}
+	if !req.Stdin {
+		s.inOnce.Do(func() { close(s.inDone) })
+	}
+	// A cancelled context ends the session, as it kills a real exec.
+	go func() {
+		select {
+		case <-s.inDone:
+		case <-s.done:
+		case <-ctx.Done():
+		}
+		if script.Output != "" {
+			select {
+			case s.out <- []byte(script.Output):
+			case <-s.done:
+			case <-ctx.Done():
+			}
+		}
+		close(s.out)
+		close(s.finished)
+	}()
+	return s
+}
+
+func (s *scriptedSession) Write(p []byte) error {
+	select {
+	case <-s.inDone:
+		return fmt.Errorf("input closed")
+	default:
+	}
+	s.f.mu.Lock()
+	s.f.ExecInput[s.id] = append(s.f.ExecInput[s.id], p...)
+	s.f.mu.Unlock()
+	return nil
+}
+
+func (s *scriptedSession) CloseWrite() error {
+	s.inOnce.Do(func() { close(s.inDone) })
+	return nil
+}
+
+func (s *scriptedSession) Resize(cols, rows uint16) error { return nil }
+func (s *scriptedSession) Output() <-chan []byte          { return s.out }
+
+func (s *scriptedSession) Wait() (int, error) {
+	<-s.finished
+	if s.script.Exit != 0 {
+		return s.script.Exit, fmt.Errorf("exit %d", s.script.Exit)
+	}
+	return 0, nil
+}
+
+func (s *scriptedSession) Close() error {
+	s.once.Do(func() { close(s.done) })
+	return nil
 }
 
 type echoSession struct {
@@ -482,6 +667,9 @@ func (s *echoSession) Write(p []byte) error {
 		return fmt.Errorf("session closed")
 	}
 }
+
+// CloseWrite ends the input, which ends an echo.
+func (s *echoSession) CloseWrite() error { return s.Close() }
 
 func (s *echoSession) Resize(cols, rows uint16) error { return nil }
 func (s *echoSession) Output() <-chan []byte          { return s.out }
@@ -525,12 +713,46 @@ func (h hostFake) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.L
 	if err := h.f.record(fmt.Sprintf("host.gitsync(%s)", req.Project), nil); err != nil {
 		return agent.GitSyncResult{}, err
 	}
+	h.f.mu.Lock()
+	off := h.f.OffBranch[req.Commit]
+	h.f.mu.Unlock()
+	if req.RequireOnBranch && off {
+		return agent.GitSyncResult{}, agent.ErrNotOnBranch
+	}
 	h.f.emit(out, "Cloning "+req.URL)
 	commit := req.Commit
 	if commit == "" {
 		commit = h.f.GitCommit
 	}
 	return agent.GitSyncResult{Commit: commit}, nil
+}
+
+func (d dockerFake) CopyVolume(ctx context.Context, from, to string, out agent.LogSink) error {
+	if err := d.f.record(fmt.Sprintf("docker.copyvolume(%s,%s)", from, to), nil); err != nil {
+		return err
+	}
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	d.f.CopiedVolumes = append(d.f.CopiedVolumes, from+">"+to)
+	return nil
+}
+
+func (d dockerFake) VolumeSizes(ctx context.Context) (map[string]int64, error) {
+	if err := d.f.record("docker.volumesizes", nil); err != nil {
+		return nil, err
+	}
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	return maps.Clone(d.f.Volumes), nil
+}
+
+func (d dockerFake) FreeSpace(ctx context.Context) (uint64, error) {
+	if err := d.f.record("docker.free", nil); err != nil {
+		return 0, err
+	}
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	return d.f.DockerFree, nil
 }
 
 // RegistryLogin records the login so a test can assert the host was

@@ -20,6 +20,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/proxy"
 	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/secrets"
+	"github.com/windlass-dev/windlass/internal/staging"
 	"github.com/windlass-dev/windlass/internal/store/db"
 	"github.com/windlass-dev/windlass/internal/update"
 )
@@ -29,6 +30,7 @@ type API struct {
 	Audit      *audit.Log
 	Projects   *projects.Service
 	Deploy     *deploy.Service
+	Staging    *staging.Service
 	Proxy      *proxy.Service
 	Git        *git.Service
 	Registries *registries.Service

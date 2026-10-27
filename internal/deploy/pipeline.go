@@ -65,6 +65,19 @@ var verifyPollInterval = 2 * time.Second
 type payload struct {
 	DeploymentID int64  `json:"deployment_id"`
 	Project      string `json:"project"`
+	// Seed names the live project whose data a new staging copies, in the
+	// applying step, before its first start.
+	Seed string `json:"seed,omitempty"`
+	// NoPromote keeps a new staging's first deployment from promoting
+	// itself: nobody has looked at it yet.
+	NoPromote bool `json:"no_promote,omitempty"`
+}
+
+// pinned reports whether d runs digests and a commit chosen when it was
+// created, as a rollback and a promotion do, rather than what the branch
+// and tags hold now.
+func pinned(d db.Deployment) bool {
+	return d.RollbackOf.Valid || d.PromotedFrom.Valid
 }
 
 type Service struct {
@@ -87,6 +100,10 @@ func New(q *db.Queries, ag agent.Agent, proj *projects.Service, gitSvc *git.Serv
 // Deploy creates a deployment and enqueues its job. One active deployment
 // per project.
 func (s *Service) Deploy(ctx context.Context, projectName, trigger string) (db.Deployment, error) {
+	return s.deploy(ctx, projectName, trigger, payload{Project: projectName})
+}
+
+func (s *Service) deploy(ctx context.Context, projectName, trigger string, pl payload) (db.Deployment, error) {
 	p, err := s.projects.Get(ctx, projectName)
 	if err != nil {
 		return db.Deployment{}, err
@@ -110,7 +127,8 @@ func (s *Service) Deploy(ctx context.Context, projectName, trigger string) (db.D
 		return db.Deployment{}, err
 	}
 
-	if _, err := s.runner.Enqueue(ctx, JobType, payload{DeploymentID: d.ID, Project: projectName}); err != nil {
+	pl.DeploymentID, pl.Project = d.ID, projectName
+	if _, err := s.runner.Enqueue(ctx, JobType, pl); err != nil {
 		return db.Deployment{}, s.abandon(ctx, d, err)
 	}
 
@@ -220,6 +238,14 @@ func sortedKeys(m map[string]bool) []string {
 	return keys
 }
 
+// shortSHA is the seven-character form Git shows.
+func shortSHA(commit string) string {
+	if len(commit) > 7 {
+		return commit[:7]
+	}
+	return commit
+}
+
 func shortCommit(commit string) string {
 	if len(commit) > 12 {
 		return commit[:12]
@@ -294,9 +320,19 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 		s.event(ctx, d.ID, "step", fmt.Sprintf("resuming interrupted deployment at step %q", resumeStep))
 	}
 
-	// Rollbacks skip pull, and sync and build unless there is a commit.
+	// A seed is not safe to run twice: half-loaded data would be loaded
+	// again on top of itself.
+	if pl.Seed != "" && d.StartedAt.Valid && resumeStep == stepApplying {
+		const msg = "data copy was interrupted; delete staging and create it again"
+		s.event(ctx, d.ID, "error", msg)
+		s.finish(ctx, d, "failed", msg)
+		return nil
+	}
+
+	// Rollbacks and promotions skip pull, and sync and build unless there is
+	// a commit.
 	steps := stepOrder
-	if d.RollbackOf.Valid {
+	if pinned(d) {
 		steps = rollbackSteps
 		if d.GitCommit.Valid {
 			steps = rollbackGitSteps
@@ -331,7 +367,7 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 		}
 		s.publish(d.ID, pl.Project, "deployment.step", step)
 
-		if err := s.runStep(ctx, step, d, pl.Project); err != nil {
+		if err := s.runStep(ctx, step, d, pl); err != nil {
 			if ctx.Err() != nil {
 				s.finish(ctx, d, "cancelled", "cancelled")
 				return ctx.Err()
@@ -343,11 +379,18 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 	}
 
 	s.finish(ctx, d, "succeeded", "")
+	// The first deployment of a new staging is a copy of live, not a
+	// change to it, so it is never promoted on its own. Nor is a rollback:
+	// promoting it would roll live back too, and live has its own Rollback.
+	if !pl.NoPromote && !d.RollbackOf.Valid {
+		s.autoPromote(ctx, d, pl.Project)
+	}
 	return nil
 }
 
-func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, project string) error {
+func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pl payload) error {
 	sink := s.logSink(ctx, d.ID)
+	project := pl.Project
 
 	switch step {
 	case stepPreparing:
@@ -366,8 +409,17 @@ func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pro
 		if err != nil {
 			return err
 		}
-		if d.RollbackOf.Valid {
-			arts, err := s.q.ListDeploymentArtifacts(ctx, d.RollbackOf.Int64)
+		if err := s.checkStaging(ctx, d.ID, project, cfg); err != nil {
+			return err
+		}
+		if pinned(d) {
+			// A rollback pins its target's digests. A promotion pins the
+			// ones copied onto it, which leave out services live lacks.
+			source := d.RollbackOf.Int64
+			if d.PromotedFrom.Valid {
+				source = d.ID
+			}
+			arts, err := s.q.ListDeploymentArtifacts(ctx, source)
 			if err != nil {
 				return err
 			}
@@ -430,7 +482,12 @@ func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pro
 			Branch:  branch,
 			Commit:  d.GitCommit.String, // pinned on resume/rollback, empty otherwise
 			Token:   token,
+			// Live only ever runs code merged into the branch it deploys.
+			RequireOnBranch: d.PromotedFrom.Valid,
 		}, sink)
+		if errors.Is(err, agent.ErrNotOnBranch) {
+			return fmt.Errorf("commit %s is not on %s yet. Merge it, then promote", shortSHA(d.GitCommit.String), branch)
+		}
 		if err != nil {
 			return err
 		}
@@ -479,9 +536,9 @@ func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pro
 				return err
 			}
 		}
-		// A rollback carries its target's digests, copied when it was
+		// A rollback or promotion carries the digests copied when it was
 		// created; the tags here name the current images, not those.
-		if d.RollbackOf.Valid {
+		if pinned(d) {
 			return nil
 		}
 		// Record image digests for rollback, whether pulled or built.
@@ -503,9 +560,14 @@ func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pro
 		return nil
 
 	case stepApplying:
+		if pl.Seed != "" {
+			if err := s.seed(ctx, d.ID, pl.Seed, project, sink); err != nil {
+				return err
+			}
+		}
 		s.event(ctx, d.ID, "step", "starting services")
 		req := agent.ComposeUpReq{Project: project, RemoveOrphans: true}
-		if d.RollbackOf.Valid {
+		if pinned(d) {
 			req.ExtraFiles = []string{rollbackFile}
 		}
 		return s.agent.Compose().Up(ctx, req, sink)

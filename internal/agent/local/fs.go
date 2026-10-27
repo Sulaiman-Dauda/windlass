@@ -2,11 +2,14 @@ package local
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 
@@ -194,4 +197,166 @@ func (f fsLocal) RemoveProject(ctx context.Context, project string) error {
 		return err
 	}
 	return os.RemoveAll(dir)
+}
+
+func (f fsLocal) CopyProject(ctx context.Context, from, to string, skip []string) ([]string, error) {
+	src, err := f.projectDir(from)
+	if err != nil {
+		return nil, err
+	}
+	dst, err := f.projectDir(to)
+	if err != nil {
+		return nil, err
+	}
+	// Every read and write goes through a root, so a path a running
+	// container swaps for a symlink after the walk saw it still cannot
+	// reach outside either project.
+	in, err := os.OpenRoot(src)
+	if err != nil {
+		return nil, err
+	}
+	defer in.Close()
+	out, err := os.OpenRoot(dst)
+	if err != nil {
+		return nil, err
+	}
+	defer out.Close()
+	var skipped, links []string
+	err = fs.WalkDir(in.FS(), ".", func(rel string, d fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if rel == "." {
+			return walkErr
+		}
+		if slices.Contains(skip, strings.Split(rel, "/")[0]) {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if walkErr != nil {
+			skipped = append(skipped, rel)
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			skipped = append(skipped, rel)
+			return nil
+		}
+		switch mode := info.Mode(); {
+		case mode.IsDir():
+			return out.MkdirAll(rel, mode.Perm()|0o700)
+		case mode.IsRegular():
+			if err := copyFile(in, out, rel, mode.Perm()); err != nil {
+				if os.IsPermission(err) || errors.Is(err, errNotRegular) {
+					skipped = append(skipped, rel)
+					return nil
+				}
+				return err
+			}
+			return nil
+		case mode&os.ModeSymlink != 0:
+			link, err := in.Readlink(rel)
+			if err != nil || !linkStaysInside(dst, filepath.Join(dst, filepath.FromSlash(rel)), link) {
+				skipped = append(skipped, rel)
+				return nil
+			}
+			links = append(links, rel)
+			return out.Symlink(link, rel)
+		default:
+			skipped = append(skipped, rel)
+			return nil
+		}
+	})
+	if err != nil {
+		return skipped, err
+	}
+	// A link can read as inside and still leave: with here -> ".", the
+	// target here/../x is the sibling x. The root resolves each copied link
+	// the way the kernel will and refuses one that escapes; a link left
+	// dangling by a skipped one is harmless.
+	for _, rel := range links {
+		if _, err := out.Stat(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := out.Remove(rel); err != nil {
+				return skipped, err
+			}
+			skipped = append(skipped, rel)
+		}
+	}
+	return skipped, nil
+}
+
+func linkStaysInside(root, path, link string) bool {
+	if filepath.IsAbs(link) {
+		return false
+	}
+	resolved := filepath.Join(filepath.Dir(path), link)
+	return resolved == root || strings.HasPrefix(resolved, root+string(filepath.Separator))
+}
+
+// errNotRegular is a file that stopped being a regular file between the
+// walk and the open.
+var errNotRegular = errors.New("not a regular file")
+
+func copyFile(in, out *os.Root, rel string, perm fs.FileMode) error {
+	r, err := in.Open(rel)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	if info, err := r.Stat(); err != nil {
+		return err
+	} else if !info.Mode().IsRegular() {
+		return errNotRegular
+	}
+	w, err := out.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(w, r); err != nil {
+		_ = w.Close()
+		return err
+	}
+	return w.Close()
+}
+
+func (f fsLocal) Usage(ctx context.Context, project string, skip []string) (int64, error) {
+	dir, err := f.projectDir(project)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		if rel != "." && slices.Contains(skip, strings.Split(filepath.ToSlash(rel), "/")[0]) {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if walkErr != nil {
+			if d != nil && d.IsDir() && rel != "." {
+				return filepath.SkipDir
+			}
+			return walkErr
+		}
+		if d.Type().IsRegular() {
+			if info, err := d.Info(); err == nil {
+				total += info.Size()
+			}
+		}
+		return nil
+	})
+	return total, err
+}
+
+func (f fsLocal) FreeSpace(ctx context.Context) (uint64, error) {
+	return freeBytes(f.l.cfg.ProjectsDir)
 }

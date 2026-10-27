@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
 	"github.com/windlass-dev/windlass/internal/agent"
@@ -335,4 +337,107 @@ func (d dockerLocal) RegistryLogin(ctx context.Context, host, username, secret s
 			host, err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+// copyHelperImage runs CopyVolume. It is pinned by digest so the copy is the
+// same on every host and a retagged image cannot change what runs with both
+// volumes mounted.
+const copyHelperImage = "busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
+
+func (d dockerLocal) CopyVolume(ctx context.Context, from, to string, out agent.LogSink) error {
+	cli, err := d.l.docker()
+	if err != nil {
+		return err
+	}
+	// Mounting a volume that does not exist creates it, so check both first
+	// rather than leave a stray empty volume behind.
+	for _, name := range []string{from, to} {
+		if _, err := cli.VolumeInspect(ctx, name, client.VolumeInspectOptions{}); err != nil {
+			return fmt.Errorf("volume %s: %w", name, err)
+		}
+	}
+	if _, err := cli.ImageInspect(ctx, copyHelperImage); err != nil {
+		pull, err := cli.ImagePull(ctx, copyHelperImage, client.ImagePullOptions{})
+		if err != nil {
+			return fmt.Errorf("pull %s: %w", copyHelperImage, err)
+		}
+		err = pull.Wait(ctx)
+		_ = pull.Close()
+		if err != nil {
+			return fmt.Errorf("pull %s: %w", copyHelperImage, err)
+		}
+	}
+	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config: &container.Config{
+			Image:  copyHelperImage,
+			Cmd:    []string{"cp", "-a", "/from/.", "/to/"},
+			Labels: map[string]string{"windlass.helper": "copy-volume"},
+		},
+		HostConfig: &container.HostConfig{
+			NetworkMode: "none",
+			Mounts: []mount.Mount{
+				{Type: mount.TypeVolume, Source: from, Target: "/from", ReadOnly: true},
+				{Type: mount.TypeVolume, Source: to, Target: "/to"},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("create copy helper: %w", err)
+	}
+	defer func() {
+		// The caller's context may be what ended the copy; the helper still
+		// has to go.
+		rm, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		_, _ = cli.ContainerRemove(rm, created.ID, client.ContainerRemoveOptions{Force: true})
+	}()
+	wait := cli.ContainerWait(ctx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNextExit})
+	if _, err := cli.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
+		return fmt.Errorf("start copy helper: %w", err)
+	}
+	var code int64
+	select {
+	case res := <-wait.Result:
+		code = res.StatusCode
+	case err := <-wait.Error:
+		return fmt.Errorf("copy volume %s: %w", from, err)
+	}
+	if code != 0 {
+		_ = d.Logs(ctx, created.ID, agent.LogOpts{Tail: 20}, out)
+		return fmt.Errorf("copy volume %s: exit status %d", from, code)
+	}
+	return nil
+}
+
+func (d dockerLocal) VolumeSizes(ctx context.Context) (map[string]int64, error) {
+	cli, err := d.l.docker()
+	if err != nil {
+		return nil, err
+	}
+	du, err := cli.DiskUsage(ctx, client.DiskUsageOptions{Volumes: true, Verbose: true})
+	if err != nil {
+		return nil, err
+	}
+	sizes := map[string]int64{}
+	for _, v := range du.Volumes.Items {
+		if v.UsageData != nil && v.UsageData.Size >= 0 {
+			sizes[v.Name] = v.UsageData.Size
+		}
+	}
+	return sizes, nil
+}
+
+func (d dockerLocal) FreeSpace(ctx context.Context) (uint64, error) {
+	cli, err := d.l.docker()
+	if err != nil {
+		return 0, err
+	}
+	info, err := cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return 0, err
+	}
+	if info.Info.DockerRootDir == "" {
+		return 0, errors.New("docker did not report its root directory")
+	}
+	return freeBytes(info.Info.DockerRootDir)
 }

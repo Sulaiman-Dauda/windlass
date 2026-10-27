@@ -14,3 +14,6 @@ DELETE FROM projects WHERE id = ?;
 
 -- name: UpdateProjectGit :exec
 UPDATE projects SET git_repo = ?, git_branch = ?, auto_deploy = ? WHERE id = ?;
+
+-- name: SetProjectStagingOf :exec
+UPDATE projects SET staging_of = ? WHERE id = ?;

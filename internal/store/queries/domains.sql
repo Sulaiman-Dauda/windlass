@@ -7,7 +7,7 @@ RETURNING *;
 SELECT * FROM domains WHERE project_id = ? ORDER BY hostname;
 
 -- name: ListAllDomains :many
-SELECT d.*, p.name AS project_name
+SELECT d.*, p.name AS project_name, p.staging_of
 FROM domains d
 JOIN projects p ON p.id = d.project_id
 ORDER BY d.hostname;

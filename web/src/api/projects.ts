@@ -9,6 +9,10 @@ export interface Project {
   git_branch?: string;
   auto_deploy: boolean;
   created_at: string;
+  /** Set on a staging: the live project it belongs to. */
+  staging_of?: string;
+  /** Set on a live project that has a staging. */
+  staging?: string;
 }
 
 export interface ProjectFile {
@@ -25,10 +29,11 @@ export function useProjects() {
   });
 }
 
-export function useProject(name: string) {
+export function useProject(name: string, enabled = true) {
   return useQuery<Project>({
     queryKey: ["projects", name],
     queryFn: () => api<Project>(`/projects/${name}`),
+    enabled,
   });
 }
 
@@ -60,7 +65,10 @@ export function useDeleteProject() {
     // Only the list: refetching the deleted project's own queries 404s them,
     // which swaps the page to "not found" and unmounts the dialog before its
     // onSuccess can navigate away.
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"], exact: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"], exact: true });
+      qc.invalidateQueries({ queryKey: ["staging"] });
+    },
   });
 }
 
@@ -110,4 +118,18 @@ export function useSaveProjectEnv(name: string) {
     onSuccess: () =>
       qc.invalidateQueries({ queryKey: ["projects", name, "env"] }),
   });
+}
+
+/**
+ * Puts each staging straight after its live project, keeping the given order
+ * otherwise. A staging whose live is not in the list (filtered out, or gone)
+ * stays where it was.
+ */
+export function withStagingNested(projects: Project[]): Project[] {
+  const names = new Set(projects.map((p) => p.name));
+  const byLive = new Map<string, Project[]>();
+  for (const p of projects) {
+    if (p.staging_of && names.has(p.staging_of)) byLive.set(p.staging_of, [...(byLive.get(p.staging_of) ?? []), p]);
+  }
+  return projects.flatMap((p) => (p.staging_of && names.has(p.staging_of) ? [] : [p, ...(byLive.get(p.name) ?? [])]));
 }

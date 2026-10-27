@@ -46,6 +46,8 @@ type Manifest struct {
 	GitBranch  string         `json:"git_branch,omitempty"`
 	AutoDeploy bool           `json:"auto_deploy"`
 	Domains    []DomainConfig `json:"domains"`
+	// Staging is set only on a staging project, naming the live one.
+	Staging *StagingConfig `json:"staging,omitempty"`
 }
 
 type DomainConfig struct {
@@ -222,6 +224,9 @@ func (s *Service) Reconcile(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("index project %s: %w", name, err)
 		}
+		if err := s.setStagingOf(ctx, project, manifest); err != nil {
+			return fmt.Errorf("index staging link for %s: %w", name, err)
+		}
 		domains := make([]db.CreateDomainParams, 0, len(manifest.Domains))
 		for _, d := range manifest.Domains {
 			domains = append(domains, db.CreateDomainParams{ProjectID: project.ID,
@@ -298,14 +303,43 @@ func (s *Service) SetDomains(ctx context.Context, project string, domains []Doma
 }
 
 // Delete stops the project's containers (best effort until compose lands),
-// removes the directory, and deletes metadata.
+// removes the directory, and deletes metadata. A project with a staging is
+// refused. A staging's volumes go with it: they are a copy of live's data,
+// and a database volume left behind would refuse the next copy's load.
 func (s *Service) Delete(ctx context.Context, name string) error {
 	p, err := s.Get(ctx, name)
 	if err != nil {
 		return err
 	}
+	if _, has, err := s.StagingFor(ctx, name); err != nil {
+		return err
+	} else if has {
+		return fmt.Errorf("%w: delete %s first", ErrHasStaging, StagingName(name))
+	}
+	_, isStaging, err := s.stagingManifest(ctx, name)
+	if err != nil {
+		return err
+	}
+	if isStaging {
+		// Staging deployments refuse a fixed volume name, but the compose
+		// file can be edited after the last one.
+		cfg, err := s.agent.Compose().Config(ctx, name)
+		if err != nil {
+			return fmt.Errorf("read staging's compose file before removing its volumes: %w", err)
+		}
+		if fixed := FixedVolumes(cfg, name); len(fixed) > 0 {
+			return fmt.Errorf("%w: %s's compose file names volume %s, and deleting would remove it even if live uses it. "+
+				"Remove name: from it, then delete again", ErrSharedVolume, name, strings.Join(fixed, ", "))
+		}
+	}
 
-	if err := s.agent.Compose().Down(ctx, name, false, nil); err != nil {
+	if err := s.agent.Compose().Down(ctx, name, isStaging, nil); err != nil {
+		if isStaging {
+			// Keeping the directory lets the delete be tried again; without
+			// it the volumes would be orphaned under a name the next staging
+			// reuses.
+			return fmt.Errorf("remove staging containers and volumes: %w", err)
+		}
 		// Compose may be unavailable (dev) or the project never deployed.
 		s.logger.Warn("compose down during delete", "project", name, "error", err)
 	}

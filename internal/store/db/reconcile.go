@@ -37,7 +37,7 @@ func (q *Queries) ListProjectIndexes(ctx context.Context, names []string) ([]Pro
 		args[i], marks[i] = name, "?"
 	}
 	rows, err := q.db.QueryContext(ctx, fmt.Sprintf(`SELECT id, name, source, git_repo, git_branch,
-		auto_deploy, created_at, git_connection_id, webhook_secret_enc FROM projects
+		auto_deploy, created_at, git_connection_id, webhook_secret_enc, staging_of FROM projects
 		WHERE name IN (%s) ORDER BY created_at DESC`, strings.Join(marks, ",")), args...)
 	if err != nil {
 		return nil, err
@@ -47,7 +47,7 @@ func (q *Queries) ListProjectIndexes(ctx context.Context, names []string) ([]Pro
 	for rows.Next() {
 		var p Project
 		if err := rows.Scan(&p.ID, &p.Name, &p.Source, &p.GitRepo, &p.GitBranch,
-			&p.AutoDeploy, &p.CreatedAt, &p.GitConnectionID, &p.WebhookSecretEnc); err != nil {
+			&p.AutoDeploy, &p.CreatedAt, &p.GitConnectionID, &p.WebhookSecretEnc, &p.StagingOf); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -96,10 +96,10 @@ func (q *Queries) ReplaceProjectDomains(ctx context.Context, projectID int64, do
 // filesystem-owned project manifest.
 func (q *Queries) ProjectByID(ctx context.Context, id int64) (Project, error) {
 	row := q.db.QueryRowContext(ctx, `SELECT id, name, source, git_repo, git_branch,
-		auto_deploy, created_at, git_connection_id, webhook_secret_enc FROM projects WHERE id = ?`, id)
+		auto_deploy, created_at, git_connection_id, webhook_secret_enc, staging_of FROM projects WHERE id = ?`, id)
 	var p Project
 	err := row.Scan(&p.ID, &p.Name, &p.Source, &p.GitRepo, &p.GitBranch,
-		&p.AutoDeploy, &p.CreatedAt, &p.GitConnectionID, &p.WebhookSecretEnc)
+		&p.AutoDeploy, &p.CreatedAt, &p.GitConnectionID, &p.WebhookSecretEnc, &p.StagingOf)
 	if err != nil {
 		return Project{}, err
 	}

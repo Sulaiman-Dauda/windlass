@@ -31,7 +31,7 @@ VALUES (
     ?,
     ?
 )
-RETURNING id, project_id, number, status, triggered_by, git_commit, error, rollback_of, started_at, finished_at, created_at
+RETURNING id, project_id, number, status, triggered_by, git_commit, error, rollback_of, started_at, finished_at, created_at, promoted_from
 `
 
 type CreateDeploymentParams struct {
@@ -61,6 +61,7 @@ func (q *Queries) CreateDeployment(ctx context.Context, arg CreateDeploymentPara
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.CreatedAt,
+		&i.PromotedFrom,
 	)
 	return i, err
 }
@@ -83,7 +84,7 @@ func (q *Queries) FinishDeployment(ctx context.Context, arg FinishDeploymentPara
 }
 
 const getDeployment = `-- name: GetDeployment :one
-SELECT d.id, d.project_id, d.number, d.status, d.triggered_by, d.git_commit, d.error, d.rollback_of, d.started_at, d.finished_at, d.created_at FROM deployments d
+SELECT d.id, d.project_id, d.number, d.status, d.triggered_by, d.git_commit, d.error, d.rollback_of, d.started_at, d.finished_at, d.created_at, d.promoted_from FROM deployments d
 JOIN projects p ON p.id = d.project_id
 WHERE p.name = ? AND d.number = ?
 `
@@ -108,12 +109,13 @@ func (q *Queries) GetDeployment(ctx context.Context, arg GetDeploymentParams) (D
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.CreatedAt,
+		&i.PromotedFrom,
 	)
 	return i, err
 }
 
 const getDeploymentByID = `-- name: GetDeploymentByID :one
-SELECT id, project_id, number, status, triggered_by, git_commit, error, rollback_of, started_at, finished_at, created_at FROM deployments WHERE id = ?
+SELECT id, project_id, number, status, triggered_by, git_commit, error, rollback_of, started_at, finished_at, created_at, promoted_from FROM deployments WHERE id = ?
 `
 
 func (q *Queries) GetDeploymentByID(ctx context.Context, id int64) (Deployment, error) {
@@ -131,6 +133,7 @@ func (q *Queries) GetDeploymentByID(ctx context.Context, id int64) (Deployment, 
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.CreatedAt,
+		&i.PromotedFrom,
 	)
 	return i, err
 }
@@ -198,6 +201,33 @@ func (q *Queries) LatestDeploymentID(ctx context.Context, projectID int64) (int6
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const latestSucceededDeployment = `-- name: LatestSucceededDeployment :one
+SELECT id, project_id, number, status, triggered_by, git_commit, error, rollback_of, started_at, finished_at, created_at, promoted_from FROM deployments
+WHERE project_id = ? AND status = 'succeeded'
+ORDER BY number DESC
+LIMIT 1
+`
+
+func (q *Queries) LatestSucceededDeployment(ctx context.Context, projectID int64) (Deployment, error) {
+	row := q.db.QueryRowContext(ctx, latestSucceededDeployment, projectID)
+	var i Deployment
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Number,
+		&i.Status,
+		&i.TriggeredBy,
+		&i.GitCommit,
+		&i.Error,
+		&i.RollbackOf,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+		&i.PromotedFrom,
+	)
+	return i, err
 }
 
 const listDeploymentArtifacts = `-- name: ListDeploymentArtifacts :many
@@ -277,7 +307,7 @@ func (q *Queries) ListDeploymentEvents(ctx context.Context, arg ListDeploymentEv
 }
 
 const listDeployments = `-- name: ListDeployments :many
-SELECT d.id, d.project_id, d.number, d.status, d.triggered_by, d.git_commit, d.error, d.rollback_of, d.started_at, d.finished_at, d.created_at FROM deployments d
+SELECT d.id, d.project_id, d.number, d.status, d.triggered_by, d.git_commit, d.error, d.rollback_of, d.started_at, d.finished_at, d.created_at, d.promoted_from FROM deployments d
 JOIN projects p ON p.id = d.project_id
 WHERE p.name = ?
 ORDER BY d.number DESC
@@ -310,6 +340,7 @@ func (q *Queries) ListDeployments(ctx context.Context, arg ListDeploymentsParams
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.CreatedAt,
+			&i.PromotedFrom,
 		); err != nil {
 			return nil, err
 		}
@@ -351,6 +382,20 @@ type SetDeploymentCommitParams struct {
 
 func (q *Queries) SetDeploymentCommit(ctx context.Context, arg SetDeploymentCommitParams) error {
 	_, err := q.db.ExecContext(ctx, setDeploymentCommit, arg.GitCommit, arg.ID)
+	return err
+}
+
+const setDeploymentPromotedFrom = `-- name: SetDeploymentPromotedFrom :exec
+UPDATE deployments SET promoted_from = ? WHERE id = ?
+`
+
+type SetDeploymentPromotedFromParams struct {
+	PromotedFrom sql.NullInt64
+	ID           int64
+}
+
+func (q *Queries) SetDeploymentPromotedFrom(ctx context.Context, arg SetDeploymentPromotedFromParams) error {
+	_, err := q.db.ExecContext(ctx, setDeploymentPromotedFrom, arg.PromotedFrom, arg.ID)
 	return err
 }
 

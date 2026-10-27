@@ -286,6 +286,13 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"result": "ignored", "reason": "branch mismatch"})
 		return
 	}
+	if deferred, err := a.deploysThroughStaging(r.Context(), p); err != nil {
+		a.internalError(w, "webhook staging check", err)
+		return
+	} else if deferred {
+		writeJSON(w, http.StatusOK, map[string]string{"result": "ignored", "reason": "deploys through staging"})
+		return
+	}
 
 	d, err := a.Deploy.Deploy(r.Context(), p.Name, "webhook")
 	if errors.Is(err, deploy.ErrDeployInProgress) {

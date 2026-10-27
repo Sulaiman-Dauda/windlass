@@ -1,11 +1,12 @@
 import { Link, useNavigate } from "react-router";
-import type { Project } from "../api/projects";
+import { withStagingNested, type Project } from "../api/projects";
 import { useDeployments, useServices, summariseServices, deploymentTone, isActive } from "../api/deployments";
 import { useDomains } from "../api/domains";
-import { StatusPill, StatusDot } from "../ui/Badge";
+import { StatusPill, StatusDot, Tag } from "../ui/Badge";
 import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
 import { timeAgo } from "../ui/format";
+import { cn } from "../ui/cn";
 import { Monogram } from "./Layout";
 
 /**
@@ -14,6 +15,7 @@ import { Monogram } from "./Layout";
  * screens use, so opening a project shows data that is already warm.
  */
 export default function ProjectsTable({ projects, loading }: { projects: Project[]; loading?: boolean }) {
+  const rows = withStagingNested(projects);
   return (
     <div className="overflow-x-auto rounded-card border border-hairline bg-surface shadow-[var(--shadow-xs)]">
       <table className="w-full min-w-[560px] table-fixed text-sm">
@@ -42,7 +44,7 @@ export default function ProjectsTable({ projects, loading }: { projects: Project
                 </td>
               </tr>
             ))}
-          {projects.map((p) => (
+          {rows.map((p) => (
             <ProjectRow key={p.name} project={p} />
           ))}
         </tbody>
@@ -72,16 +74,19 @@ function ProjectRow({ project }: { project: Project }) {
       onClick={() => navigate(`/projects/${project.name}`)}
     >
       <td className="px-4 py-3">
-        <div className="flex min-w-0 items-center gap-3">
+        <div className={cn("flex min-w-0 items-center gap-3", project.staging_of && "pl-7")}>
           <Monogram name={project.name} size="md" />
           <div className="min-w-0">
-            <Link
-              to={`/projects/${project.name}`}
-              onClick={(e) => e.stopPropagation()}
-              className="block truncate font-semibold text-fg"
-            >
-              {project.name}
-            </Link>
+            <div className="flex min-w-0 items-center gap-2">
+              <Link
+                to={`/projects/${project.name}`}
+                onClick={(e) => e.stopPropagation()}
+                className="truncate font-semibold text-fg"
+              >
+                {project.name}
+              </Link>
+              {project.staging_of && <Tag tone="warn">staging</Tag>}
+            </div>
             <div className="flex min-w-0 items-center gap-1.5 text-xs text-fg3">
               {project.git_repo && <Icon name="gitBranch" size={13} />}
               <span className="truncate">{source}</span>

@@ -12,6 +12,8 @@ export interface Deployment {
   started_at?: string;
   finished_at?: string;
   created_at: string;
+  /** Set on a live deployment that a staging promotion made. */
+  promoted_from_number?: number;
 }
 
 export interface ServiceStatus {

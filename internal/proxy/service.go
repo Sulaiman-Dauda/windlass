@@ -74,6 +74,32 @@ func (s *Service) SetPanelDomain(ctx context.Context, hostname string) error {
 	return nil
 }
 
+// CheckHostname reports why hostname cannot become a new domain: it is not
+// a valid hostname, or a project or the panel already uses it.
+func (s *Service) CheckHostname(ctx context.Context, hostname string) error {
+	hostname = strings.ToLower(strings.TrimSpace(hostname))
+	if !validHostname(hostname) {
+		return fmt.Errorf("%w: %q", ErrInvalidHostname, hostname)
+	}
+	panel, err := s.PanelDomain(ctx)
+	if err != nil {
+		return err
+	}
+	if panel == hostname {
+		return fmt.Errorf("%w: %s is the panel's domain", ErrConflict, hostname)
+	}
+	all, err := s.q.ListAllDomains(ctx)
+	if err != nil {
+		return err
+	}
+	for _, d := range all {
+		if d.Hostname == hostname {
+			return fmt.Errorf("%w: %s routes to %s", ErrConflict, hostname, d.ProjectName)
+		}
+	}
+	return nil
+}
+
 func (s *Service) Add(ctx context.Context, projectID int64, hostname, service string, port int64) (db.Domain, error) {
 	hostname = strings.ToLower(strings.TrimSpace(hostname))
 	if !validHostname(hostname) {
@@ -280,6 +306,8 @@ func (s *Service) Sync(ctx context.Context) error {
 			Hostname: d.Hostname,
 			Upstream: upstream,
 			TLS:      true,
+			// A staging site is a copy of a live one; keep it out of search.
+			NoIndex: d.StagingOf.Valid,
 		})
 	}
 

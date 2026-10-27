@@ -57,6 +57,8 @@ Stopping or removing Windlass does not stop deployed applications. See
 
 - Manual, Git, webhook, template, and rollback deployments
 - Crash-resumable deployment jobs and replayable deployment events
+- [Staging](docs/staging.md) per project: pushes deploy to a copy with its own domains and data,
+  and Promote deploys the commit and image digests it verified to live
 - Caddy application domains and a Settings-managed HTTPS domain for the panel itself
 - Raw file editing plus individual or bulk-paste environment variable editing
 - Compose-native CPU/memory limit visibility and application readiness checks

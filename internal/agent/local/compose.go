@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -77,7 +79,24 @@ func (c composeLocal) Up(ctx context.Context, req agent.ComposeUpReq, out agent.
 	if req.RemoveOrphans {
 		args = append(args, "--remove-orphans")
 	}
+	if req.NoDeps {
+		args = append(args, "--no-deps")
+	}
+	for _, svc := range req.Services {
+		if !serviceNameRe.MatchString(svc) {
+			return fmt.Errorf("invalid service name %q", svc)
+		}
+	}
+	args = append(args, req.Services...)
 	return c.run(ctx, req.Project, out, args...)
+}
+
+// serviceNameRe is the Compose specification's service name pattern, with a
+// leading letter or digit so a name can never read as a flag.
+var serviceNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+func (c composeLocal) Create(ctx context.Context, project string, out agent.LogSink) error {
+	return c.run(ctx, project, out, "create", "--quiet-pull")
 }
 
 // projectComposeFiles names the files Compose loads in dir when none is
@@ -227,6 +246,14 @@ func (c composeLocal) PS(ctx context.Context, project string) ([]agent.ServiceSt
 // Windlass needs.
 type composeConfig struct {
 	Services map[string]composeService `json:"services"`
+	Volumes  map[string]struct {
+		Name     string `json:"name"`
+		External bool   `json:"external"`
+	} `json:"volumes"`
+	Networks map[string]struct {
+		Name     string `json:"name"`
+		External bool   `json:"external"`
+	} `json:"networks"`
 }
 
 type composeService struct {
@@ -234,12 +261,26 @@ type composeService struct {
 	Build  json.RawMessage `json:"build"`
 	Expose []string        `json:"expose"`
 	Ports  []struct {
-		Target int `json:"target"`
+		Target    int    `json:"target"`
+		Published string `json:"published"`
+		HostIP    string `json:"host_ip"`
 	} `json:"ports"`
-	Labels   map[string]string `json:"labels"`
-	MemLimit byteValue         `json:"mem_limit"`
-	CPUs     numberValue       `json:"cpus"`
-	Deploy   struct {
+	ContainerName string                     `json:"container_name"`
+	NetworkMode   string                     `json:"network_mode"`
+	Networks      map[string]json.RawMessage `json:"networks"`
+	Volumes       []struct {
+		Type     string `json:"type"`
+		Source   string `json:"source"`
+		Target   string `json:"target"`
+		ReadOnly bool   `json:"read_only"`
+	} `json:"volumes"`
+	Labels map[string]string `json:"labels"`
+	// Environment has env_file contents folded in by compose config. A key
+	// without a value is null.
+	Environment map[string]*string `json:"environment"`
+	MemLimit    byteValue          `json:"mem_limit"`
+	CPUs        numberValue        `json:"cpus"`
+	Deploy      struct {
 		Resources struct {
 			Limits struct {
 				Memory byteValue   `json:"memory"`
@@ -327,7 +368,18 @@ func (c composeLocal) Config(ctx context.Context, project string) (agent.Resolve
 	if err := json.Unmarshal(stdout.Bytes(), &cfg); err != nil {
 		return agent.ResolvedConfig{}, fmt.Errorf("parse compose config: %w", err)
 	}
-	resolved := agent.ResolvedConfig{Services: map[string]agent.ResolvedService{}}
+	resolved := agent.ResolvedConfig{
+		Services:   map[string]agent.ResolvedService{},
+		Volumes:    map[string]agent.ResolvedVolume{},
+		Networks:   map[string]agent.ResolvedNetwork{},
+		WorkingDir: filepath.Join(c.l.cfg.ProjectsDir, project),
+	}
+	for key, v := range cfg.Volumes {
+		resolved.Volumes[key] = agent.ResolvedVolume{Name: v.Name, External: v.External}
+	}
+	for key, n := range cfg.Networks {
+		resolved.Networks[key] = agent.ResolvedNetwork{Name: n.Name, External: n.External}
+	}
 	for name, svc := range cfg.Services {
 		ports := make([]int, 0, len(svc.Expose)+len(svc.Ports))
 		for _, exposed := range svc.Expose {
@@ -339,10 +391,34 @@ func (c composeLocal) Config(ctx context.Context, project string) (agent.Resolve
 			ports = append(ports, published.Target)
 		}
 		memory, cpus := svc.limits()
-		resolved.Services[name] = agent.ResolvedService{
+		rs := agent.ResolvedService{
 			Image: svc.Image, ContainerPorts: ports, MemoryLimit: memory, CPULimit: cpus,
-			Build: len(svc.Build) > 0 && string(svc.Build) != "null",
+			Build:         len(svc.Build) > 0 && string(svc.Build) != "null",
+			ContainerName: svc.ContainerName, NetworkMode: svc.NetworkMode,
 		}
+		for _, p := range svc.Ports {
+			if p.Published != "" {
+				rs.PublishedPorts = append(rs.PublishedPorts,
+					agent.PublishedPort{HostIP: p.HostIP, Published: p.Published, Target: p.Target})
+			}
+		}
+		for key := range svc.Networks {
+			rs.Networks = append(rs.Networks, key)
+		}
+		sort.Strings(rs.Networks)
+		for _, v := range svc.Volumes {
+			rs.Mounts = append(rs.Mounts, agent.Mount{Type: v.Type, Source: v.Source,
+				Target: v.Target, ReadOnly: v.ReadOnly})
+		}
+		for key, value := range svc.Environment {
+			if value != nil {
+				if rs.Environment == nil {
+					rs.Environment = map[string]string{}
+				}
+				rs.Environment[key] = *value
+			}
+		}
+		resolved.Services[name] = rs
 		if rawURL := strings.TrimSpace(svc.Labels["windlass.health.url"]); rawURL != "" {
 			check := agent.ApplicationHealthCheck{Service: name, URL: rawURL,
 				ExpectedStatus: 200, StabilitySeconds: 10}

@@ -71,3 +71,12 @@ SET image_ref = excluded.image_ref, image_digest = excluded.image_digest;
 
 -- name: ListDeploymentArtifacts :many
 SELECT * FROM deployment_artifacts WHERE deployment_id = ? ORDER BY service;
+
+-- name: SetDeploymentPromotedFrom :exec
+UPDATE deployments SET promoted_from = ? WHERE id = ?;
+
+-- name: LatestSucceededDeployment :one
+SELECT * FROM deployments
+WHERE project_id = ? AND status = 'succeeded'
+ORDER BY number DESC
+LIMIT 1;

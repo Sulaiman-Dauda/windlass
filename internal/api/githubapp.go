@@ -256,6 +256,12 @@ func (a *API) handleAppWebhook(w http.ResponseWriter, r *http.Request) {
 		if branch != p.GitBranch.String {
 			continue
 		}
+		if deferred, err := a.deploysThroughStaging(r.Context(), p); err != nil || deferred {
+			if err != nil {
+				a.Logger.Warn("app webhook staging check", "project", p.Name, "error", err)
+			}
+			continue
+		}
 		d, err := a.Deploy.Deploy(r.Context(), p.Name, "webhook")
 		if errors.Is(err, deploy.ErrDeployInProgress) {
 			continue

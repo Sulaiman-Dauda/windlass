@@ -147,6 +147,21 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 	if _, err := svc.Add(ctx, p.ID, "it.example.com", "web", 80); err != nil {
 		t.Fatalf("add domain: %v", err)
 	}
+
+	// A staging copy of the project, whose route tells crawlers to stay out.
+	t.Cleanup(func() {
+		exec.Command("docker", "compose", "-p", name+"-staging", "down", "--remove-orphans").Run()
+	})
+	stg, err := proj.CreateStagingCopy(ctx, projects.CopyReq{Live: name})
+	if err != nil {
+		t.Fatalf("create staging copy: %v", err)
+	}
+	if err := ag.Compose().Up(ctx, agent.ComposeUpReq{Project: stg.Project.Name}, nil); err != nil {
+		t.Fatalf("compose up staging: %v", err)
+	}
+	if _, err := svc.Add(ctx, stg.Project.ID, "staging-it.example.com", "web", 80); err != nil {
+		t.Fatalf("add staging domain: %v", err)
+	}
 	if err := svc.Sync(ctx); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
@@ -189,6 +204,32 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(body, "nginx") {
 		t.Fatalf("windlass HTTPS domain did not route to nginx; body: %.200s", body)
+	}
+	robots := func(host string) (string, int) {
+		t.Helper()
+		client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12,
+		}}}
+		r, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://127.0.0.1:18443/", nil)
+		r.Host = host
+		for i := 0; ; i++ {
+			resp, err := client.Do(r)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK || i >= 20 {
+					return resp.Header.Get("X-Robots-Tag"), resp.StatusCode
+				}
+			} else if i >= 20 {
+				t.Fatalf("%s: %v", host, err)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	if tag, code := robots("staging-it.example.com"); code != http.StatusOK || tag != "noindex" {
+		t.Errorf("staging route: status %d, X-Robots-Tag %q, want noindex", code, tag)
+	}
+	if tag, _ := robots("it.example.com"); tag != "" {
+		t.Errorf("live route has X-Robots-Tag %q", tag)
 	}
 
 	// The Settings-managed panel hostname is a separate owned route and also
@@ -236,8 +277,13 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 		t.Fatalf("re-sync: %v", err)
 	}
 	current, err := ag.Proxy().CurrentRoutes(ctx)
-	if err != nil || len(current) != 1 || current[0].Hostname != "it.example.com" {
+	if err != nil || len(current) != 2 {
 		t.Fatalf("current routes = %+v, %v", current, err)
+	}
+	for _, r := range current {
+		if r.NoIndex != (r.Hostname == "staging-it.example.com") {
+			t.Errorf("read back route %s with NoIndex %v", r.Hostname, r.NoIndex)
+		}
 	}
 
 	// An administrator reloading Caddy loads its own config, which drops
@@ -291,8 +337,14 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 		t.Fatalf("rebuild index: %v", err)
 	}
 	listed, err := rebuiltProjects.List(ctx)
-	if err != nil || len(listed) != 1 || listed[0].Name != name {
+	if err != nil || len(listed) != 2 {
 		t.Fatalf("rebuilt project index = %+v, %v", listed, err)
+	}
+	// The list is newest first, and live and staging can share a millisecond.
+	for _, p := range listed {
+		if want := map[string]string{name: "", name + "-staging": name}; want[p.Name] != p.StagingOf.String {
+			t.Fatalf("rebuilt project index = %+v", listed)
+		}
 	}
 	statuses, err := ag.Compose().PS(ctx, name)
 	if err != nil || len(statuses) == 0 || statuses[0].State != "running" {

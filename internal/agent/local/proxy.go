@@ -53,6 +53,11 @@ type caddyHandle struct {
 	Upstreams  []caddyUpstream     `json:"upstreams,omitempty"`   // reverse_proxy
 	StatusCode int                 `json:"status_code,omitempty"` // static_response
 	Headers    map[string][]string `json:"headers,omitempty"`     // static_response
+	Response   *caddyHeaderOps     `json:"response,omitempty"`    // headers
+}
+
+type caddyHeaderOps struct {
+	Set map[string][]string `json:"set,omitempty"`
 }
 
 type caddyUpstream struct {
@@ -95,13 +100,21 @@ func buildRoutesObject(routes []agent.Route) caddyRoute {
 	}
 
 	for _, r := range routes {
+		var handle []caddyHandle
+		if r.NoIndex {
+			// The headers handler sets the header before proxying, so it is on
+			// every response, the application's errors included.
+			handle = append(handle, caddyHandle{Handler: "headers",
+				Response: &caddyHeaderOps{Set: map[string][]string{"X-Robots-Tag": {"noindex"}}}})
+		}
+		handle = append(handle, caddyHandle{
+			Handler:   "reverse_proxy",
+			Upstreams: []caddyUpstream{{Dial: r.Upstream}},
+		})
 		inner = append(inner, caddyRoute{
-			ID:    r.ID,
-			Match: []caddyMatch{{Host: []string{r.Hostname}}},
-			Handle: []caddyHandle{{
-				Handler:   "reverse_proxy",
-				Upstreams: []caddyUpstream{{Dial: r.Upstream}},
-			}},
+			ID:       r.ID,
+			Match:    []caddyMatch{{Host: []string{r.Hostname}}},
+			Handle:   handle,
 			Terminal: true,
 		})
 	}
@@ -502,6 +515,9 @@ func (p proxyLocal) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {
 			for _, ih := range r.Handle {
 				if len(ih.Upstreams) > 0 {
 					route.Upstream = ih.Upstreams[0].Dial
+				}
+				if ih.Handler == "headers" && ih.Response != nil && len(ih.Response.Set["X-Robots-Tag"]) > 0 {
+					route.NoIndex = true
 				}
 			}
 			out = append(out, route)

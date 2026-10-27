@@ -24,6 +24,10 @@ type projectDTO struct {
 	GitBranch  string `json:"git_branch,omitempty"`
 	AutoDeploy bool   `json:"auto_deploy"`
 	CreatedAt  string `json:"created_at"`
+	// StagingOf names the live project when this is a staging; Staging
+	// names this project's staging when it has one.
+	StagingOf string `json:"staging_of,omitempty"`
+	Staging   string `json:"staging,omitempty"`
 }
 
 func toProjectDTO(p db.Project) projectDTO {
@@ -35,6 +39,21 @@ func toProjectDTO(p db.Project) projectDTO {
 		GitBranch:  p.GitBranch.String,
 		AutoDeploy: p.AutoDeploy != 0,
 		CreatedAt:  p.CreatedAt,
+		StagingOf:  p.StagingOf.String,
+	}
+}
+
+// withStaging fills in the staging of each live project in list, from the
+// index: a staging names its live project in staging_of.
+func withStaging(list []projectDTO) {
+	stagingOf := map[string]string{}
+	for _, p := range list {
+		if p.StagingOf != "" && p.Name == projects.StagingName(p.StagingOf) {
+			stagingOf[p.StagingOf] = p.Name
+		}
+	}
+	for i := range list {
+		list[i].Staging = stagingOf[list[i].Name]
 	}
 }
 
@@ -52,7 +71,14 @@ func (a *API) projectRoutes(r chi.Router) {
 		r.Put("/{name}/files/*", a.handleWriteProjectFile)
 		r.Put("/{name}/env", a.handleSetProjectEnv)
 		r.Put("/{name}/git", a.handleConfigureProjectGit)
+		r.Post("/{name}/staging/preflight", a.handleStagingPreflight)
+		r.Post("/{name}/staging", a.handleCreateStaging)
+		r.Put("/{name}/staging", a.handleSetStaging)
+		// Member only. A token without the secrets flag gets both files
+		// masked, and Copy to live then refuses the masked content.
+		r.Get("/{name}/staging/diff/{file}", a.handleStagingDiff)
 	})
+	r.Get("/{name}/staging", a.handleGetStaging)
 	r.Get("/{name}", a.handleGetProject)
 	r.Get("/{name}/files", a.handleListProjectFiles)
 	r.Get("/{name}/files/*", a.handleReadProjectFile)
@@ -92,6 +118,7 @@ func (a *API) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	for _, p := range list {
 		out = append(out, toProjectDTO(p))
 	}
+	withStaging(out)
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -132,7 +159,11 @@ func (a *API) handleGetProject(w http.ResponseWriter, r *http.Request) {
 		a.internalError(w, "get project", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, toProjectDTO(p))
+	dto := toProjectDTO(p)
+	if s, ok, err := a.Projects.StagingFor(r.Context(), p.Name); err == nil && ok {
+		dto.Staging = s.Name
+	}
+	writeJSON(w, http.StatusOK, dto)
 }
 
 func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +192,14 @@ func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	err := a.Projects.Delete(r.Context(), name)
 	if errors.Is(err, projects.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "project not found")
+		return
+	}
+	if errors.Is(err, projects.ErrHasStaging) {
+		writeError(w, http.StatusConflict, "has_staging", err.Error())
+		return
+	}
+	if errors.Is(err, projects.ErrSharedVolume) {
+		writeError(w, http.StatusConflict, "shared_volume", err.Error())
 		return
 	}
 	if err != nil {

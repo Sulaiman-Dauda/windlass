@@ -59,17 +59,18 @@ type BackupSchedule struct {
 }
 
 type Deployment struct {
-	ID          int64
-	ProjectID   int64
-	Number      int64
-	Status      string
-	TriggeredBy string
-	GitCommit   sql.NullString
-	Error       sql.NullString
-	RollbackOf  sql.NullInt64
-	StartedAt   sql.NullString
-	FinishedAt  sql.NullString
-	CreatedAt   string
+	ID           int64
+	ProjectID    int64
+	Number       int64
+	Status       string
+	TriggeredBy  string
+	GitCommit    sql.NullString
+	Error        sql.NullString
+	RollbackOf   sql.NullInt64
+	StartedAt    sql.NullString
+	FinishedAt   sql.NullString
+	CreatedAt    string
+	PromotedFrom sql.NullInt64
 }
 
 type DeploymentArtifact struct {
@@ -142,6 +143,7 @@ type Project struct {
 	CreatedAt        string
 	GitConnectionID  sql.NullInt64
 	WebhookSecretEnc []byte
+	StagingOf        sql.NullString
 }
 
 type RegistryCredential struct {

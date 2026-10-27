@@ -167,3 +167,83 @@ func TestRemoveProject(t *testing.T) {
 		t.Error("project directory still exists")
 	}
 }
+
+func TestCopyProjectStaysInsideBothProjects(t *testing.T) {
+	f, root := newFS(t)
+	ctx := context.Background()
+	secret := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(secret, []byte("host only"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	live, staging := filepath.Join(root, "app"), filepath.Join(root, "app-staging")
+	for _, d := range []string{filepath.Join(live, "src", "public"), filepath.Join(live, "data"), staging} {
+		if err := os.MkdirAll(d, 0o750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(rel, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(live, rel), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := func(target, rel string) {
+		t.Helper()
+		if err := os.Symlink(target, filepath.Join(live, rel)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("compose.yaml", "services: {}\n")
+	write("src/public/index.html", "hi")
+	write("data/big.db", "skip me")
+	link("index.html", "src/public/home.html")
+	link(secret, "src/absolute")
+	link("../../../outside", "src/relative")
+	link(filepath.Dir(secret), "src/dir")
+	// Reads as inside, but here resolves to src, so the .. leaves the
+	// project and lands in its sibling.
+	link(".", "here")
+	link("here/../app/compose.yaml", "sibling")
+	link("here/../not-yet/file", "sibling-missing")
+	link("missing.txt", "src/dangling")
+
+	skipped, err := f.CopyProject(ctx, "app", "app-staging", []string{"data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(staging, "src", "public", "index.html")); string(got) != "hi" { //nolint:gosec // G304: the test's temp dir
+		t.Errorf("index.html = %q", got)
+	}
+	if got, err := os.Readlink(filepath.Join(staging, "src", "public", "home.html")); err != nil || got != "index.html" {
+		t.Errorf("inside link = %q, %v", got, err)
+	}
+	if got, err := os.Readlink(filepath.Join(staging, "src", "dangling")); err != nil || got != "missing.txt" {
+		t.Errorf("dangling inside link = %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(staging, "data")); !os.IsNotExist(err) {
+		t.Errorf("skipped data was copied: %v", err)
+	}
+	want := map[string]bool{"src/absolute": true, "src/relative": true, "src/dir": true, "sibling": true, "sibling-missing": true}
+	for _, s := range skipped {
+		if !want[s] {
+			t.Errorf("unexpected skip %q", s)
+		}
+		delete(want, s)
+	}
+	if len(want) != 0 {
+		t.Errorf("links not skipped: %v (skipped %v)", want, skipped)
+	}
+
+	// A file the walk saw as regular and a container then swapped for a
+	// link out of the project: the open refuses rather than reading it.
+	in, _ := os.OpenRoot(live)
+	defer in.Close()
+	out, _ := os.OpenRoot(staging)
+	defer out.Close()
+	if err := copyFile(in, out, "src/absolute", 0o644); err == nil {
+		t.Fatal("copyFile followed a link out of the project")
+	}
+	if _, err := os.Stat(filepath.Join(staging, "src", "absolute")); !os.IsNotExist(err) {
+		t.Errorf("staging got a file from outside: %v", err)
+	}
+}

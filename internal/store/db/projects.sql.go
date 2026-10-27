@@ -13,7 +13,7 @@ import (
 const createProject = `-- name: CreateProject :one
 INSERT INTO projects (name, source, git_repo, git_branch, auto_deploy)
 VALUES (?, ?, ?, ?, ?)
-RETURNING id, name, source, git_repo, git_branch, auto_deploy, created_at, git_connection_id, webhook_secret_enc
+RETURNING id, name, source, git_repo, git_branch, auto_deploy, created_at, git_connection_id, webhook_secret_enc, staging_of
 `
 
 type CreateProjectParams struct {
@@ -43,6 +43,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.CreatedAt,
 		&i.GitConnectionID,
 		&i.WebhookSecretEnc,
+		&i.StagingOf,
 	)
 	return i, err
 }
@@ -57,7 +58,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id int64) error {
 }
 
 const getProjectByName = `-- name: GetProjectByName :one
-SELECT id, name, source, git_repo, git_branch, auto_deploy, created_at, git_connection_id, webhook_secret_enc FROM projects WHERE name = ?
+SELECT id, name, source, git_repo, git_branch, auto_deploy, created_at, git_connection_id, webhook_secret_enc, staging_of FROM projects WHERE name = ?
 `
 
 func (q *Queries) GetProjectByName(ctx context.Context, name string) (Project, error) {
@@ -73,12 +74,13 @@ func (q *Queries) GetProjectByName(ctx context.Context, name string) (Project, e
 		&i.CreatedAt,
 		&i.GitConnectionID,
 		&i.WebhookSecretEnc,
+		&i.StagingOf,
 	)
 	return i, err
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, name, source, git_repo, git_branch, auto_deploy, created_at, git_connection_id, webhook_secret_enc FROM projects ORDER BY name
+SELECT id, name, source, git_repo, git_branch, auto_deploy, created_at, git_connection_id, webhook_secret_enc, staging_of FROM projects ORDER BY name
 `
 
 func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
@@ -100,6 +102,7 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 			&i.CreatedAt,
 			&i.GitConnectionID,
 			&i.WebhookSecretEnc,
+			&i.StagingOf,
 		); err != nil {
 			return nil, err
 		}
@@ -112,6 +115,20 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Project, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setProjectStagingOf = `-- name: SetProjectStagingOf :exec
+UPDATE projects SET staging_of = ? WHERE id = ?
+`
+
+type SetProjectStagingOfParams struct {
+	StagingOf sql.NullString
+	ID        int64
+}
+
+func (q *Queries) SetProjectStagingOf(ctx context.Context, arg SetProjectStagingOfParams) error {
+	_, err := q.db.ExecContext(ctx, setProjectStagingOf, arg.StagingOf, arg.ID)
+	return err
 }
 
 const updateProjectGit = `-- name: UpdateProjectGit :exec

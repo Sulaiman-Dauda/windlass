@@ -28,6 +28,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/server"
+	"github.com/windlass-dev/windlass/internal/staging"
 	"github.com/windlass-dev/windlass/internal/store"
 	"github.com/windlass-dev/windlass/internal/store/db"
 	"github.com/windlass-dev/windlass/internal/update"
@@ -147,6 +148,7 @@ func run() error {
 		Audit:      audit.New(queries, logger),
 		Projects:   projectSvc,
 		Deploy:     deploySvc,
+		Staging:    staging.New(queries, ag, projectSvc, deploySvc, gitSvc, proxySvc, logger),
 		Proxy:      proxySvc,
 		Git:        gitSvc,
 		Registries: registrySvc,

@@ -96,3 +96,13 @@ func readCPUSample() (idle, total uint64, err error) {
 	}
 	return idle, total, nil
 }
+
+// freeBytes reports the bytes an unprivileged process may still write on the
+// filesystem holding path.
+func freeBytes(path string) (uint64, error) {
+	var st unix.Statfs_t
+	if err := unix.Statfs(path, &st); err != nil {
+		return 0, err
+	}
+	return st.Bavail * uint64(st.Bsize), nil //nolint:gosec // G115: block size is positive
+}

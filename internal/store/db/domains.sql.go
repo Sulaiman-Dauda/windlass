@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 const createDomain = `-- name: CreateDomain :one
@@ -76,7 +77,7 @@ func (q *Queries) GetDomain(ctx context.Context, arg GetDomainParams) (Domain, e
 }
 
 const listAllDomains = `-- name: ListAllDomains :many
-SELECT d.id, d.project_id, d.hostname, d.service, d.container_port, d.created_at, p.name AS project_name
+SELECT d.id, d.project_id, d.hostname, d.service, d.container_port, d.created_at, p.name AS project_name, p.staging_of
 FROM domains d
 JOIN projects p ON p.id = d.project_id
 ORDER BY d.hostname
@@ -90,6 +91,7 @@ type ListAllDomainsRow struct {
 	ContainerPort int64
 	CreatedAt     string
 	ProjectName   string
+	StagingOf     sql.NullString
 }
 
 func (q *Queries) ListAllDomains(ctx context.Context) ([]ListAllDomainsRow, error) {
@@ -109,6 +111,7 @@ func (q *Queries) ListAllDomains(ctx context.Context) ([]ListAllDomainsRow, erro
 			&i.ContainerPort,
 			&i.CreatedAt,
 			&i.ProjectName,
+			&i.StagingOf,
 		); err != nil {
 			return nil, err
 		}
