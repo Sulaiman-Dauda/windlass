@@ -3,7 +3,7 @@ import { api, ApiError } from "./client";
 import type { Deployment } from "./deployments";
 import type { Project } from "./projects";
 
-export interface Issue {
+interface Issue {
   service?: string;
   message: string;
   fix?: string;
@@ -14,12 +14,12 @@ export interface DomainMap {
   staging: string;
 }
 
-export interface HostnameRewrite {
+interface HostnameRewrite {
   from: string;
   to: string;
 }
 
-export interface DataItem {
+interface DataItem {
   kind: "files" | "volume" | "database";
   name: string;
   service?: string;
