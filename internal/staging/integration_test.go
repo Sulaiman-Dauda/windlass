@@ -194,7 +194,7 @@ func TestRealStagingCopiesData(t *testing.T) {
 		Error: sql.NullString{String: deploy.InterruptedDataCopyMessage, Valid: true}}); err != nil {
 		t.Fatal(err)
 	}
-	res, err = svc.Recreate(ctx, staging, true, "")
+	res, err = svc.Recreate(ctx, staging, true, "", nil)
 	if err != nil {
 		t.Fatalf("recreate interrupted staging: %v", err)
 	}

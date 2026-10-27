@@ -135,7 +135,11 @@ func (a *API) handleRecreateStaging(w http.ResponseWriter, r *http.Request) {
 	if !a.confirmProjectDeletion(w, r, req.Password, "project.staging_recreate_denied") {
 		return
 	}
-	res, err := a.Staging.Recreate(r.Context(), name, req.Acknowledged, a.requestOrigin(r))
+	user, _ := auth.UserFrom(r.Context())
+	res, err := a.Staging.Recreate(r.Context(), name, req.Acknowledged, a.requestOrigin(r), func() {
+		a.Audit.Write(r.Context(), user.ID, "project.delete", "project", name, remoteIP(r),
+			map[string]string{"reason": "staging_recreate"})
+	})
 	switch {
 	case errors.Is(err, projects.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "project not found")
@@ -156,7 +160,6 @@ func (a *API) handleRecreateStaging(w http.ResponseWriter, r *http.Request) {
 		a.internalError(w, "recreate staging", err)
 		return
 	}
-	user, _ := auth.UserFrom(r.Context())
 	a.Audit.Write(r.Context(), user.ID, "project.staging_recreate", "project", name, remoteIP(r),
 		map[string]any{"branch": res.Project.GitBranch.String, "deployment": res.Deployment})
 	writeJSON(w, http.StatusCreated, map[string]any{"project": toProjectDTO(res.Project), "result": res})

@@ -83,6 +83,8 @@ export interface StagingStatus {
   /** Why Promote is unavailable; absent when it is available. */
   promote_blocked?: string;
   can_recreate: boolean;
+  /** Current staging keys to review before reusing values; contains no values. */
+  recreate_flagged_keys?: string[];
   rewrites: HostnameRewrite[];
   drift: { file: string; state: "changed" | "staging_only" | "live_only" }[];
 }

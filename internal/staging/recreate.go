@@ -24,7 +24,9 @@ func recreatable(d db.Deployment) bool {
 
 // Recreate discards the partial data copy, not another failed or previously
 // used staging. Read everything first: Delete removes the authoritative files.
-func (s *Service) Recreate(ctx context.Context, name string, acknowledged bool, origin string) (Result, error) {
+// afterDelete, when supplied, runs after deletion succeeds and before creating
+// its replacement, so callers can record that completed destructive action.
+func (s *Service) Recreate(ctx context.Context, name string, acknowledged bool, origin string, afterDelete func()) (Result, error) {
 	p, err := s.projects.Get(ctx, name)
 	if err != nil {
 		return Result{}, err
@@ -57,8 +59,18 @@ func (s *Service) Recreate(ctx context.Context, name string, acknowledged bool, 
 	retained := &retainedSettings{env: env, domains: domains, rewrites: cfg.Rewrites}
 	req := Request{Branch: p.GitBranch.String, CopyData: true,
 		AutoPromote: cfg.AutoPromote, Acknowledged: acknowledged}
+	pf, err := s.preflight(ctx, live.Name, req, retained, p.ID)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := validateCreate(pf, req); err != nil {
+		return Result{}, err
+	}
 	if err := s.projects.Delete(ctx, name); err != nil {
 		return Result{}, err
+	}
+	if afterDelete != nil {
+		afterDelete()
 	}
 	return s.create(ctx, live.Name, req, origin, retained)
 }

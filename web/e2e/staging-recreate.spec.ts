@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-async function panel(page: Page, options: { role?: string; eligible?: boolean; hasPassword?: boolean } = {}) {
+async function panel(page: Page, options: { role?: string; eligible?: boolean; hasPassword?: boolean; flaggedKeys?: string[] } = {}) {
   const role = options.role ?? "member";
   const project = { id: 2, name: "app-staging", source: "git", git_repo: "https://example.com/app.git",
     git_branch: "preview", auto_deploy: true, staging_of: "app", created_at: "2026-10-27T00:00:00Z" };
@@ -23,7 +23,8 @@ async function panel(page: Page, options: { role?: string; eligible?: boolean; h
       : path === "/projects/app-staging" ? project
       : path.endsWith("/staging") ? { live: "app", staging: "app-staging", branch: "preview", auto_promote: true,
         staging_latest: latest, live_current: null, live_latest: null, promotable: null,
-        promote_blocked: "staging has no succeeded deployment yet", can_recreate: options.eligible ?? true, rewrites: [], drift: [] }
+        promote_blocked: "staging has no succeeded deployment yet", can_recreate: options.eligible ?? true,
+        recreate_flagged_keys: options.flaggedKeys ?? [], rewrites: [], drift: [] }
       : path.endsWith("/services") ? { services: [] }
       : path.endsWith("/deployments") ? [latest]
       : path.endsWith("/domains") ? [] : {};
@@ -78,6 +79,23 @@ test("recreation keeps its confirmation through a missing pair and shows the rot
   finish();
   await expect(dialog.getByText("Created app-staging", { exact: true })).toBeVisible();
   await expect(dialog.getByText("fresh-webhook-secret", { exact: true })).toBeVisible();
+});
+
+test("recreation names the flagged staging values before confirmation", async ({ page }) => {
+  await panel(page, { flaggedKeys: ["SMTP_HOST", "STRIPE_SECRET_KEY"] });
+  await page.goto("/projects/app-staging");
+  await page.getByRole("button", { name: "Recreate staging", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("SMTP_HOST", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("STRIPE_SECRET_KEY", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/Check these in staging's Environment tab/)).toBeVisible();
+  const submit = dialog.getByRole("button", { name: "Recreate staging", exact: true });
+  await expect(submit).toBeDisabled();
+  await dialog.getByLabel(/Type app-staging to confirm/).fill("app-staging");
+  await dialog.getByLabel("Your password").fill("memberpassword123");
+  await expect(submit).toBeDisabled();
+  await dialog.getByRole("switch", { name: "Reuse staging's current environment values" }).click();
+  await expect(submit).toBeEnabled();
 });
 
 test("failed deletion stays visible for retry", async ({ page }) => {

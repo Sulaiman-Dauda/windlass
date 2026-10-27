@@ -124,7 +124,7 @@ func TestRecreatePreservesStagingSettings(t *testing.T) {
 	if err != nil || !status.CanRecreate {
 		t.Fatalf("status = %+v, %v", status, err)
 	}
-	res, err := e.svc.Recreate(ctx, e.old.Name, true, "http://panel.invalid")
+	res, err := e.svc.Recreate(ctx, e.old.Name, true, "http://panel.invalid", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,9 +176,13 @@ func TestRecreateFailedDeleteKeepsOldStaging(t *testing.T) {
 			callsBefore := len(e.agent.Calls)
 			injected := errors.New("injected removal failure")
 			e.agent.Fail[op] = injected
-			_, err := e.svc.Recreate(context.Background(), e.old.Name, true, "")
+			deleted := false
+			_, err := e.svc.Recreate(context.Background(), e.old.Name, true, "", func() { deleted = true })
 			if !errors.Is(err, injected) {
 				t.Fatalf("recreate error = %v", err)
+			}
+			if deleted {
+				t.Error("failed deletion called the completed-deletion hook")
 			}
 			if !reflect.DeepEqual(e.agent.Files[e.old.Name], before) {
 				t.Fatal("failed delete changed staging's authoritative files")
@@ -226,7 +230,7 @@ func TestRecreateOnlyInterruptedFirstCopy(t *testing.T) {
 			if err != nil || st.CanRecreate {
 				t.Fatalf("ineligible status = %+v: %v", st, err)
 			}
-			if _, err := e.svc.Recreate(ctx, e.old.Name, true, ""); !errors.Is(err, ErrNotRecreatable) {
+			if _, err := e.svc.Recreate(ctx, e.old.Name, true, "", nil); !errors.Is(err, ErrNotRecreatable) {
 				t.Fatalf("ineligible recreate = %v", err)
 			}
 			if slices.Contains(e.agent.Calls, "compose.down(app-staging)") {
@@ -253,7 +257,7 @@ func TestRecreateChecksBeforeDelete(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newRecreateFixture(t)
 			tc.prepare(e)
-			_, err := e.svc.Recreate(context.Background(), e.old.Name, tc.name != "acknowledgement", "")
+			_, err := e.svc.Recreate(context.Background(), e.old.Name, tc.name != "acknowledgement", "", nil)
 			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
 				t.Fatalf("recreate error = %v, want %v", err, tc.want)
 			}
@@ -266,10 +270,12 @@ func TestRecreateChecksBeforeDelete(t *testing.T) {
 
 func TestRecreateRunsFreshCreatePreflight(t *testing.T) {
 	e := newRecreateFixture(t)
-	e.agent.Resolved["app"] = agent.ResolvedConfig{Services: map[string]agent.ResolvedService{
-		"web": {Image: "nginx", ContainerName: "fixed-live-container"},
-	}}
-	_, err := e.svc.Recreate(context.Background(), e.old.Name, true, "")
+	_, err := e.svc.Recreate(context.Background(), e.old.Name, true, "", func() {
+		// Live changed after the first checks passed and staging was deleted.
+		e.agent.Resolved["app"] = agent.ResolvedConfig{Services: map[string]agent.ResolvedService{
+			"web": {Image: "nginx", ContainerName: "fixed-live-container"},
+		}}
+	})
 	if !errors.Is(err, ErrBlocked) || !strings.Contains(err.Error(), "container_name") {
 		t.Fatalf("fresh isolation check = %v", err)
 	}

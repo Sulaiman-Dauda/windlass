@@ -6,7 +6,7 @@ import { useRecreateStaging, type CreateResult, type StagingStatus } from "../ap
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
 import { Field, Input, Switch } from "../ui/Field";
-import { FormError } from "../ui/Page";
+import { Callout, FormError } from "../ui/Page";
 import { useToast } from "../ui/Toast";
 import StagingCreatedDialog from "./StagingCreatedDialog";
 
@@ -21,6 +21,7 @@ export default function RecreateStagingDialog({ st, onClose }: { st: StagingStat
   const [acknowledged, setAcknowledged] = useState(false);
   const [created, setCreated] = useState<CreateResult | null>(null);
   const needsPassword = me.data?.has_password ?? true;
+  const flagged = st.recreate_flagged_keys ?? [];
   const ready = typed === st.staging && acknowledged && (!needsPassword || password.length > 0);
 
   if (created) return <StagingCreatedDialog created={created} repo={live?.git_repo} onClose={onClose} />;
@@ -68,6 +69,14 @@ export default function RecreateStagingDialog({ st, onClose }: { st: StagingStat
           <Field label="Your password">
             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
           </Field>
+        )}
+        {flagged.length > 0 && (
+          <Callout tone="warn" title="Values that may reach real people or services">
+            <p>Check these in staging's Environment tab before reusing them.</p>
+            <ul className="mt-1 list-inside list-disc">
+              {flagged.map((key) => <li key={key}><code className="break-all font-mono">{key}</code></li>)}
+            </ul>
+          </Callout>
         )}
         <Switch checked={acknowledged} onChange={setAcknowledged} label="Reuse staging's current environment values"
           description="I have checked any values that can reach real people or external services." />
