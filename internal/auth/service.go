@@ -93,7 +93,7 @@ func (s *Service) Setup(ctx context.Context, token, email, password, ip, userAge
 		return "", db.User{}, errors.New("password must be at least 10 characters")
 	}
 
-	hash, err := HashPassword(password)
+	hash, err := HashPassword(ctx, password)
 	if err != nil {
 		return "", db.User{}, err
 	}
@@ -115,7 +115,9 @@ func (s *Service) Login(ctx context.Context, email, password, totpCode, ip, user
 	user, err := s.q.GetUserByEmail(ctx, email)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Burn comparable time so absent accounts are indistinguishable.
-		_ = VerifyPassword("$argon2id$v=19$m=65536,t=3,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", password)
+		if err := VerifyPassword(ctx, dummyHash, password); !errors.Is(err, ErrPasswordMismatch) {
+			return "", db.User{}, err
+		}
 		return "", db.User{}, ErrInvalidCredentials
 	}
 	if err != nil {
@@ -124,7 +126,10 @@ func (s *Service) Login(ctx context.Context, email, password, totpCode, ip, user
 	if !user.PasswordHash.Valid {
 		return "", db.User{}, ErrInvalidCredentials // OAuth-only account
 	}
-	if err := VerifyPassword(user.PasswordHash.String, password); err != nil {
+	if err := VerifyPassword(ctx, user.PasswordHash.String, password); err != nil {
+		if errors.Is(err, ErrHashBusy) || ctx.Err() != nil {
+			return "", db.User{}, err
+		}
 		return "", db.User{}, ErrInvalidCredentials
 	}
 
@@ -143,8 +148,29 @@ func (s *Service) Login(ctx context.Context, email, password, totpCode, ip, user
 		}
 	}
 
+	s.rehashPassword(ctx, user, password)
 	cookie, err := s.startSession(ctx, user, ip, userAgent)
 	return cookie, user, err
+}
+
+// rehashPassword stores a hash with the current parameters when the one the
+// user just logged in with is older. It never fails the login: the old hash
+// still verifies, and the next login tries again.
+func (s *Service) rehashPassword(ctx context.Context, user db.User, password string) {
+	if !NeedsRehash(user.PasswordHash.String) {
+		return
+	}
+	hash, err := HashPassword(ctx, password)
+	if err == nil {
+		_, err = s.q.RehashUserPassword(ctx, db.RehashUserPasswordParams{
+			NewHash: sql.NullString{String: hash, Valid: true},
+			ID:      user.ID,
+			OldHash: user.PasswordHash,
+		})
+	}
+	if err != nil {
+		s.logger.Warn("rehash password", "user", user.ID, "error", err)
+	}
 }
 
 // BeginTOTPEnrollment stores a new (disabled) secret and returns it with the

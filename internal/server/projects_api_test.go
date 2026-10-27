@@ -16,7 +16,7 @@ import (
 // hashViewer inserts a viewer-role user directly into the store.
 func hashViewer(t *testing.T, e *testEnv, ctx context.Context) {
 	t.Helper()
-	hash, err := auth.HashPassword("viewerpassword")
+	hash, err := auth.HashPassword(context.Background(), "viewerpassword")
 	if err != nil {
 		t.Fatal(err)
 	}

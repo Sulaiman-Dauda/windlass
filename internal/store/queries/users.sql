@@ -21,6 +21,11 @@ UPDATE users SET role = ? WHERE id = ?;
 -- name: UpdateUserPassword :exec
 UPDATE users SET password_hash = ? WHERE id = ?;
 
+-- name: RehashUserPassword :execrows
+-- Replaces the hash only while it is still the one login verified, so a
+-- password changed meanwhile is not overwritten with the old one.
+UPDATE users SET password_hash = sqlc.arg(new_hash) WHERE id = sqlc.arg(id) AND password_hash = sqlc.arg(old_hash);
+
 -- name: DisableUser :exec
 UPDATE users SET disabled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?;
 

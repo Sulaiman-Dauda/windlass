@@ -264,7 +264,7 @@ func TestOnlyAdminsCreateTokens(t *testing.T) {
 	e := newTestEnv(t)
 	e.login(t)
 	ctx := context.Background()
-	hash, err := auth.HashPassword("memberpassword")
+	hash, err := auth.HashPassword(context.Background(), "memberpassword")
 	if err != nil {
 		t.Fatal(err)
 	}

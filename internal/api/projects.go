@@ -182,7 +182,12 @@ func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "password_required", "re-enter your password to delete this project")
 			return
 		}
-		if err := auth.VerifyPassword(user.PasswordHash.String, req.Password); err != nil {
+		err := auth.VerifyPassword(r.Context(), user.PasswordHash.String, req.Password)
+		if errors.Is(err, auth.ErrHashBusy) {
+			writeError(w, http.StatusServiceUnavailable, "busy", "too many password checks at once, try again in a moment")
+			return
+		}
+		if err != nil {
 			a.Audit.Write(r.Context(), user.ID, "project.delete_denied", "project", name, remoteIP(r), nil)
 			writeError(w, http.StatusForbidden, "invalid_password", "password does not match")
 			return

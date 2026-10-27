@@ -69,6 +69,9 @@ func (a *API) handleSetup(w http.ResponseWriter, r *http.Request) {
 		a.Audit.Write(r.Context(), 0, "auth.setup_failed", "", "", remoteIP(r), nil)
 		writeError(w, http.StatusForbidden, "invalid_token", "invalid setup token")
 		return
+	case errors.Is(err, auth.ErrHashBusy):
+		writeError(w, http.StatusServiceUnavailable, "busy", "too many password checks at once, try again in a moment")
+		return
 	case err != nil:
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -104,6 +107,9 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		a.Audit.Write(r.Context(), 0, "auth.login_failed", "user", req.Email, remoteIP(r), nil)
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password")
+		return
+	case errors.Is(err, auth.ErrHashBusy):
+		writeError(w, http.StatusServiceUnavailable, "busy", "too many sign-ins at once, try again in a moment")
 		return
 	case err != nil:
 		a.Logger.Error("login", "error", err)

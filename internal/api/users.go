@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -105,7 +106,11 @@ func (a *API) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "bad_request", "password must be at least 10 characters")
 			return
 		}
-		h, err := auth.HashPassword(req.Password)
+		h, err := auth.HashPassword(r.Context(), req.Password)
+		if errors.Is(err, auth.ErrHashBusy) {
+			writeError(w, http.StatusServiceUnavailable, "busy", "too many password checks at once, try again in a moment")
+			return
+		}
 		if err != nil {
 			a.internalError(w, "hash password", err)
 			return

@@ -151,6 +151,26 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const rehashUserPassword = `-- name: RehashUserPassword :execrows
+UPDATE users SET password_hash = ?1 WHERE id = ?2 AND password_hash = ?3
+`
+
+type RehashUserPasswordParams struct {
+	NewHash sql.NullString
+	ID      int64
+	OldHash sql.NullString
+}
+
+// Replaces the hash only while it is still the one login verified, so a
+// password changed meanwhile is not overwritten with the old one.
+func (q *Queries) RehashUserPassword(ctx context.Context, arg RehashUserPasswordParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, rehashUserPassword, arg.NewHash, arg.ID, arg.OldHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const setUserTOTP = `-- name: SetUserTOTP :exec
 UPDATE users SET totp_secret_enc = ?, totp_enabled = ? WHERE id = ?
 `
