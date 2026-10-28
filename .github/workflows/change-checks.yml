@@ -191,12 +191,13 @@ jobs:
             echo "::error::osv-scanner could not run (exit $code)"
             exit 1
           fi
-          # Each finding as "fix<TAB>what", the fix empty when no release has one.
+          # Each finding as "fix<US>what", the fix empty when no release has one. Not a tab:
+          # read treats tab as whitespace and drops an empty first field.
           jq -r '.results[] | .source.path as $s | .packages[]? | .package as $p | .vulnerabilities[]? |
             ([.affected[]?.ranges[]?.events[]? | .fixed // empty] | last // "") as $fix |
-            "\($fix)\t\(.id) in \($p.name)@\($p.version) (\($s))"' "$RUNNER_TEMP/osv.json" > "$RUNNER_TEMP/osv.txt"
+            "\($fix)\u001f\(.id) in \($p.name)@\($p.version) (\($s))"' "$RUNNER_TEMP/osv.json" > "$RUNNER_TEMP/osv.txt"
           fixable=0
-          while IFS=$'\t' read -r fix what; do
+          while IFS=$'\x1f' read -r fix what; do
             if [ -n "$fix" ]; then
               echo "::error::$what is fixed in $fix"
               fixable=$((fixable + 1))
