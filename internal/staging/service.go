@@ -109,6 +109,10 @@ type Preflight struct {
 // Preflight checks live for a staging copy. req may be empty, in which case
 // the defaults are checked: live's branch, staging- domains and a data copy.
 func (s *Service) Preflight(ctx context.Context, liveName string, req Request) (Preflight, error) {
+	return s.preflight(ctx, liveName, req, nil, 0)
+}
+
+func (s *Service) preflight(ctx context.Context, liveName string, req Request, retained *retainedSettings, replacingProjectID int64) (Preflight, error) {
 	live, err := s.projects.Get(ctx, liveName)
 	if err != nil {
 		return Preflight{}, err
@@ -130,17 +134,21 @@ func (s *Service) Preflight(ctx context.Context, liveName string, req Request) (
 		block(fmt.Sprintf("%s is itself the staging of %s", live.Name, live.StagingOf.String), "Create staging from the live project.")
 		return pf, nil
 	}
-	if _, ok, err := s.projects.StagingFor(ctx, live.Name); err != nil {
+	replacing := false
+	if current, ok, err := s.projects.StagingFor(ctx, live.Name); err != nil {
 		return Preflight{}, err
 	} else if ok {
-		block(fmt.Sprintf("%s already has a staging", live.Name), "Open it, or delete it to start again.")
-		return pf, nil
+		if replacingProjectID == 0 || current.ID != replacingProjectID {
+			block(fmt.Sprintf("%s already has a staging", live.Name), "Open it, or delete it to start again.")
+			return pf, nil
+		}
+		replacing = true
 	}
 	exists, err := s.projectExists(ctx, pf.Staging)
 	if err != nil {
 		return Preflight{}, err
 	}
-	if exists {
+	if exists && !replacing {
 		block(fmt.Sprintf("a project named %s already exists and is not linked to %s", pf.Staging, live.Name),
 			"Rename or delete it first.")
 	}
@@ -175,6 +183,12 @@ func (s *Service) Preflight(ctx context.Context, liveName string, req Request) (
 		return Preflight{}, err
 	}
 	pf.Domains = domainMap(liveDomains, req.Domains)
+	if retained != nil {
+		pf.Domains = make([]DomainMap, 0, len(retained.domains))
+		for _, d := range retained.domains {
+			pf.Domains = append(pf.Domains, DomainMap{Staging: d.Hostname})
+		}
+	}
 	for _, d := range pf.Domains {
 		if d.Staging == "" {
 			block(fmt.Sprintf("%s has no staging domain", d.Live), "Give it one, such as "+DefaultHostname(d.Live)+".")
@@ -184,10 +198,15 @@ func (s *Service) Preflight(ctx context.Context, liveName string, req Request) (
 			block(fmt.Sprintf("%s is live's domain", d.Staging), "Give staging a domain of its own.")
 			continue
 		}
-		if err := s.proxy.CheckHostname(ctx, d.Staging); err != nil {
+		if err := s.proxy.CheckHostnameForProject(ctx, d.Staging, replacingProjectID); err != nil {
 			block(err.Error(), "Choose another staging domain.")
 		}
-		pf.Rewrites = append(pf.Rewrites, projects.HostnameRewrite{From: d.Live, To: strings.ToLower(d.Staging)})
+		if retained == nil {
+			pf.Rewrites = append(pf.Rewrites, projects.HostnameRewrite{From: d.Live, To: strings.ToLower(d.Staging)})
+		}
+	}
+	if retained != nil {
+		pf.Rewrites = append([]projects.HostnameRewrite{}, retained.rewrites...)
 	}
 	if pf.Rewrites == nil {
 		pf.Rewrites = []projects.HostnameRewrite{}
@@ -206,7 +225,7 @@ func (s *Service) Preflight(ctx context.Context, liveName string, req Request) (
 	}
 	pf.Blockers = append(pf.Blockers, projects.HealthURLsOnHosts(stagingCfg, hosts)...)
 
-	env, err := s.stagingEnv(ctx, live.Name, pf.Rewrites, req.Env)
+	env, err := s.plannedEnv(ctx, live.Name, pf.Rewrites, req.Env, retained)
 	if err != nil {
 		return Preflight{}, err
 	}
@@ -337,33 +356,22 @@ type Result struct {
 // the panel's external base URL, for the webhook. Anything that fails before
 // the deployment is queued is undone.
 func (s *Service) Create(ctx context.Context, liveName string, req Request, origin string) (Result, error) {
-	pf, err := s.Preflight(ctx, liveName, req)
+	return s.create(ctx, liveName, req, origin, nil)
+}
+
+func (s *Service) create(ctx context.Context, liveName string, req Request, origin string, retained *retainedSettings) (Result, error) {
+	pf, err := s.preflight(ctx, liveName, req, retained, 0)
 	if err != nil {
 		return Result{}, err
 	}
-	if len(pf.Blockers) > 0 {
-		lines := make([]string, 0, len(pf.Blockers))
-		for _, b := range pf.Blockers {
-			lines = append(lines, strings.TrimSpace(b.Service+" "+b.Message))
-		}
-		return Result{}, fmt.Errorf("%w: %s", ErrBlocked, strings.Join(lines, "; "))
-	}
-	if req.CopyData {
-		for _, item := range pf.Data {
-			if item.Kind == "database" && hasWarning(pf.Warnings, item.Service, "is not running") {
-				return Result{}, fmt.Errorf("%w: live's %s database is not running, so its data cannot be copied",
-					ErrBlocked, item.Name)
-			}
-		}
-	}
-	if len(pf.Flagged) > 0 && !req.Acknowledged {
-		return Result{}, ErrNotAcknowledged
+	if err := validateCreate(pf, req); err != nil {
+		return Result{}, err
 	}
 	live, err := s.projects.Get(ctx, liveName)
 	if err != nil {
 		return Result{}, err
 	}
-	env, err := s.stagingEnv(ctx, live.Name, pf.Rewrites, req.Env)
+	env, err := s.plannedEnv(ctx, live.Name, pf.Rewrites, req.Env, retained)
 	if err != nil {
 		return Result{}, err
 	}
@@ -389,9 +397,17 @@ func (s *Service) Create(ctx context.Context, liveName string, req Request, orig
 	for _, d := range pf.Domains {
 		targets[d.Live] = strings.ToLower(d.Staging)
 	}
+	domains := make([]projects.DomainConfig, 0, len(liveDomains))
 	for _, d := range liveDomains {
-		if _, err := s.proxy.Add(ctx, staging.ID, targets[d.Hostname], d.Service, d.ContainerPort); err != nil {
-			return undo(fmt.Errorf("add staging domain %s: %w", targets[d.Hostname], err))
+		d.Hostname = targets[d.Hostname]
+		domains = append(domains, d)
+	}
+	if retained != nil {
+		domains = retained.domains
+	}
+	for _, d := range domains {
+		if _, err := s.proxy.Add(ctx, staging.ID, d.Hostname, d.Service, d.ContainerPort); err != nil {
+			return undo(fmt.Errorf("add staging domain %s: %w", d.Hostname, err))
 		}
 	}
 
@@ -436,6 +452,30 @@ func (s *Service) Create(ctx context.Context, liveName string, req Request, orig
 		}
 	}
 	return result, nil
+}
+
+// validateCreate applies the same blockers before replacement deletes the old
+// staging and when creation checks live again afterward.
+func validateCreate(pf Preflight, req Request) error {
+	if len(pf.Blockers) > 0 {
+		lines := make([]string, 0, len(pf.Blockers))
+		for _, b := range pf.Blockers {
+			lines = append(lines, strings.TrimSpace(b.Service+" "+b.Message))
+		}
+		return fmt.Errorf("%w: %s", ErrBlocked, strings.Join(lines, "; "))
+	}
+	if req.CopyData {
+		for _, item := range pf.Data {
+			if item.Kind == "database" && hasWarning(pf.Warnings, item.Service, "is not running") {
+				return fmt.Errorf("%w: live's %s database is not running, so its data cannot be copied",
+					ErrBlocked, item.Name)
+			}
+		}
+	}
+	if len(pf.Flagged) > 0 && !req.Acknowledged {
+		return ErrNotAcknowledged
+	}
+	return nil
 }
 
 // valuesOutsideEnv warns about each service that gets a value the flagged
@@ -581,6 +621,7 @@ type DeploymentRef struct {
 
 	id           int64
 	promotedFrom int64 // the staging deployment's ID, for a promoted live deployment
+	recreatable  bool
 }
 
 // DriftFile is a compose file that differs between live and staging once
@@ -602,9 +643,12 @@ type Status struct {
 	Latest      *DeploymentRef `json:"staging_latest"`
 	Promotable  *DeploymentRef `json:"promotable"`
 	// PromoteBlocked says why Promote is unavailable; empty when it is.
-	PromoteBlocked string                     `json:"promote_blocked,omitempty"`
-	Rewrites       []projects.HostnameRewrite `json:"rewrites"`
-	Drift          []DriftFile                `json:"drift"`
+	PromoteBlocked string `json:"promote_blocked,omitempty"`
+	CanRecreate    bool   `json:"can_recreate"`
+	// RecreateFlaggedKeys names the retained values to review, never their contents.
+	RecreateFlaggedKeys []string                   `json:"recreate_flagged_keys,omitempty"`
+	Rewrites            []projects.HostnameRewrite `json:"rewrites"`
+	Drift               []DriftFile                `json:"drift"`
 }
 
 // ErrNoStaging means the project is neither a staging nor has one.
@@ -637,6 +681,14 @@ func (s *Service) Status(ctx context.Context, name string) (Status, error) {
 	}
 	if st.Latest, err = s.latest(ctx, staging.Name); err != nil {
 		return Status{}, err
+	}
+	st.CanRecreate = st.Latest != nil && st.Latest.recreatable
+	if st.CanRecreate {
+		env, err := s.projects.GetEnv(ctx, staging.Name)
+		if err != nil {
+			return Status{}, err
+		}
+		st.RecreateFlaggedKeys = projects.OutsideWorldKeys(env)
 	}
 	st.PromoteBlocked = promoteBlocked(st)
 
@@ -687,7 +739,7 @@ func (s *Service) latest(ctx context.Context, project string) (*DeploymentRef, e
 
 func ref(d db.Deployment) *DeploymentRef {
 	return &DeploymentRef{Number: d.Number, Status: d.Status, Commit: d.GitCommit.String,
-		id: d.ID, promotedFrom: d.PromotedFrom.Int64}
+		id: d.ID, promotedFrom: d.PromotedFrom.Int64, recreatable: recreatable(d)}
 }
 
 // drift lists the top-level compose files that differ, comparing live's

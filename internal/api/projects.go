@@ -73,6 +73,7 @@ func (a *API) projectRoutes(r chi.Router) {
 		r.Put("/{name}/git", a.handleConfigureProjectGit)
 		r.Post("/{name}/staging/preflight", a.handleStagingPreflight)
 		r.Post("/{name}/staging", a.handleCreateStaging)
+		r.With(auth.RejectToken).Post("/{name}/staging/recreate", a.limitAuth(a.handleRecreateStaging))
 		r.Put("/{name}/staging", a.handleSetStaging)
 		// Member only. A token without the secrets flag gets both files
 		// masked, and Copy to live then refuses the masked content.
@@ -168,30 +169,15 @@ func (a *API) handleGetProject(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-
-	// Deleting stops containers and removes the project directory, so a live
-	// session alone is not enough: users with a password must re-enter it.
-	// OAuth-only accounts have no password hash and skip this check.
 	user, _ := auth.UserFrom(r.Context())
+	var req struct {
+		Password string `json:"password"`
+	}
 	if user.PasswordHash.Valid {
-		var req struct {
-			Password string `json:"password"`
-		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		if req.Password == "" {
-			writeError(w, http.StatusForbidden, "password_required", "re-enter your password to delete this project")
-			return
-		}
-		err := auth.VerifyPassword(r.Context(), user.PasswordHash.String, req.Password)
-		if errors.Is(err, auth.ErrHashBusy) {
-			writeError(w, http.StatusServiceUnavailable, "busy", "too many password checks at once, try again in a moment")
-			return
-		}
-		if err != nil {
-			a.Audit.Write(r.Context(), user.ID, "project.delete_denied", "project", name, remoteIP(r), nil)
-			writeError(w, http.StatusForbidden, "invalid_password", "password does not match")
-			return
-		}
+	}
+	if !a.confirmProjectDeletion(w, r, req.Password, "project.delete_denied") {
+		return
 	}
 
 	err := a.Projects.Delete(r.Context(), name)
@@ -213,6 +199,30 @@ func (a *API) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 	}
 	a.Audit.Write(r.Context(), user.ID, "project.delete", "project", name, remoteIP(r), nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Both delete and staging recreation remove the directory and volumes. A
+// session alone is insufficient; OAuth-only accounts have no hash to check.
+func (a *API) confirmProjectDeletion(w http.ResponseWriter, r *http.Request, password, deniedAction string) bool {
+	user, _ := auth.UserFrom(r.Context())
+	if !user.PasswordHash.Valid {
+		return true
+	}
+	if password == "" {
+		writeError(w, http.StatusForbidden, "password_required", "re-enter your password to delete this project")
+		return false
+	}
+	err := auth.VerifyPassword(r.Context(), user.PasswordHash.String, password)
+	if errors.Is(err, auth.ErrHashBusy) {
+		writeError(w, http.StatusServiceUnavailable, "busy", "too many password checks at once, try again in a moment")
+		return false
+	}
+	if err != nil {
+		a.Audit.Write(r.Context(), user.ID, deniedAction, "project", chi.URLParam(r, "name"), remoteIP(r), nil)
+		writeError(w, http.StatusForbidden, "invalid_password", "password does not match")
+		return false
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------

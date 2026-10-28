@@ -23,6 +23,7 @@ import { useToast, errorText } from "../ui/Toast";
 import { diffLines } from "../ui/diff";
 import { cn } from "../ui/cn";
 import { plural } from "../ui/format";
+import RecreateStagingDialog from "./RecreateStagingDialog";
 
 /**
  * The live and staging pair with Promote, on either project's overview.
@@ -31,10 +32,18 @@ import { plural } from "../ui/format";
 export default function StagingCard({ project }: { project: string }) {
   const p = useProject(project).data;
   const status = useStagingStatus(project, !!(p?.staging || p?.staging_of));
-  if (!p || !(p.staging || p.staging_of)) return null;
-  if (status.isLoading) return <Skeleton className="h-[188px] w-full rounded-card" />;
-  if (!status.data) return null;
-  return <PairCard st={status.data} />;
+  const [recreating, setRecreating] = useState<StagingStatus | null>(null);
+  return (
+    <>
+      {p && (p.staging || p.staging_of) && (
+        status.isLoading ? <Skeleton className="h-[188px] w-full rounded-card" /> : status.data && (
+          <PairCard st={status.data} onRecreate={project === status.data.staging ? () => setRecreating(status.data!) : undefined} />
+        )
+      )}
+      {/* Status can briefly be absent between deletion and creation. Keep the dialog mounted. */}
+      {recreating && <RecreateStagingDialog st={recreating} onClose={() => setRecreating(null)} />}
+    </>
+  );
 }
 
 function Side({
@@ -131,7 +140,7 @@ export function usePromoteAction(st: StagingStatus | null | undefined) {
   return { run, pending: promote.isPending };
 }
 
-function PairCard({ st }: { st: StagingStatus }) {
+function PairCard({ st, onRecreate }: { st: StagingStatus; onRecreate?: () => void }) {
   const can = useCan();
   const toast = useToast();
   const promote = usePromoteAction(st);
@@ -160,17 +169,21 @@ function PairCard({ st }: { st: StagingStatus }) {
         }
         actions={
           member && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon="deploy"
-              onClick={promote.run}
-              disabled={!!st.promote_blocked}
-              loading={promote.pending}
-              title={st.promote_blocked ? `Promote is unavailable because ${st.promote_blocked}` : undefined}
-            >
-              {p ? `Promote #${p.number}` : "Promote"}
-            </Button>
+            st.can_recreate && onRecreate ? (
+              <Button variant="danger" size="sm" onClick={onRecreate}>Recreate staging</Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="sm"
+                icon="deploy"
+                onClick={promote.run}
+                disabled={!!st.promote_blocked}
+                loading={promote.pending}
+                title={st.promote_blocked ? `Promote is unavailable because ${st.promote_blocked}` : undefined}
+              >
+                {p ? `Promote #${p.number}` : "Promote"}
+              </Button>
+            )
           )
         }
       />

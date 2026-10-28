@@ -77,6 +77,13 @@ func (s *Service) SetPanelDomain(ctx context.Context, hostname string) error {
 // CheckHostname reports why hostname cannot become a new domain: it is not
 // a valid hostname, or a project or the panel already uses it.
 func (s *Service) CheckHostname(ctx context.Context, hostname string) error {
+	return s.CheckHostnameForProject(ctx, hostname, 0)
+}
+
+// CheckHostnameForProject also permits a hostname already owned by projectID.
+// A replacement can check its retained domains before deleting the old copy;
+// names belonging to the panel or another project still conflict.
+func (s *Service) CheckHostnameForProject(ctx context.Context, hostname string, projectID int64) error {
 	hostname = strings.ToLower(strings.TrimSpace(hostname))
 	if !validHostname(hostname) {
 		return fmt.Errorf("%w: %q", ErrInvalidHostname, hostname)
@@ -93,7 +100,7 @@ func (s *Service) CheckHostname(ctx context.Context, hostname string) error {
 		return err
 	}
 	for _, d := range all {
-		if d.Hostname == hostname {
+		if d.Hostname == hostname && d.ProjectID != projectID {
 			return fmt.Errorf("%w: %s routes to %s", ErrConflict, hostname, d.ProjectName)
 		}
 	}

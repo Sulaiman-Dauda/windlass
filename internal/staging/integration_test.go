@@ -5,6 +5,7 @@ package staging
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"io"
 	"log/slog"
 	"os/exec"
@@ -181,6 +182,31 @@ func TestRealStagingCopiesData(t *testing.T) {
 	}
 	if checksum(live+"_files") != before {
 		t.Error("staging's write reached live's volume")
+	}
+
+	// Model the persisted failure after an interrupted first copy. The
+	// staging-only file and extra row stand for partially loaded old data.
+	first, err := dep.Get(ctx, staging, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.FinishDeployment(ctx, db.FinishDeploymentParams{ID: first.ID, Status: "failed",
+		Error: sql.NullString{String: deploy.InterruptedDataCopyMessage, Valid: true}}); err != nil {
+		t.Fatal(err)
+	}
+	res, err = svc.Recreate(ctx, staging, true, "", nil)
+	if err != nil {
+		t.Fatalf("recreate interrupted staging: %v", err)
+	}
+	wait(staging, res.Deployment)
+	if got := sh(staging, "app", "test ! -e /data/staging-only && cat /data/app.db /data/uploads/a.jpg"); got != "stock\nphoto" {
+		t.Errorf("replacement files = %q", got)
+	}
+	if got := psql(staging, "SELECT count(*) FROM orders"); got != "250" {
+		t.Errorf("replacement has %s orders, want a fresh copy of live's 250", got)
+	}
+	if checksum(live+"_files") != before || psql(live, "SELECT count(*) FROM orders") != "250" {
+		t.Error("recreating staging changed live's data")
 	}
 
 	// Delete and create again without data: the volumes start clean.

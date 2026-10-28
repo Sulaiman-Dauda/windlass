@@ -29,6 +29,9 @@ import (
 
 const (
 	JobType = "deploy"
+	// InterruptedDataCopyMessage is durable: staging recovery recognises it
+	// without treating an unrelated failed deployment as disposable.
+	InterruptedDataCopyMessage = "data copy was interrupted; delete staging and create it again"
 
 	stepPreparing = "preparing"
 	stepSyncing   = "syncing"
@@ -323,9 +326,8 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 	// A seed is not safe to run twice: half-loaded data would be loaded
 	// again on top of itself.
 	if pl.Seed != "" && d.StartedAt.Valid && resumeStep == stepApplying {
-		const msg = "data copy was interrupted; delete staging and create it again"
-		s.event(ctx, d.ID, "error", msg)
-		s.finish(ctx, d, "failed", msg)
+		s.event(ctx, d.ID, "error", InterruptedDataCopyMessage)
+		s.finish(ctx, d, "failed", InterruptedDataCopyMessage)
 		return nil
 	}
 
