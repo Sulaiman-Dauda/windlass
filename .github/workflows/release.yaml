@@ -1,5 +1,10 @@
 name: Release
 
+# Releases are cut by pushing a v* tag from a green main, usually as a weekly
+# batch, and the same day for a security fix or a broken install. Merging to
+# main releases nothing. Panels tracking this repo (WINDLASS_UPDATE_REPO) see
+# the new tag as "update available".
+
 on:
   push:
     tags: ["v*"]
@@ -23,6 +28,11 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: stable
+
+      - name: Gate on tests
+        run: |
+          go vet ./...
+          go test ./...
 
       - name: Build frontend
         working-directory: web
@@ -63,6 +73,7 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --title "Windlass ${GITHUB_REF_NAME}" \
             --generate-notes \
+            --latest \
             dist/windlass-linux-amd64 dist/windlass-linux-arm64 dist/checksums.txt install/install.sh
 
       - name: Log in to GHCR
