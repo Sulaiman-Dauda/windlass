@@ -1,20 +1,51 @@
 # Windlass
 
-Windlass is a lightweight, self-hosted Docker Compose control plane. It provides projects,
-Git deployments, domains with HTTPS, logs, terminals, metrics, backups, templates, users,
-and updates without replacing Docker Compose with a proprietary runtime.
+**A self-hosted panel for Docker Compose that never rewrites your compose file.**
 
-![The Windlass dashboard](docs/screenshots/dashboard-light.png)
+[![Latest release](https://img.shields.io/github/v/release/Sulaiman-Dauda/windlass)](https://github.com/Sulaiman-Dauda/windlass/releases/latest) [![Licence: Apache-2.0](https://img.shields.io/badge/licence-Apache--2.0-blue)](LICENSE)
+
+Windlass gives one server Git deployments, HTTPS domains, logs, a terminal, metrics,
+backups and users, and does all of it by running the real `docker compose` CLI on your own
+`compose.yaml`. No Swarm, no Postgres, no Redis: one Go binary, one SQLite file and Caddy.
+The process idles at about 24 MB, and CI fails any build that reaches 40 MB.
 
 ![Creating a project in Windlass, deploying it, and watching the log stream until nginx reports healthy](docs/screenshots/deploy.gif)
-
-Stop Windlass and your sites keep serving. The containers are ordinary Compose containers
-with a restart policy, and Caddy keeps the routes it already has. There is nothing to
-migrate off if you change your mind: see [life without the panel](docs/life-without-the-panel.md).
 
 ```sh
 curl -fsSL https://get.windlass.run | sudo sh
 ```
+
+Runs on Linux, x86_64 or arm64. Claiming the instance and setting the panel domain are under
+[Install](#install).
+
+## Why Windlass
+
+- **Your compose file stays yours.** Windlass adds no labels, networks or renamed volumes to
+  it. Routes go to Caddy through its API, so `docker compose up -d` by hand still works, and
+  the panel reads the same files you edit.
+- **The panel is not in the request path.** Stop Windlass and your sites keep serving: the
+  containers are ordinary Compose containers with a restart policy, and Caddy keeps its
+  routes. See [life without the panel](docs/life-without-the-panel.md).
+- **Nothing to migrate off.** Everything that defines an app is a plain file in
+  `/var/lib/windlass/projects/<name>/`. Uninstall Windlass and you keep a folder of Compose
+  projects that run with `docker compose` alone.
+- **Small enough for the cheapest VPS.** No database server or cache to feed besides your apps.
+
+## How it compares
+
+Checked against each project's own docs and source on 30/10/2026. Corrections welcome.
+
+| | Windlass | Coolify | Dokploy | CapRover | Dokku |
+|---|---|---|---|---|---|
+| Deploys your compose file with | `docker compose`, file unchanged | its own labels, networks and volume names added ("Raw" mode leaves it mostly alone) | `docker compose`, Traefik labels written into the file | converted into CapRover apps; `build`, `networks` and `deploy` ignored | no compose support; git push, image or archive |
+| Runs alongside | Caddy, SQLite | Postgres, Redis, Traefik or Caddy | Docker Swarm, Postgres, Traefik | Docker Swarm, nginx | nginx (other proxies optional) |
+| Stated server minimum | none; the panel idles at about 24 MB | 2 GB RAM | 2 GB RAM | 1 GB RAM recommended | 1 GB RAM |
+| Licence | Apache-2.0 | Apache-2.0 | Apache-2.0, except `/proprietary` | Apache-2.0 | MIT |
+
+If you want a Heroku-style git push workflow, Dokku is the better fit. If you already write
+Compose files and want a panel that leaves them alone, that is what Windlass is for.
+
+![The Windlass dashboard](docs/screenshots/dashboard-light.png)
 
 More screens in [docs/screenshots](docs/screenshots/), and the full guides at
 [windlass.run](https://windlass.run).
@@ -110,6 +141,6 @@ The production binary embeds `web/dist`:
 CGO_ENABLED=0 go build -trimpath -tags embedweb ./cmd/windlass
 ```
 
-## License
+## Licence
 
 Apache-2.0
