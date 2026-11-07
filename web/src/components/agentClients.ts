@@ -13,10 +13,10 @@ export const CLIENTS: { id: ClientId; label: string; tokenName: string }[] = [
   { id: "zed", label: "Zed", tokenName: "zed" },
 ];
 
-export const SERVER_NAME = "windlass";
-export const TOKEN_ENV = "WINDLASS_TOKEN";
+const SERVER_NAME = "windlass";
+const TOKEN_ENV = "WINDLASS_TOKEN";
 
-export interface Snippet {
+interface Snippet {
   title: string;
   path?: string;
   code: string;
