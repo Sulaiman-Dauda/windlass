@@ -29,6 +29,8 @@ A Compose control plane that does not own your containers.
 - [API](./api.md), the versioned HTTP API the panel itself uses
 - [AI agents (MCP)](./mcp.md), connecting Claude Code, Cursor, VS Code or Codex, and what
   an agent can and cannot do
+- [Security](./security.md), what runs as root, what the panel can reach, token and agent
+  limits, and how to verify a release before installing it
 - [Architecture](./architecture.md), how it is put together and why it shells out to
   `docker compose`
 - [Troubleshooting](./troubleshooting.md), the failures that are most often misread

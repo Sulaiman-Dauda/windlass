@@ -44,8 +44,8 @@ A project that pulls from a private registry needs the host authenticated, or
 running.
 
 Windlass applies stored registry credentials with a real `docker login`, at
-startup and again before every pull, so the credential lives in the host's
-Docker config rather than inside the panel. That is deliberate: holding it only
+startup and again before every pull, so the credential lives in a Docker config
+file on the host rather than inside the panel. That is deliberate: holding it only
 in Windlass would make the panel required to start your applications, which is
 the one thing it promises not to be.
 
@@ -55,8 +55,11 @@ Set one in **Settings, Registries**, or by hand without the panel:
 echo "$TOKEN" | sudo docker login ghcr.io --username <user> --password-stdin
 ```
 
-Either way the credential ends up in the same place, and removing Windlass
-leaves it behind.
+The two land in different files. Windlass runs `docker login` as the `windlass` user,
+so its credentials are in `/var/lib/windlass/.docker/config.json`. `sudo docker login`
+writes root's, `/root/.docker/config.json`. Removing Windlass leaves both behind. To use
+the panel's credentials as root, point Docker at its config with
+`DOCKER_CONFIG=/var/lib/windlass/.docker`, as below.
 
 ### Check the promise holds
 
@@ -65,13 +68,15 @@ With the panel stopped, a project must still pull and start:
 ```sh
 sudo systemctl stop windlass
 cd /var/lib/windlass/projects/myapp
-sudo docker compose -p myapp pull
+sudo DOCKER_CONFIG=/var/lib/windlass/.docker docker compose -p myapp pull
 sudo docker compose -p myapp up -d
 sudo systemctl start windlass
 ```
 
-If the pull fails with `unauthorized`, the host has no credential for that
-registry and no deployment will succeed either.
+If the pull fails with `unauthorized`, Windlass has no credential for that
+registry and no deployment will succeed either. A credential added with
+`sudo docker login` is in root's config instead, so drop `DOCKER_CONFIG=...` to test that
+one.
 
 ## Rebuild the application index
 

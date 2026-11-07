@@ -9,10 +9,18 @@ back, promote staging and take a backup.
 It cannot edit Compose files or `.env`. Agents change code in Git and deploy it; the compose
 file stays the authority, as it is everywhere else in Windlass.
 
+## Before you start
+
+- Windlass v0.60 or later. An admin sees the running version under **Settings, System**.
+- The panel on an HTTPS domain, set in **Settings, General, Panel domain**. The token travels
+  in a header on every call, and over plain HTTP anyone on the path can read it.
+- An MCP client that connects to remote servers over HTTP with a bearer token. The four
+  below do.
+
 ## Connect
 
-1. In **Settings, API tokens**, create a **Read only** token. Make it **Deploy only** when
-   you want the agent to deploy; its owner must be a member or admin.
+1. As an admin, create a **Read only** token in **Settings, API tokens**, or a **Deploy only**
+   one when you want the agent to deploy.
 2. Put it in your environment from your secret store, not typed into shell history:
    `export WINDLASS_TOKEN=wl_pat_...`
 3. Add the server to your client as below, with your panel's address in place of
@@ -105,7 +113,7 @@ curl -sS https://panel.example/api/v1/mcp \
 
 `tools/list` shows a token only the tools it can use.
 
-| Tool | Token | What it does |
+| Tool | Needs | What it does |
 | --- | --- | --- |
 | `list_projects` | any | The projects the token can see |
 | `get_project` | any | Services with container state and exit code, health, domains, last deployment |
@@ -125,28 +133,36 @@ curl -sS https://panel.example/api/v1/mcp \
 ## What an agent never sees or does
 
 - **Env values.** No tool returns `.env` or env values, whatever the token's access or its
-  env values setting. Log output has `[redacted]` in place of any Windlass API token and of
-  the project's env values: those in `.env` and those its top-level Compose files set inline
-  (`environment` and build `args`, the default in `${NAME:-value}` included, and in config
-  `content` each line's value and each long line with no spaces, such as a key's body). If
-  Windlass cannot read those values, or a Compose file will not parse, it withholds the log
-  text rather than send it unscrubbed.
-  The match is exact, so some values get through: one shorter than 6 characters, or than 4
-  under a name such as `DB_PASSWORD`, `API_TOKEN` or `SECRET_KEY`; one from another env file
-  named by `env_file`; a line of a multi-line config `content` that is neither `key = value`
-  nor 16 characters with no spaces; one the app prints encoded or in pieces. Keep secrets out of logs
-  regardless.
+  env values setting.
+- **Secrets in logs, mostly.** Log output has `[redacted]` in place of any Windlass API token
+  and of the project's env values: those in `.env` and those its top-level Compose files set
+  inline (`environment` and build `args`, the default in `${NAME:-value}` included, and in
+  config `content` each line's value and each long line with no spaces, such as a key's
+  body). If Windlass cannot read those values, or a Compose file will not parse, it withholds
+  the log text rather than send it unscrubbed. See [What scrubbing misses](#what-scrubbing-misses).
 - **Changes beyond the five writes.** No editing Compose, env, files, Git settings or
   domains; no start, stop, delete, restore, staging create, terminal, users or tokens. The
   REST routes for those refuse a Deploy only token too.
 - **A browser.** The endpoint takes a bearer token only, never the panel's session cookie,
   and refuses any request that carries an `Origin` header, so a web page cannot reach it.
 
+### What scrubbing misses
+
+The match is exact, so these get through:
+
+- a value shorter than 6 characters, or shorter than 4 under a name such as `DB_PASSWORD`,
+  `API_TOKEN` or `SECRET_KEY`
+- a value from another env file named by `env_file`
+- a line of a multi-line config `content` that is neither `key = value` nor 16 characters
+  with no spaces
+- a value the app prints encoded or in pieces
+
+Keep secrets out of logs regardless.
+
 ## Writes
 
 `deploy`, `restart`, `rollback`, `promote` and `create_backup` are marked destructive and need
-`confirm: true`.
-The server tells the agent to ask you before each one and to prefer staging and promote over
+`confirm: true`. The server tells the agent to ask you before each one and to prefer staging and promote over
 changing live directly. That relies on the agent: a model can set `confirm` without asking,
 and in testing one did when told plainly to redeploy. Treat `confirm` as a speed bump. The
 real controls are your client's prompt to approve each tool call (leave it on for these five)
@@ -173,9 +189,12 @@ Each write appears twice in the audit log: the route's own entry naming the toke
 ## Protocol
 
 Streamable HTTP, stateless: JSON responses only, no sessions and no server-sent events; GET
-and DELETE answer 405. Two revisions are served: 2026-07-28 (`server/discover`, with the
-`MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` headers) and 2025-11-25 (`initialize`,
-answered without a session id).
+and DELETE answer 405. Three revisions are accepted:
+
+- **2026-07-28**, with `server/discover` and the `MCP-Protocol-Version`, `Mcp-Method` and
+  `Mcp-Name` headers
+- **2025-11-25**, with `initialize`, answered without a session id
+- **2025-06-18**, served as 2025-11-25, which has the same tool shapes
 
 There is no OAuth sign-in yet, so a client that can connect to remote servers only through
 OAuth cannot use it.

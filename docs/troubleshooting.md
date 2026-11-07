@@ -18,7 +18,7 @@ recorded and kept, including for deployments that failed.
 
 Prepare reads `.env` and runs `docker compose config`. A failure here is usually Compose
 rejecting the file, and the message is Compose's own, literal about the line. Nothing was
-stopped, because Prepare runs before anything is changed.
+stopped, because Prepare runs before any container is touched.
 
 Reproduce it directly on the server for the full context:
 

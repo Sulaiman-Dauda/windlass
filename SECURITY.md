@@ -4,11 +4,14 @@ Windlass is a control plane for Docker Compose. It holds Docker socket access,
 writes Caddy configuration and stores platform credentials, so a compromise of
 Windlass is a compromise of everything it deploys. Treat it accordingly.
 
-## Status — read this first
+## Status: read this first
 
 Windlass is **pre-1.0 and has had no external security audit**. It is suitable
 for machines you control and can rebuild. Do not put it in front of
 infrastructure you cannot afford to lose.
+
+How Windlass is put together from a security point of view, what runs as root and how to
+verify a release, is in [docs/security.md](docs/security.md).
 
 ## Reporting a vulnerability
 
@@ -37,8 +40,8 @@ The design assumption is that **privileged work is confined to one package**:
 - Deployed containers keep running if Windlass stops or is removed. It is a
   control plane, not a runtime dependency.
 
-A way to cross that boundary — to reach Docker or the host from outside
-`internal/agent/local` — is the most valuable thing anyone could report.
+A way to cross that boundary, to reach Docker or the host from outside
+`internal/agent/local`, is the most valuable thing anyone could report.
 
 ## In scope
 

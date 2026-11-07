@@ -26,7 +26,7 @@ confirm, and the dialog shows everything it is about to do:
   before staging can be created. A key like these that a service gets from an `env_file` or
   the compose file itself, rather than `.env`, is listed as a warning: staging copies those
   files as they are, so it keeps live's value unless you change staging's copy.
-- **Copy live's data.** On by default when live has volumes. Named volumes are copied file
+- **Copy live's data.** On by default. Named volumes are copied file
   by file. A Postgres, MySQL or MariaDB volume is not copied as files, because a running
   database's files are not safe to copy: Windlass dumps live's database and loads the dump
   into staging's own fresh server. Live keeps running throughout. Only one database is
@@ -68,13 +68,18 @@ block creation, each with the fix shown in the dialog:
 
 - `container_name`, a published host port, `network_mode: host` or another container's
   network
-- an `external` network, where live's services answer to the same names
+- an `external` network, or a network with a fixed `name:`, where live's services answer to
+  the same names
 - an `external` volume, or a volume with a fixed `name:`
 - a writable bind mount outside the project directory (read-only mounts such as
   `/etc/localtime:ro` are allowed and listed)
 - a `windlass.health.url` that still checks live's domain
 - a service that builds on the server when live is not connected to Git, because promotion
   would have nothing to deploy but live's own files
+
+Creation is also refused when live already has a staging or is one, when a project already
+has the staging's name, when live's name is over 55 characters, and when copying data is on
+but live's database is not running.
 
 The same isolation check runs at the start of every staging deployment, so a compose file
 edited later cannot start sharing with live without the deployment failing.
@@ -92,7 +97,8 @@ verified, and **Promote #N**. Promote creates a new live deployment that:
 - pins every pulled image to the digest staging ran, and skips pull
 - uses live's own compose files, `.env` and data, which promotion never touches
 
-A promoted deployment is marked "promoted from staging #N" in live's history and is health
+A promoted deployment is marked "promoted from #N" in live's history, naming staging's
+deployment number, and is health
 checked like any other, so a promotion that fails verification fails on live the same way a
 deployment would. Roll it back from the Deployments tab as usual.
 

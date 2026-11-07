@@ -1,7 +1,7 @@
 # Configuration reference
 
-Windlass is configured entirely through `WINDLASS_*` environment variables, so it behaves
-the same under systemd and under Docker. Everything else, the parts an operator changes
+Windlass is configured through `WINDLASS_*` environment variables, plus Docker's own
+`DOCKER_HOST`, so it behaves the same under systemd and under Docker. Everything else, the parts an operator changes
 day to day, lives in Settings in the panel.
 
 Under systemd, put overrides in a drop-in rather than editing the unit:
@@ -25,10 +25,11 @@ Environment=WINDLASS_LOG_LEVEL=debug
 | `WINDLASS_LOG_LEVEL` | `info` | One of `debug`, `info`, `warn`, `error`. An unrecognised value is a startup error rather than a silent fallback. |
 | `WINDLASS_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy admin API. Set this when Caddy runs in a container: `http://caddy:2019`. |
 | `WINDLASS_PANEL_UPSTREAM` | `127.0.0.1:8080` | The address Caddy dials to reach the panel, used by the Settings-managed panel hostname. Change it when Caddy is not on the host network. |
-| `WINDLASS_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128` | Sources allowed to supply forwarding headers. The default covers the recommended local Caddy. Widen it only for a proxy you control. |
+| `WINDLASS_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128` | Sources whose `X-Forwarded-For` and `X-Real-IP` headers Windlass believes when it records a client's address. The default covers the recommended local Caddy. Widen it only for a proxy you control. |
 | `WINDLASS_UPDATE_REPO` | `Sulaiman-Dauda/windlass` | Repository checked for releases. |
 | `WINDLASS_UPDATE_TOKEN` | unset | Authenticates release checks and downloads. Required only for a private update repository. Windlass removes it from its environment once read, so Compose, Git and plugins never see it. |
 | `WINDLASS_NO_SELF_UPDATE` | unset | Any non-empty value disables self-update. Useful when a package manager or image tag owns the version. The panel still shows when a new version exists, without the Update now button. |
+| `DOCKER_HOST` | Docker's default socket | Where Windlass and the `docker compose` it runs reach Docker. The installer sets `tcp://127.0.0.1:2375`, the restricted socket proxy, and the container install points it at the proxy service. |
 
 `WINDLASS_TRUSTED_PROXIES` decides whether a client-supplied `X-Forwarded-For` is believed.
 Trusting an address you do not control lets a client claim any source IP, which matters
@@ -43,7 +44,7 @@ them are encrypted with `secret.key`.
 - Panel domain, which creates the HTTPS route for the panel itself (Settings, General)
 - Users, two-factor and GitHub or Google sign-in (Settings, Users and sign-in)
 - Personal API tokens, stored as hashes (Settings, API tokens)
-- GitHub App and Git connections (Settings, Git)
+- The GitHub App (Settings, Users and sign-in) and Git connections (Settings, Git)
 - Container registry credentials (Settings, Registries)
 - The S3 backup destination and its keys (Settings, Backups)
 
@@ -55,7 +56,8 @@ them are encrypted with `secret.key`.
 │   ├── windlass.db      # platform state
 │   ├── secret.key       # encryption key for stored credentials
 │   ├── session.key      # signs session cookies
-│   └── windlass.lock    # stops a second Windlass using the same data
+│   ├── windlass.lock    # stops a second Windlass using the same data
+│   └── update/          # a downloaded update, waiting for the next restart
 ├── projects/            # one directory per project
 ├── backups/             # local backup archives, beside projects/
 └── plugins/             # installed plugins

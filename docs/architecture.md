@@ -119,8 +119,8 @@ Caddy reload loads the Caddyfile and drops every route the admin API added.
 ## Events and UI safety
 
 An in-process event bus drives live invalidation. Deployment events are also persisted for SSE
-replay with sequence numbers. Container logs stream on demand; the terminal alone uses a
-WebSocket. A React route error boundary prevents a rendering failure from blanking the whole
+replay with sequence numbers. Container logs stream on demand; the terminal is the panel's only
+WebSocket, and the plugin proxy carries a plugin's own. A React route error boundary prevents a rendering failure from blanking the whole
 application.
 
 ## Resource policy
