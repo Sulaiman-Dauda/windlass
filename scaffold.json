@@ -1,0 +1,9 @@
+{
+  "_about": "Module map for scaffold-check. It maps only internal/mcp (Pablo, 30/10/2026); everything else is ignored, so a new Go package elsewhere must be added to ignore. Change it only with Pablo's approval; see ARCHITECTURE.md.",
+  "modules": {
+    "internal/mcp": { "owns": "the MCP protocol and tool catalogue", "may_use": [] }
+  },
+  "shared": [],
+  "wiring": [],
+  "ignore": ["api", "bin", "cmd", "docs", "install", "migrations", "plugins-sdk", "web", "internal/agent", "internal/api", "internal/audit", "internal/auth", "internal/backups", "internal/config", "internal/dbdetect", "internal/dbtemplates", "internal/deploy", "internal/events", "internal/git", "internal/jobs", "internal/plugins", "internal/projects", "internal/proxy", "internal/registries", "internal/secrets", "internal/server", "internal/staging", "internal/store", "internal/update", "internal/version"]
+}

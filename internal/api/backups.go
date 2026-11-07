@@ -35,9 +35,11 @@ func toBackupDTO(b db.Backup) backupDTO {
 func (a *API) backupRoutes(r chi.Router) {
 	r.Get("/", a.handleListBackups)
 	r.Get("/schedule", a.handleGetBackupSchedule)
+	// A deploy token may take a backup. It runs no prune itself, but it counts
+	// toward the schedule's retention when the next scheduled backup prunes.
+	r.With(auth.RequireDeployer).Post("/", a.handleCreateBackup)
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("member"))
-		r.Post("/", a.handleCreateBackup)
 		// Restoring writes old files over the live ones, .env included. A
 		// person does that in the panel, not a script holding a token.
 		r.With(auth.RejectToken).Post("/{id}/restore", a.handleRestoreBackup)

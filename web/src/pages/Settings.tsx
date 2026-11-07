@@ -959,7 +959,7 @@ interface APIToken {
   id: number;
   name: string;
   prefix: string;
-  scope: "read" | "write" | "admin";
+  scope: "read" | "deploy" | "write" | "admin";
   can_read_secrets: boolean;
   expires_at: string;
   expired: boolean;
@@ -971,9 +971,13 @@ interface APIToken {
 
 const SCOPE_LABEL: Record<APIToken["scope"], string> = {
   read: "Read only",
+  deploy: "Deploy only",
   write: "Deploy and edit",
   admin: "Admin",
 };
+
+// Read and deploy tokens act as a viewer, which never sees env values.
+const scopeCanReadSecrets = (scope: APIToken["scope"]) => scope === "write" || scope === "admin";
 
 const EXPIRY_DAYS = [7, 30, 90, 180, 365];
 
@@ -994,7 +998,7 @@ function APITokensSection() {
     mutationFn: () =>
       api<APIToken & { token: string }>("/auth/tokens", {
         method: "POST",
-        body: JSON.stringify({ name, scope, expires_in_days: days, can_read_secrets: secrets && scope !== "read" }),
+        body: JSON.stringify({ name, scope, expires_in_days: days, can_read_secrets: secrets && scopeCanReadSecrets(scope) }),
       }),
     onSuccess: (res) => {
       setCreated({ name: res.name, token: res.token });
@@ -1041,6 +1045,7 @@ function APITokensSection() {
               <Field label="Access" className="w-44">
                 <Select value={scope} onChange={(e) => setScope(e.target.value as APIToken["scope"])}>
                   <option value="read">{SCOPE_LABEL.read}</option>
+                  <option value="deploy">{SCOPE_LABEL.deploy}</option>
                   <option value="write">{SCOPE_LABEL.write}</option>
                   <option value="admin">{SCOPE_LABEL.admin}</option>
                 </Select>
@@ -1058,7 +1063,7 @@ function APITokensSection() {
             <Switch
               checked={secrets}
               onChange={setSecrets}
-              disabled={scope === "read"}
+              disabled={!scopeCanReadSecrets(scope)}
               label="Can read env values"
               description="Off, env values come back as ******** and writing them back keeps the stored value. A token that can deploy can still reach secrets through a container, so store it as carefully as the secrets."
             />

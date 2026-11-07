@@ -3,7 +3,11 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"log/slog"
+	"maps"
+	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -42,6 +46,9 @@ type API struct {
 	Queries    *db.Queries
 	Box        *secrets.Box
 	Logger     *slog.Logger
+	// MCP serves the Model Context Protocol at /mcp when set. It needs an
+	// API token and calls these routes in process with it.
+	MCP http.Handler
 
 	authLimiter *authRateLimiter
 }
@@ -80,6 +87,9 @@ func (a *API) Routes(r chi.Router) {
 		r.Use(auth.RequireAuth)
 		r.Get("/auth/me", a.handleMe)
 		r.Get("/auth/tokens/current", a.handleCurrentToken)
+		if a.MCP != nil {
+			r.Handle("/mcp", a.MCP)
+		}
 		// Browser-only: a token must never manage tokens or second factors.
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RejectToken)
@@ -123,4 +133,55 @@ func (a *API) Routes(r chi.Router) {
 			})
 		})
 	})
+}
+
+// MCPEnvValues returns the values the MCP server scrubs from a project's
+// output: its .env, and the values its top-level Compose files set inline,
+// which the panel hides from viewers the same way. Keys are the variable
+// names, an inline one prefixed "file#n:" so no value overwrites another. A
+// Compose file that cannot be read or parsed is an error, so the server
+// withholds the text rather than scrub it with half the values.
+func MCPEnvValues(p *projects.Service) func(ctx context.Context, project string) (map[string]string, error) {
+	return func(ctx context.Context, project string) (map[string]string, error) {
+		env, err := p.ReadEnv(ctx, project)
+		if err != nil {
+			return nil, err
+		}
+		values := make(map[string]string, len(env))
+		maps.Copy(values, env)
+		files, err := p.ListFiles(ctx, project, ".")
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range files {
+			if f.IsDir || !projects.IsComposeFile(f.Name) {
+				continue
+			}
+			data, err := p.ReadFile(ctx, project, f.Name)
+			if err != nil {
+				return nil, err
+			}
+			inline, err := composeInlineValues(string(data))
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", f.Name, err)
+			}
+			for i, kv := range inline {
+				values[fmt.Sprintf("%s#%d:%s", f.Name, i, kv[0])] = kv[1]
+			}
+		}
+		return values, nil
+	}
+}
+
+// MCPAudit returns the hook the MCP server calls after a write tool's
+// route has succeeded. It writes the mcp.call line beside the route's own,
+// with the same user, token and address. The write may finish after the
+// MCP client has gone, so the line must not depend on its request staying
+// open.
+func MCPAudit(l *audit.Log) func(r *http.Request, tool, project string) {
+	return func(r *http.Request, tool, project string) {
+		user, _ := auth.UserFrom(r.Context())
+		l.Write(context.WithoutCancel(r.Context()), user.ID, "mcp.call", "project", project, remoteIP(r),
+			map[string]string{"tool": tool})
+	}
 }

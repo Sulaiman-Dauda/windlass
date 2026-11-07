@@ -355,3 +355,150 @@ func TestPluginProxyWritesNeedMember(t *testing.T) {
 		}
 	}
 }
+
+// TestDeployScope: a deploy token reads like a read token and may use the
+// five deploy routes, and nothing else that writes.
+func TestDeployScope(t *testing.T) {
+	e := newTestEnv(t)
+	cookie := e.login(t)
+	ctx := context.Background()
+	e.prepareDeployableProject(t, cookie, "app")
+	if rec := e.do(t, http.MethodPost, "/api/v1/projects/app/deployments", nil, cookie); rec.Code != http.StatusCreated {
+		t.Fatalf("first deploy = %d: %s", rec.Code, rec.Body.String())
+	}
+	waitForStatus(t, e, cookie, "app", "1", "succeeded")
+
+	dep := e.createToken(t, cookie, map[string]any{"name": "ci", "scope": "deploy"})
+	if dep.Scope != "deploy" {
+		t.Fatalf("created scope = %q, want deploy", dep.Scope)
+	}
+	read := e.createToken(t, cookie, map[string]any{"name": "r", "scope": "read"})
+	write := e.createToken(t, cookie, map[string]any{"name": "w", "scope": "write"})
+
+	current := func(token string) (scope string, canDeploy bool) {
+		t.Helper()
+		rec := e.doBearer(t, http.MethodGet, "/api/v1/auth/tokens/current", token, nil)
+		var out struct {
+			Scope     string `json:"scope"`
+			CanDeploy bool   `json:"can_deploy"`
+		}
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
+			t.Fatalf("current = %d: %s", rec.Code, rec.Body.String())
+		}
+		return out.Scope, out.CanDeploy
+	}
+	for _, c := range []struct {
+		token, scope string
+		can          bool
+	}{{dep.Token, "deploy", true}, {read.Token, "read", false}, {write.Token, "write", true}} {
+		if s, can := current(c.token); s != c.scope || can != c.can {
+			t.Errorf("current for %s = %q can_deploy %v, want %q %v", c.scope, s, can, c.scope, c.can)
+		}
+	}
+
+	// Allowed: deploy, rollback, restart, backup. Promote gets past the
+	// role check and fails on the missing staging instead.
+	if rec := e.doBearer(t, http.MethodPost, "/api/v1/projects/app/deployments", dep.Token, nil); rec.Code != http.StatusCreated {
+		t.Fatalf("deploy with deploy token = %d: %s", rec.Code, rec.Body.String())
+	}
+	waitForStatus(t, e, cookie, "app", "2", "succeeded")
+	if rec := e.doBearer(t, http.MethodPost, "/api/v1/projects/app/deployments/1/rollback", dep.Token, nil); rec.Code != http.StatusCreated {
+		t.Errorf("rollback = %d: %s", rec.Code, rec.Body.String())
+	}
+	waitForStatus(t, e, cookie, "app", "3", "succeeded")
+	if rec := e.doBearer(t, http.MethodPost, "/api/v1/projects/app/actions/restart", dep.Token, nil); rec.Code != http.StatusNoContent {
+		t.Errorf("restart = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.doBearer(t, http.MethodPost, "/api/v1/projects/app/backups", dep.Token, nil); rec.Code == http.StatusForbidden {
+		t.Errorf("backup = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.doBearer(t, http.MethodPost, "/api/v1/projects/app/deployments/3/promote", dep.Token, nil); rec.Code == http.StatusForbidden ||
+		rec.Code == http.StatusUnauthorized {
+		t.Errorf("promote = %d, want past the role check: %s", rec.Code, rec.Body.String())
+	}
+
+	// Refused: every other write a member could make.
+	refused := []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/projects"},
+		{http.MethodPost, "/api/v1/projects/scan"},
+		{http.MethodPut, "/api/v1/projects/app/env"},
+		{http.MethodPut, "/api/v1/projects/app/files/compose.yaml"},
+		{http.MethodPut, "/api/v1/projects/app/git"},
+		{http.MethodPost, "/api/v1/projects/app/domains"},
+		{http.MethodDelete, "/api/v1/projects/app/domains/app.example.com"},
+		{http.MethodPost, "/api/v1/projects/app/staging"},
+		{http.MethodPost, "/api/v1/projects/app/staging/preflight"},
+		{http.MethodPut, "/api/v1/projects/app/staging"},
+		{http.MethodGet, "/api/v1/projects/app/staging/diff/compose.yaml"},
+		{http.MethodPost, "/api/v1/projects/app/actions/start"},
+		{http.MethodPost, "/api/v1/projects/app/actions/stop"},
+		{http.MethodPut, "/api/v1/projects/app/backups/schedule"},
+		{http.MethodPost, "/api/v1/projects/app/backups/1/restore"},
+		{http.MethodPost, "/api/v1/registries"},
+		{http.MethodPost, "/api/v1/git/connections"},
+	}
+	for _, c := range refused {
+		if rec := e.doBearer(t, c.method, c.path, dep.Token, map[string]string{}); rec.Code != http.StatusForbidden {
+			t.Errorf("deploy token %s %s = %d, want 403: %s", c.method, c.path, rec.Code, rec.Body.String())
+		}
+	}
+	// Env reads stay masked: a deploy token is never a secrets reader.
+	if err := e.api.Projects.SetEnv(ctx, "app", map[string]string{"DB_PASSWORD": "deploy-scope-secret"}); err != nil { //nolint:gosec // G101: planted test value
+		t.Fatal(err)
+	}
+	if rec := e.doBearer(t, http.MethodGet, "/api/v1/projects/app/env", dep.Token, nil); strings.Contains(rec.Body.String(), "deploy-scope-secret") {
+		t.Errorf("deploy token read an env value: %s", rec.Body.String())
+	}
+	// A read token still cannot deploy.
+	if rec := e.doBearer(t, http.MethodPost, "/api/v1/projects/app/actions/restart", read.Token, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("read token restart = %d, want 403", rec.Code)
+	}
+
+	// The audit line for the token's deploy names the token.
+	entries, err := e.queries.ListAudit(ctx, db.ListAuditParams{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := false
+	for _, a := range entries {
+		if a.Action == "deployment.create" && a.TokenID.Valid && a.TokenID.Int64 == dep.ID {
+			named = true
+		}
+	}
+	if !named {
+		t.Error("no deployment.create audit entry names the deploy token")
+	}
+
+	// A viewer session cannot restart, and a deploy token whose owner is
+	// demoted to viewer stops deploying at once.
+	for _, u := range []struct{ email, role string }{{"viewer@example.com", "viewer"}, {"second@example.com", "admin"}} {
+		if rec := e.do(t, http.MethodPost, "/api/v1/users", map[string]string{
+			"email": u.email, "password": "longenoughpassword1", "role": u.role,
+		}, cookie); rec.Code != http.StatusCreated {
+			t.Fatalf("create %s = %d: %s", u.email, rec.Code, rec.Body.String())
+		}
+	}
+	login := func(email string) *http.Cookie {
+		return sessionCookie(t, e.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
+			"email": email, "password": "longenoughpassword1",
+		}))
+	}
+	if rec := e.do(t, http.MethodPost, "/api/v1/projects/app/actions/restart", nil, login("viewer@example.com")); rec.Code != http.StatusForbidden {
+		t.Errorf("viewer session restart = %d, want 403", rec.Code)
+	}
+	second := login("second@example.com")
+	theirs := e.createToken(t, second, map[string]any{"name": "ci2", "scope": "deploy"})
+	u, err := e.queries.GetUserByEmail(ctx, "second@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.do(t, http.MethodPut, "/api/v1/users/"+itoa(u.ID)+"/role", map[string]string{"role": "viewer"}, cookie); rec.Code/100 != 2 {
+		t.Fatalf("demote = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := e.doBearer(t, http.MethodPost, "/api/v1/projects/app/actions/restart", theirs.Token, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("demoted owner's deploy token restart = %d, want 403", rec.Code)
+	}
+	if _, can := current(theirs.Token); can {
+		t.Error("demoted owner's deploy token reports can_deploy")
+	}
+}

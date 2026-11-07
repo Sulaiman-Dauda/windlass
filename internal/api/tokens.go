@@ -18,7 +18,7 @@ import (
 // auth.RejectToken: tokens are made and revoked by a person in the panel.
 func (a *API) tokenRoutes(r chi.Router) {
 	r.Get("/", a.handleListTokens)
-	// Admins only in v1. Members and viewers can still list and revoke
+	// Admins only, for now. Members and viewers can still list and revoke
 	// tokens they hold, for example after being demoted.
 	r.With(auth.RequireRole("admin")).Post("/", a.handleCreateToken)
 	r.Delete("/{id}", a.handleRevokeToken)
@@ -47,7 +47,7 @@ func toTokenDTO(t db.ApiToken, now time.Time) tokenDTO {
 		ID:             t.ID,
 		Name:           t.Name,
 		Prefix:         auth.TokenPrefix + t.PublicID,
-		Scope:          t.Scope,
+		Scope:          auth.ScopeOf(t),
 		CanReadSecrets: t.CanReadSecrets != 0,
 		ExpiresAt:      t.ExpiresAt,
 		Expired:        expired,
@@ -103,7 +103,7 @@ func (a *API) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 	plaintext, tok, err := a.Auth.CreateAPIToken(r.Context(), user, req.Name, req.Scope, req.CanReadSecrets, ttl)
 	switch {
 	case errors.Is(err, auth.ErrInvalidScope):
-		writeError(w, http.StatusBadRequest, "bad_request", "scope must be read, write or admin")
+		writeError(w, http.StatusBadRequest, "bad_request", "scope must be read, deploy, write or admin")
 		return
 	case errors.Is(err, auth.ErrScopeAbove):
 		writeError(w, http.StatusForbidden, "forbidden", "a token cannot have more access than its owner")
@@ -116,7 +116,7 @@ func (a *API) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Audit.Write(r.Context(), user.ID, "token.create", "api_token", auth.TokenPrefix+tok.PublicID, remoteIP(r),
-		map[string]any{"name": tok.Name, "scope": tok.Scope, "can_read_secrets": req.CanReadSecrets,
+		map[string]any{"name": tok.Name, "scope": auth.ScopeOf(tok), "can_read_secrets": req.CanReadSecrets,
 			"expires_at": tok.ExpiresAt})
 	writeJSON(w, http.StatusCreated, struct {
 		tokenDTO
@@ -173,7 +173,10 @@ func (a *API) handleCurrentToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, struct {
 		tokenDTO
 		User userDTO `json:"user"`
-	}{toTokenDTO(tok, time.Now()), toUserDTO(user)})
+		// CanDeploy says whether the deploy, rollback, promote, restart and
+		// backup routes will accept this token now, owner's role included.
+		CanDeploy bool `json:"can_deploy"`
+	}{toTokenDTO(tok, time.Now()), toUserDTO(user), auth.CanDeploy(r.Context())})
 }
 
 func (a *API) handleListUserTokens(w http.ResponseWriter, r *http.Request) {

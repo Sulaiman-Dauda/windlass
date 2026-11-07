@@ -414,42 +414,61 @@ func (s *Service) ListFiles(ctx context.Context, project, rel string) ([]agent.F
 // SQLite rows are a rebuildable cache for platform features.
 
 func (s *Service) GetEnv(ctx context.Context, project string) (map[string]string, error) {
-	p, err := s.Get(ctx, project)
+	projectID, vars, fromFile, err := s.readEnv(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	data, fileErr := s.agent.FS().ReadFile(ctx, project, ".env")
-	if fileErr == nil {
-		vars, err := parseEnvFile(string(data))
-		if err != nil {
-			return nil, err
-		}
-		if err := s.cacheEnv(ctx, p.ID, vars); err != nil {
+	if fromFile {
+		if err := s.cacheEnv(ctx, projectID, vars); err != nil {
 			s.logger.Warn("refresh env cache", "project", project, "error", err)
 		}
 		return vars, nil
 	}
-	if !errors.Is(fileErr, fs.ErrNotExist) {
-		return nil, fileErr
-	}
-
 	// One-time migration for installations that predate filesystem-owned env.
-	rows, err := s.q.ListEnvVars(ctx, p.ID)
-	if err != nil {
+	if err := s.writeEnvFile(ctx, project, vars); err != nil {
 		return nil, err
 	}
-	out := make(map[string]string, len(rows))
+	return vars, nil
+}
+
+// ReadEnv returns the project's env values without side effects: unlike
+// GetEnv it never refreshes the encrypted cache or creates .env. It is for
+// callers that only need to recognise values, like the MCP log scrubber,
+// and must not write on a read. Without a .env file it falls back to the
+// cached rows, which is what an install from before filesystem env has.
+func (s *Service) ReadEnv(ctx context.Context, project string) (map[string]string, error) {
+	_, vars, _, err := s.readEnv(ctx, project)
+	return vars, err
+}
+
+// readEnv reads the project's .env, or its encrypted rows when there is no
+// .env file; fromFile says which.
+func (s *Service) readEnv(ctx context.Context, project string) (projectID int64, vars map[string]string, fromFile bool, err error) {
+	p, err := s.Get(ctx, project)
+	if err != nil {
+		return 0, nil, false, err
+	}
+	data, fileErr := s.agent.FS().ReadFile(ctx, project, ".env")
+	if fileErr == nil {
+		vars, err := parseEnvFile(string(data))
+		return p.ID, vars, true, err
+	}
+	if !errors.Is(fileErr, fs.ErrNotExist) {
+		return 0, nil, false, fileErr
+	}
+	rows, err := s.q.ListEnvVars(ctx, p.ID)
+	if err != nil {
+		return 0, nil, false, err
+	}
+	vars = make(map[string]string, len(rows))
 	for _, row := range rows {
 		plain, err := s.box.Decrypt(row.ValueEnc)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt %s: %w", row.Key, err)
+			return 0, nil, false, fmt.Errorf("decrypt %s: %w", row.Key, err)
 		}
-		out[row.Key] = string(plain)
+		vars[row.Key] = string(plain)
 	}
-	if err := s.writeEnvFile(ctx, project, out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return p.ID, vars, false, nil
 }
 
 // SetEnv replaces the project's environment with vars.

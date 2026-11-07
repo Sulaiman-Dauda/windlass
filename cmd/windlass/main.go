@@ -22,6 +22,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/events"
 	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/jobs"
+	"github.com/windlass-dev/windlass/internal/mcp"
 	"github.com/windlass-dev/windlass/internal/plugins"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
@@ -143,9 +144,17 @@ func run() error {
 	pluginSvc.StartEnabled(ctx)
 	defer pluginSvc.StopAll()
 
+	auditLog := audit.New(queries, logger)
+	mcpSrv := mcp.New(mcp.Config{
+		Version:   version.Version,
+		APIPrefix: "/api/v1",
+		EnvValues: api.MCPEnvValues(projectSvc),
+		Audit:     api.MCPAudit(auditLog),
+	})
+
 	a := &api.API{
 		Auth:       authSvc,
-		Audit:      audit.New(queries, logger),
+		Audit:      auditLog,
 		Projects:   projectSvc,
 		Deploy:     deploySvc,
 		Staging:    staging.New(queries, ag, projectSvc, deploySvc, gitSvc, proxySvc, logger),
@@ -160,12 +169,16 @@ func run() error {
 		Queries:    queries,
 		Box:        box,
 		Logger:     logger,
+		MCP:        mcpSrv,
 	}
 
 	handler, err := server.New(cfg, logger, a)
 	if err != nil {
 		return err
 	}
+	// The MCP tools call the API through the same handler, with every
+	// middleware, so a token is checked exactly as a REST client's would be.
+	mcpSrv.SetAPI(handler)
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,

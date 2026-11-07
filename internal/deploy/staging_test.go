@@ -48,13 +48,20 @@ func newGitStaging(t *testing.T) *env {
 	return e
 }
 
+// deployed deploys project and drives the runner until every job is done.
+// runUntilFinished would stop the runner as soon as this deployment ends,
+// cancelling an auto-promotion it had already started on live.
 func (e *env) deployed(t *testing.T, project string) db.Deployment {
 	t.Helper()
 	d, err := e.deploy.Deploy(context.Background(), project, "manual")
 	if err != nil {
 		t.Fatal(err)
 	}
-	final := e.runUntilFinished(t, d.ID)
+	e.runUntilIdle(t)
+	final, err := e.q.GetDeploymentByID(context.Background(), d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if final.Status != "succeeded" {
 		t.Fatalf("%s deploy = %s: %s", project, final.Status, final.Error.String)
 	}

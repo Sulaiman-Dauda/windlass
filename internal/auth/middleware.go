@@ -122,6 +122,24 @@ func RequireRole(role string) func(http.Handler) http.Handler {
 	}
 }
 
+// RequireDeployer admits a member or above, or a deploy token whose owner is
+// a member or above. It guards only deploy, rollback, promote, restart and
+// create backup, so a deploy token can ship code but never edit a project.
+// Anything not behind it stays closed to deploy tokens.
+func RequireDeployer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := UserFrom(r.Context()); !ok {
+			writeAuthError(w, http.StatusUnauthorized, "unauthenticated", "authentication required")
+			return
+		}
+		if !CanDeploy(r.Context()) {
+			writeAuthError(w, http.StatusForbidden, "forbidden", "insufficient role")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // RejectToken refuses API tokens with 403. It guards what only a person at
 // a browser should do: managing tokens and users, second factors, sign-in
 // providers, the panel domain, self-update, the terminal and project

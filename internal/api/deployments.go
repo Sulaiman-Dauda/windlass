@@ -60,8 +60,10 @@ func (a *API) deploymentRoutes(r chi.Router) {
 	r.Get("/", a.handleListDeployments)
 	r.Get("/{number}", a.handleGetDeployment)
 	r.Get("/{number}/events", a.handleDeploymentEvents)
+	// RequireDeployer, not RequireRole("member"): a deploy token may use
+	// these three, and nothing else that writes.
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireRole("member"))
+		r.Use(auth.RequireDeployer)
 		r.Post("/", a.handleCreateDeployment)
 		r.Post("/{number}/rollback", a.handleRollback)
 		r.Post("/{number}/promote", a.handlePromote)
@@ -141,8 +143,17 @@ func (a *API) handleDeploymentEvents(w http.ResponseWriter, r *http.Request) {
 // runs.
 
 func (a *API) handleProjectAction(w http.ResponseWriter, r *http.Request) {
+	a.projectAction(w, r, chi.URLParam(r, "action"))
+}
+
+// handleRestartProject is restart on its own route, so a deploy token can
+// restart a project without being able to start or stop it.
+func (a *API) handleRestartProject(w http.ResponseWriter, r *http.Request) {
+	a.projectAction(w, r, "restart")
+}
+
+func (a *API) projectAction(w http.ResponseWriter, r *http.Request, action string) {
 	name := chi.URLParam(r, "name")
-	action := chi.URLParam(r, "action")
 
 	if _, err := a.Projects.Get(r.Context(), name); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "project not found")
