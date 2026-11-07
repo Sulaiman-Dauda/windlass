@@ -443,7 +443,7 @@ func TestDeployScope(t *testing.T) {
 		}
 	}
 	// Env reads stay masked: a deploy token is never a secrets reader.
-	if err := e.api.Projects.SetEnv(ctx, "app", map[string]string{"DB_PASSWORD": "deploy-scope-secret"}); err != nil {
+	if err := e.api.Projects.SetEnv(ctx, "app", map[string]string{"DB_PASSWORD": "deploy-scope-secret"}); err != nil { //nolint:gosec // G101: planted test value
 		t.Fatal(err)
 	}
 	if rec := e.doBearer(t, http.MethodGet, "/api/v1/projects/app/env", dep.Token, nil); strings.Contains(rec.Body.String(), "deploy-scope-secret") {

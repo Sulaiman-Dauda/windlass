@@ -19,7 +19,7 @@ var testToken = "wl_pat_" + strings.Repeat("ab12", 15)
 
 // The planted secret: long enough to be scrubbed, and placed in every
 // field a tool could pass through.
-const plantedSecret = "s3cr3t-db-password"
+const plantedSecret = "s3cr3t-db-password" //nolint:gosec // G101: planted test value
 
 // fakeAPI stands in for the /api/v1 router. It checks the bearer token the
 // way auth.Middleware does and answers the routes the tools call.
@@ -387,7 +387,7 @@ func TestRefusesCookieOnly(t *testing.T) {
 	s := newTestServer(t, newFakeAPI())
 	for _, auth := range []string{"", "Bearer", "Bearer some-oauth-token", "Basic dXNlcjpwYXNz"} {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/mcp", strings.NewReader(legacyBody("tools/list", nil)))
-		req.AddCookie(&http.Cookie{Name: "windlass_session", Value: "a-valid-looking-session"})
+		req.AddCookie(&http.Cookie{Name: "windlass_session", Value: "a-valid-looking-session"}) //nolint:gosec // G124: a request cookie in a test
 		if auth != "" {
 			req.Header.Set("Authorization", auth)
 		}
@@ -744,7 +744,7 @@ func TestScrubberRules(t *testing.T) {
 	if got != want {
 		t.Errorf("named scrub = %q, want %q", got, want)
 	}
-	for in, want := range map[string]string{
+	for in, want := range map[string]string{ //nolint:gosec // G101: fake credentials the test strips
 		"https://x-access-token:ghp_abc@github.com/a/b.git": "https://[redacted]@github.com/a/b.git",
 		"https://ghp_abc@github.com/a/b.git":                "https://[redacted]@github.com/a/b.git",
 		"ssh://git@github.com/a/b.git":                      "ssh://git@github.com/a/b.git",

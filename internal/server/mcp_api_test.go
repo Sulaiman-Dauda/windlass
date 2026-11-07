@@ -111,7 +111,7 @@ func TestMCPThroughTheRouter(t *testing.T) {
 	cookie := e.login(t)
 	ctx := context.Background()
 
-	const secret = "planted-env-value-42"
+	const secret = "planted-env-value-42" //nolint:gosec // G101: planted test value
 	e.prepareDeployableProject(t, cookie, "app")
 	if err := e.api.Projects.SetEnv(ctx, "app", map[string]string{"DB_PASSWORD": secret, "PORT": "8080"}); err != nil {
 		t.Fatal(err)

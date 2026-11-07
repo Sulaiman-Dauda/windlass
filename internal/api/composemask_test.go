@@ -159,7 +159,7 @@ configs:
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{
+	want := map[string]string{ //nolint:gosec // G101: planted test values
 		"DB_PASSWORD": "anchorsekret", "API_KEY": "mapsekret", "PIN": "1234", "NPM_TOKEN": "argsekret",
 		"POSTGRES_PASSWORD": "listsekret", "content:password": "configsekret",
 	}
