@@ -1,6 +1,6 @@
 -- name: CreateAPIToken :one
-INSERT INTO api_tokens (public_id, user_id, name, secret_hash, scope, can_read_secrets, expires_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO api_tokens (public_id, user_id, name, secret_hash, scope, can_read_secrets, can_deploy, expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetAPITokenByPublicID :one

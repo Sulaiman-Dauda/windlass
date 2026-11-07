@@ -7,7 +7,10 @@ info:
     session cookie obtained from /auth/login or /auth/setup. Scripts and
     agents use a personal API token (`Authorization: Bearer wl_pat_...`),
     created by an admin in Settings. A token acts as its owner with the role
-    capped at its scope (read = viewer, write = member, admin = admin).
+    capped at its scope (read = viewer, write = member, admin = admin). A
+    deploy token acts as a viewer that may also call five routes, marked
+    "(member, or a deploy token)": deploy, roll back, promote, restart and
+    back up. It needs an owner who is a member or admin.
     Operations whose only security scheme is `session` refuse tokens with
     403 `session_required`.
   version: 0.1.0
@@ -62,7 +65,7 @@ components:
         prefix:
           type: string
           description: The non-secret start of the token (`wl_pat_` and the public id), for recognising it.
-        scope: { type: string, enum: [read, write, admin] }
+        scope: { type: string, enum: [read, deploy, write, admin] }
         can_read_secrets:
           type: boolean
           description: Whether the token sees real env values. Without it, env reads come back masked.
@@ -346,8 +349,11 @@ paths:
                 name: { type: string, maxLength: 100 }
                 scope:
                   type: string
-                  enum: [read, write, admin]
-                  description: Highest role the token acts as; cannot exceed your own.
+                  enum: [read, deploy, write, admin]
+                  description: |
+                    Highest role the token acts as; cannot exceed your own. deploy
+                    needs a member or admin and acts as a viewer plus the five
+                    deploy routes. can_read_secrets has no effect on read or deploy.
                 expires_in_days: { type: integer, minimum: 1, maximum: 365, default: 90 }
                 can_read_secrets: { type: boolean, default: false }
       responses:
@@ -390,6 +396,12 @@ paths:
                   - type: object
                     properties:
                       user: { $ref: "#/components/schemas/User" }
+                      can_deploy:
+                        type: boolean
+                        description: |
+                          Whether the deploy, rollback, promote, restart and backup
+                          routes accept this token now: scope deploy, write or admin,
+                          with an owner who is a member or admin.
         "404": { description: The request used a session, not a token }
 
   /users/{id}/tokens:
@@ -722,6 +734,19 @@ paths:
         "204": { description: Done }
         "502": { description: Compose command failed }
 
+  /projects/{name}/actions/restart:
+    post:
+      summary: docker compose restart (member, or a deploy token)
+      description: |
+        The restart action on its own route, so a deploy token can restart a
+        project without being able to start or stop it.
+      operationId: restartProject
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "204": { description: Done }
+        "404": { description: "not_found: no such project" }
+        "502": { description: Compose command failed }
+
   /projects/{name}/deployments:
     get:
       summary: List deployments
@@ -730,7 +755,7 @@ paths:
       responses:
         "200": { description: Array of deployments, newest first }
     post:
-      summary: Deploy (member)
+      summary: Deploy (member, or a deploy token)
       operationId: createDeployment
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
@@ -755,7 +780,7 @@ paths:
 
   /projects/{name}/deployments/{number}/rollback:
     post:
-      summary: Roll back to this succeeded deployment (member)
+      summary: Roll back to this succeeded deployment (member, or a deploy token)
       description: |
         Queues a new deployment. Pulled services are pinned to this deployment's
         recorded image digests. On a Git project its commit is checked out and
@@ -771,7 +796,7 @@ paths:
 
   /projects/{name}/deployments/{number}/promote:
     post:
-      summary: Promote this staging deployment to live (member)
+      summary: Promote this staging deployment to live (member, or a deploy token)
       description: |
         Called on the staging project. Queues a live deployment that runs the
         commit and image digests this succeeded staging deployment ran,
@@ -942,7 +967,7 @@ paths:
       responses:
         "200": { description: Array of backups }
     post:
-      summary: Back up now (member), archive + best-effort DB dump
+      summary: Back up now (member, or a deploy token), archive + best-effort DB dump
       operationId: createBackup
       security: [{ session: [] }, { bearerAuth: [] }]
       requestBody:

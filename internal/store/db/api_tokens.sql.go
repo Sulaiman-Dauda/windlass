@@ -11,9 +11,9 @@ import (
 )
 
 const createAPIToken = `-- name: CreateAPIToken :one
-INSERT INTO api_tokens (public_id, user_id, name, secret_hash, scope, can_read_secrets, expires_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-RETURNING id, public_id, user_id, name, secret_hash, scope, can_read_secrets, expires_at, last_used_at, last_used_ip, created_at, revoked_at
+INSERT INTO api_tokens (public_id, user_id, name, secret_hash, scope, can_read_secrets, can_deploy, expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, public_id, user_id, name, secret_hash, scope, can_read_secrets, expires_at, last_used_at, last_used_ip, created_at, revoked_at, can_deploy
 `
 
 type CreateAPITokenParams struct {
@@ -23,6 +23,7 @@ type CreateAPITokenParams struct {
 	SecretHash     string
 	Scope          string
 	CanReadSecrets int64
+	CanDeploy      int64
 	ExpiresAt      string
 }
 
@@ -34,6 +35,7 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		arg.SecretHash,
 		arg.Scope,
 		arg.CanReadSecrets,
+		arg.CanDeploy,
 		arg.ExpiresAt,
 	)
 	var i ApiToken
@@ -50,12 +52,13 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		&i.LastUsedIp,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.CanDeploy,
 	)
 	return i, err
 }
 
 const getAPIToken = `-- name: GetAPIToken :one
-SELECT id, public_id, user_id, name, secret_hash, scope, can_read_secrets, expires_at, last_used_at, last_used_ip, created_at, revoked_at FROM api_tokens WHERE id = ?
+SELECT id, public_id, user_id, name, secret_hash, scope, can_read_secrets, expires_at, last_used_at, last_used_ip, created_at, revoked_at, can_deploy FROM api_tokens WHERE id = ?
 `
 
 func (q *Queries) GetAPIToken(ctx context.Context, id int64) (ApiToken, error) {
@@ -74,12 +77,13 @@ func (q *Queries) GetAPIToken(ctx context.Context, id int64) (ApiToken, error) {
 		&i.LastUsedIp,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.CanDeploy,
 	)
 	return i, err
 }
 
 const getAPITokenByPublicID = `-- name: GetAPITokenByPublicID :one
-SELECT id, public_id, user_id, name, secret_hash, scope, can_read_secrets, expires_at, last_used_at, last_used_ip, created_at, revoked_at FROM api_tokens WHERE public_id = ?
+SELECT id, public_id, user_id, name, secret_hash, scope, can_read_secrets, expires_at, last_used_at, last_used_ip, created_at, revoked_at, can_deploy FROM api_tokens WHERE public_id = ?
 `
 
 func (q *Queries) GetAPITokenByPublicID(ctx context.Context, publicID string) (ApiToken, error) {
@@ -98,12 +102,13 @@ func (q *Queries) GetAPITokenByPublicID(ctx context.Context, publicID string) (A
 		&i.LastUsedIp,
 		&i.CreatedAt,
 		&i.RevokedAt,
+		&i.CanDeploy,
 	)
 	return i, err
 }
 
 const listAPITokens = `-- name: ListAPITokens :many
-SELECT t.id, t.public_id, t.user_id, t.name, t.secret_hash, t.scope, t.can_read_secrets, t.expires_at, t.last_used_at, t.last_used_ip, t.created_at, t.revoked_at, u.email AS user_email
+SELECT t.id, t.public_id, t.user_id, t.name, t.secret_hash, t.scope, t.can_read_secrets, t.expires_at, t.last_used_at, t.last_used_ip, t.created_at, t.revoked_at, t.can_deploy, u.email AS user_email
 FROM api_tokens t JOIN users u ON u.id = t.user_id
 ORDER BY t.id DESC
 `
@@ -121,6 +126,7 @@ type ListAPITokensRow struct {
 	LastUsedIp     sql.NullString
 	CreatedAt      string
 	RevokedAt      sql.NullString
+	CanDeploy      int64
 	UserEmail      string
 }
 
@@ -146,6 +152,7 @@ func (q *Queries) ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error)
 			&i.LastUsedIp,
 			&i.CreatedAt,
 			&i.RevokedAt,
+			&i.CanDeploy,
 			&i.UserEmail,
 		); err != nil {
 			return nil, err
@@ -162,7 +169,7 @@ func (q *Queries) ListAPITokens(ctx context.Context) ([]ListAPITokensRow, error)
 }
 
 const listAPITokensForUser = `-- name: ListAPITokensForUser :many
-SELECT id, public_id, user_id, name, secret_hash, scope, can_read_secrets, expires_at, last_used_at, last_used_ip, created_at, revoked_at FROM api_tokens WHERE user_id = ? ORDER BY id DESC
+SELECT id, public_id, user_id, name, secret_hash, scope, can_read_secrets, expires_at, last_used_at, last_used_ip, created_at, revoked_at, can_deploy FROM api_tokens WHERE user_id = ? ORDER BY id DESC
 `
 
 func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error) {
@@ -187,6 +194,7 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 			&i.LastUsedIp,
 			&i.CreatedAt,
 			&i.RevokedAt,
+			&i.CanDeploy,
 		); err != nil {
 			return nil, err
 		}
