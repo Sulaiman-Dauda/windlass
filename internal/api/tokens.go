@@ -18,7 +18,7 @@ import (
 // auth.RejectToken: tokens are made and revoked by a person in the panel.
 func (a *API) tokenRoutes(r chi.Router) {
 	r.Get("/", a.handleListTokens)
-	// Admins only in v1. Members and viewers can still list and revoke
+	// Admins only, for now. Members and viewers can still list and revoke
 	// tokens they hold, for example after being demoted.
 	r.With(auth.RequireRole("admin")).Post("/", a.handleCreateToken)
 	r.Delete("/{id}", a.handleRevokeToken)

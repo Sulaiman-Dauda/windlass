@@ -18,7 +18,7 @@ reach the model.
 - Write Compose files. Agents change code in Git and deploy it.
 - Hold protocol sessions or any state between requests.
 
-## Out of scope for v1
+## Out of scope for the first release (v0.60)
 
 - OAuth one-click for Claude.ai and ChatGPT (unit 5, only if units 1 to 4 show real use).
 - SSE responses, progress notifications, elicitation. Destructive tools use annotations plus a

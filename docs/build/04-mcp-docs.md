@@ -1,6 +1,6 @@
 # 04 MCP docs and release
 
-Status: docs built 07/11/2026, committed on `feat/mcp`. Not tagged: v1.0 is Pablo's.
+Status: docs built 07/11/2026, committed on `feat/mcp`. Not tagged: it ships in v0.60, which Pablo tags.
 Phase 4. Depends on 01 and 03.
 
 ## Goal
@@ -61,4 +61,4 @@ Settled during the build 07/11/2026, flagged for Pablo:
   check passing, a FAILURE, or no `checks.json` each fail it
 - [ ] The conformance job green against the real suite (Pablo, or CI on the first push)
 - [ ] Cursor and VS Code snippets tried in the clients (Pablo)
-- [ ] v1.0 tagged by hand, after the units' open boxes (Pablo)
+- [ ] v0.60 tagged by hand, after the units' open boxes (Pablo)
