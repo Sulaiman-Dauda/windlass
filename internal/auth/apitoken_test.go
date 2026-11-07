@@ -88,8 +88,21 @@ func TestAPITokenAuthentication(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := s.CreateAPIToken(ctx, admin, "ci", "deploy", false, DefaultTokenTTL); !errors.Is(err, ErrInvalidScope) {
+	if _, _, err := s.CreateAPIToken(ctx, admin, "ci", "owner", false, DefaultTokenTTL); !errors.Is(err, ErrInvalidScope) {
 		t.Errorf("unknown scope err = %v", err)
+	}
+	// deploy is stored as read plus the flag, needs a member, and reads back
+	// as deploy.
+	viewer, err := q.CreateUser(ctx, db.CreateUserParams{Email: "v@example.com", Role: "viewer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateAPIToken(ctx, viewer, "ci", ScopeDeploy, false, DefaultTokenTTL); !errors.Is(err, ErrScopeAbove) {
+		t.Errorf("viewer deploy token err = %v", err)
+	}
+	if _, tok, err := s.CreateAPIToken(ctx, admin, "ci", ScopeDeploy, false, DefaultTokenTTL); err != nil ||
+		tok.Scope != "read" || tok.CanDeploy != 1 || ScopeOf(tok) != ScopeDeploy {
+		t.Errorf("deploy token = %+v, %v", tok, err)
 	}
 	if _, _, err := s.CreateAPIToken(ctx, admin, "ci", "read", false, 400*24*time.Hour); !errors.Is(err, ErrInvalidTTL) {
 		t.Errorf("400-day ttl err = %v", err)

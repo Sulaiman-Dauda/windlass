@@ -21,6 +21,7 @@ type ApiToken struct {
 	LastUsedIp     sql.NullString
 	CreatedAt      string
 	RevokedAt      sql.NullString
+	CanDeploy      int64
 }
 
 type AuditLog struct {

@@ -61,3 +61,11 @@ deployment, proxy routing, domains or backups.
   width go through props (`size`, `controlSize`) or a wrapper, never a competing class.
   Overlays (Modal, Menu, Toast, command palette, mobile drawer) render through portals because
   the sticky header's `backdrop-filter` makes it the containing block for fixed children.
+
+## Scaffold (MCP only)
+
+- `internal/mcp` is under a locked scaffold (`scaffold.json`, `scaffold.lock`, `ARCHITECTURE.md`);
+  the rest of the repo is ignored by it, so a new Go package elsewhere goes on its `ignore` list.
+  Fill stubs; never change a locked signature without Pablo's go and
+  `scaffold-check relock -reason "..."`. Build units live in `docs/build/`. Run `scaffold-check`
+  before calling any task done.

@@ -1,0 +1,15 @@
+# scaffold.lock: the public surface the approved scaffold promised.
+# Written by scaffold-check lock. Change it only with scaffold-check relock -reason "...".
+internal/mcp	Annotations	type Annotations struct { ReadOnlyHint bool `json:"readOnlyHint"`; DestructiveHint bool `json:"destructiveHint"`; IdempotentHint bool `json:"idempotentHint"`; OpenWorldHint bool `json:"openWorldHint"` }
+internal/mcp	Config	type Config struct { Version string; APIPrefix string; EnvValues func(ctx context.Context, project string) (map[string]string, error); Audit func(r *http.Request, tool string, project string) }
+internal/mcp	MaxListItems	const MaxListItems = 200
+internal/mcp	MaxLogBytes	const MaxLogBytes = 64 << 10
+internal/mcp	MaxLogLines	const MaxLogLines = 500
+internal/mcp	New	func New(cfg Config) *Server
+internal/mcp	ProtocolLatest	const ProtocolLatest = "2026-07-28"
+internal/mcp	ProtocolLegacy	const ProtocolLegacy = "2025-11-25"
+internal/mcp	Server	type Server struct {  }
+internal/mcp	Server.ServeHTTP	func (*Server) ServeHTTP(w http.ResponseWriter, r *http.Request)
+internal/mcp	Server.SetAPI	func (*Server) SetAPI(h http.Handler)
+internal/mcp	Tool	type Tool struct { Name string `json:"name"`; Title string `json:"title"`; Description string `json:"description"`; InputSchema json.RawMessage `json:"inputSchema"`; OutputSchema json.RawMessage `json:"outputSchema,omitempty"`; Annotations Annotations `json:"annotations"` }
+internal/mcp	Tools	func Tools() []Tool

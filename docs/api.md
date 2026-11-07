@@ -31,12 +31,23 @@ A token acts as the person who made it, limited to the access chosen when it was
 | Access | Acts as | Can |
 | --- | --- | --- |
 | Read only | `viewer` | Read projects, deployments, logs and metrics |
+| Deploy only | `viewer`, plus five routes | Also deploy, roll back, promote staging, restart and back up. Nothing else that writes: no compose, env, files, Git settings, domains, start, stop or restore |
 | Deploy and edit | `member` | Also create projects, edit compose and env, deploy, roll back, manage domains and backups |
 | Admin | `admin` | Also registries, Git connections, reading the S3 settings, and image pruning |
 
 The limit is worked out on every request against the owner's current role, so demoting the
 owner reduces what their tokens can do at once, and deleting the owner deletes their
-tokens.
+tokens. A Deploy only token needs an owner who is a member or admin; if the owner becomes a
+viewer, it can only read. `GET /auth/tokens/current` says whether the token can deploy now
+in `can_deploy`.
+
+Deploy only is the token to give an AI agent or a CD job: it can ship what is already in Git
+or roll back to an earlier deployment, but cannot change what a deployment runs. The five
+routes are `POST /projects/{name}/deployments`, `.../deployments/{number}/rollback`,
+`.../deployments/{number}/promote`, `/projects/{name}/actions/restart` and
+`/projects/{name}/backups`.
+To connect an AI agent through MCP rather than these routes, see
+[AI agents (MCP)](./mcp.md).
 
 Some things a token can never do, whatever its access. They need a person signed in to the
 panel, and the API answers `403 session_required`:
@@ -55,10 +66,16 @@ masked values is refused with `400 masked_values`. Compose files are masked the 
 way: inline `environment:`, build `args:` and config `content:` values read as
 `********`, and writing a YAML file that still holds them is refused.
 
-The flag fully protects secrets only on a read-only token. A Deploy and edit token can
+Read only and Deploy only tokens never get env values from the env or file routes,
+whatever the flag says. Logs are not covered: `GET /projects/{name}/logs` returns what the
+containers print, unscrubbed, to any token that can see the project, so an app that prints
+a secret hands it to every token. (The MCP server's `get_logs` scrubs env values first; see
+[AI agents](./mcp.md).) A Deploy only token cannot change compose, but anyone who holds one
+and can push to the project's Git branch can deploy a commit that prints its environment.
+On a Deploy and edit token, leaving the flag off is not full protection: such a token can
 change compose and deploy, and a container it starts can print its environment to the
-logs. Treat any write token as able to reach the project's secrets, and store it as
-carefully as the secrets themselves.
+logs. Treat any token that can deploy as able to reach the project's secrets, and store it
+as carefully as the secrets themselves.
 
 Every token expires, after 90 days by default and at most 365. Tokens can be revoked at
 any time in Settings, and an admin can see and revoke anyone's under

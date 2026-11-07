@@ -1,0 +1,2 @@
+# A hand-written PEM-shaped test fixture in a branch commit, replaced before merge, not a key.
+09361894689f3d3794b279d79e5e52ee9b4b4836:internal/api/composemask_test.go:private-key:201

@@ -96,7 +96,9 @@ Stopping or removing Windlass does not stop deployed applications. See
 - Container logs, browser terminal, host/container metrics, and image cleanup
 - Local and S3-compatible backups with optional schedules
 - Local users, roles, TOTP, and optional GitHub or Google sign-in
-- Personal API tokens, read-only or read-write, for scripts and CI
+- Personal API tokens for scripts and CI: read only, deploy only, deploy and edit, or admin
+- An [MCP server](docs/mcp.md) for AI agents: Claude Code, Cursor, VS Code or Codex can read
+  projects, logs and deployments, and deploy with a deploy only token
 - Private registry credentials, applied to the host with a real `docker login`
 - Optional external-process plugins
 

@@ -44,11 +44,28 @@ var (
 	ErrTokenName    = errors.New("name is required (at most 100 characters)")
 )
 
-// scopeRole maps a token scope to the highest role it may act as.
-var scopeRole = map[string]string{"read": "viewer", "write": "member", "admin": "admin"}
+// ScopeDeploy is the scope of a token that may deploy but not edit. It is
+// stored as scope "read" with can_deploy set (migration 0011 says why).
+const ScopeDeploy = "deploy"
 
-// ValidScope reports whether scope is one of read, write, admin.
+// scopeRole maps a token scope to the highest role it may act as. A deploy
+// token acts as a viewer everywhere except the routes behind
+// RequireDeployer.
+var scopeRole = map[string]string{"read": "viewer", ScopeDeploy: "viewer", "write": "member", "admin": "admin"}
+
+// scopeNeeds is the role a user needs to create a token with the scope.
+var scopeNeeds = map[string]string{"read": "viewer", ScopeDeploy: "member", "write": "member", "admin": "admin"}
+
+// ValidScope reports whether scope is one of read, deploy, write, admin.
 func ValidScope(scope string) bool { _, ok := scopeRole[scope]; return ok }
+
+// ScopeOf is the scope a stored token shows in the API.
+func ScopeOf(t db.ApiToken) string {
+	if t.CanDeploy != 0 {
+		return ScopeDeploy
+	}
+	return t.Scope
+}
 
 // TokenInfo describes the API token behind a request.
 type TokenInfo struct {
@@ -58,6 +75,9 @@ type TokenInfo struct {
 	Scope    string
 	// Secrets allows unmasked env reads.
 	Secrets bool
+	// Deploy is set for a deploy token whose owner is a member or above
+	// when the request is made. RequireDeployer admits it.
+	Deploy bool
 }
 
 // TokenFrom returns the API token that authenticated the request, if any.
@@ -77,6 +97,16 @@ func CanReadSecrets(ctx context.Context) bool {
 		return t.Secrets
 	}
 	return true
+}
+
+// CanDeploy reports whether the request may deploy, restart, roll back,
+// promote and take backups: a member or above, or a deploy token.
+func CanDeploy(ctx context.Context) bool {
+	if HasRole(ctx, "member") {
+		return true
+	}
+	t, ok := TokenFrom(ctx)
+	return ok && t.Deploy
 }
 
 func newAPIToken() (plaintext, publicID, secretHash string, err error) {
@@ -125,11 +155,11 @@ func (s *Service) CreateAPIToken(ctx context.Context, user db.User, name, scope 
 	if name == "" || len(name) > 100 {
 		return "", db.ApiToken{}, ErrTokenName
 	}
-	role, ok := scopeRole[scope]
+	need, ok := scopeNeeds[scope]
 	if !ok {
 		return "", db.ApiToken{}, ErrInvalidScope
 	}
-	if roleRank[role] > roleRank[user.Role] {
+	if roleRank[need] > roleRank[user.Role] {
 		return "", db.ApiToken{}, ErrScopeAbove
 	}
 	if ttl < 24*time.Hour || ttl > MaxTokenTTL {
@@ -139,17 +169,22 @@ func (s *Service) CreateAPIToken(ctx context.Context, user db.User, name, scope 
 	if err != nil {
 		return "", db.ApiToken{}, err
 	}
-	var flag int64
+	var flag, deploy int64
 	if secrets {
 		flag = 1
+	}
+	stored := scope
+	if scope == ScopeDeploy {
+		stored, deploy = "read", 1
 	}
 	tok, err := s.q.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PublicID:       publicID,
 		UserID:         user.ID,
 		Name:           name,
 		SecretHash:     hash,
-		Scope:          scope,
+		Scope:          stored,
 		CanReadSecrets: flag,
+		CanDeploy:      deploy,
 		ExpiresAt:      s.now().Add(ttl).UTC().Format(timeFormat),
 	})
 	if err != nil {
@@ -185,10 +220,14 @@ func (s *Service) AuthenticateAPIToken(ctx context.Context, raw, ip string) (db.
 	if err != nil || user.DisabledAt.Valid {
 		return db.User{}, TokenInfo{}, ErrNotAuthenticated
 	}
-	role, ok := scopeRole[tok.Scope]
+	scope := ScopeOf(tok)
+	role, ok := scopeRole[scope]
 	if !ok {
 		return db.User{}, TokenInfo{}, ErrNotAuthenticated
 	}
+	// Worked out before the cap: a deploy token deploys only while its
+	// owner could deploy in the panel.
+	deploy := scope == ScopeDeploy && roleRank[user.Role] >= roleRank[scopeNeeds[ScopeDeploy]]
 	if roleRank[role] < roleRank[user.Role] {
 		user.Role = role
 	}
@@ -208,7 +247,8 @@ func (s *Service) AuthenticateAPIToken(ctx context.Context, raw, ip string) (db.
 		ID:       tok.ID,
 		PublicID: tok.PublicID,
 		Name:     tok.Name,
-		Scope:    tok.Scope,
+		Scope:    scope,
 		Secrets:  tok.CanReadSecrets != 0,
+		Deploy:   deploy,
 	}, nil
 }
