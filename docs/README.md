@@ -27,6 +27,8 @@ A Compose control plane that does not own your containers.
 
 - [Configuration](./configuration.md), every `WINDLASS_*` variable and its default
 - [API](./api.md), the versioned HTTP API the panel itself uses
+- [AI agents (MCP)](./mcp.md), connecting Claude Code, Cursor, VS Code or Codex, and what
+  an agent can and cannot do
 - [Architecture](./architecture.md), how it is put together and why it shells out to
   `docker compose`
 - [Troubleshooting](./troubleshooting.md), the failures that are most often misread
