@@ -198,8 +198,8 @@ configs:
 	multi := "services:\n  web:\n    environment:\n      DB_PASS: ${DB_PASS:-defsekret}\n      KEY:\n        nested: leafsekret\n" +
 		"      N: ${A:-${B:-innersekret}}\n" +
 		"configs:\n  site:\n    content: |\n      server {\n        listen 80;\n        auth = linesekret\n" +
-		"      }\n      -----BEGIN PRIVATE KEY-----\n      MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n      MIIEvQIBADANBgkqhkiG9w0B==\n" +
-		"      -----END PRIVATE KEY-----\n"
+		"      }\n      -----BEGIN KEY-----\n      MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n      MIIEvQIBADANBgkqhkiG9w0B==\n" +
+		"      -----END KEY-----\n"
 	vals, err := composeInlineValues(multi)
 	if err != nil {
 		t.Fatal(err)
