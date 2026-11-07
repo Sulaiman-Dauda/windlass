@@ -30,6 +30,21 @@ Runs on Linux, x86_64 or arm64. Claiming the instance and setting the panel doma
   `/var/lib/windlass/projects/<name>/`. Uninstall Windlass and you keep a folder of Compose
   projects that run with `docker compose` alone.
 - **Small enough for the cheapest VPS.** No database server or cache to feed besides your apps.
+- **Staging that promotes what it tested.** A project can have a staging copy with its own
+  domains, `.env` and data. Pushes reach staging first, and Promote deploys the same commit
+  and image digests to live. See [Staging](docs/staging.md).
+- **An MCP server for AI agents.** Claude Code, Cursor, VS Code or Codex can read projects,
+  logs and deployments, and with a Deploy only token can deploy, roll back and promote. The MCP
+  server cannot edit a compose file or `.env`. See [AI agents (MCP)](docs/mcp.md).
+
+## Status
+
+Windlass is in production use: real projects are deployed and served with it. It is still
+0.x, so a release can contain a breaking change; when one does, its release notes say so and
+what to do. The [plugin SDK](plugins-sdk/) is held stable. Version 1.0 will mean the
+`/api/v1` API, the plugin SDK and the project directory layout are frozen, and an outside
+security review has been done. Until then, read [Security](docs/security.md) before putting it
+on a server you cannot rebuild.
 
 ## How it compares
 
@@ -70,19 +85,6 @@ audit entries, deployment history, jobs, backup records, settings, encrypted cre
 and rebuildable project/domain/environment indexes. Removing SQLite does not stop running
 containers; filesystem scanning restores the application index, but platform history and
 accounts require a platform backup.
-
-## Runtime model
-
-- One Go process serves the API and embedded React frontend.
-- Docker Compose performs deployments.
-- Caddy owns routing and certificates. Windlass changes only its tagged route objects.
-- A loopback-only Docker socket proxy exposes the API families Compose needs. The `windlass`
-  system user is not a member of the `docker` group.
-- No Redis, Kubernetes, Swarm, Prometheus, or separate job service is required.
-- CI enforces an idle RSS budget below 40 MiB for the Go process.
-
-Stopping or removing Windlass does not stop deployed applications. See
-[Life without the panel](docs/life-without-the-panel.md).
 
 ## Main features
 
@@ -128,20 +130,11 @@ renews the panel certificate automatically.
 See [Installation](docs/install.md) for systemd, container, configuration, update, and
 uninstall details.
 
-## Development and verification
+## Contributing
 
-```sh
-go test ./...
-go vet ./...
-cd web && npm ci && npm run build
-go test -tags integration ./...   # Linux with Docker and Caddy
-```
-
-The production binary embeds `web/dist`:
-
-```sh
-CGO_ENABLED=0 go build -trimpath -tags embedweb ./cmd/windlass
-```
+Building, testing and the architecture rules a change has to keep are in
+[CONTRIBUTING.md](CONTRIBUTING.md). Vulnerabilities go to [SECURITY.md](SECURITY.md), never a
+public issue.
 
 ## Licence
 

@@ -100,6 +100,8 @@ API are reachable at all, and keeps the panel's own process away from the raw so
 
 Be clear about what it does not do. Deploying Compose files means creating containers,
 and a Compose file can ask for a privileged container or mount the host's filesystem. So
-anyone who can edit a project and deploy it, a `member` or an API token with deploy
-access, can gain root on the host. Give `member` only to people you would trust with
-root, and keep tokens with that access as carefully as an SSH key.
+anyone who can edit a project and deploy it can gain root on the host: a `member`, an API
+token with **Deploy and edit** or **Admin** access, and a **Deploy only** token on a Git
+project whose repository its holder can push to. Give `member` only to people you would
+trust with root, and keep those tokens as carefully as an SSH key. See
+[Security](./security.md).

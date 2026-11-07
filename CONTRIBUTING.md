@@ -1,7 +1,7 @@
 # Contributing to Windlass
 
 Thanks for looking. Windlass is a single Go binary that drives `docker compose`,
-so most changes are smaller than they look — and a few are far more dangerous
+so most changes are smaller than they look, and a few are far more dangerous
 than they look. This page is mostly about telling those apart.
 
 ## Before anything else
@@ -24,6 +24,40 @@ make dev            # builds the SPA and runs the binary against ./tmp
 The web UI lives in `web/` and is embedded into the binary at build time, so a
 frontend change needs a rebuild to appear in a release build.
 
+## Testing and building
+
+```bash
+go test ./...
+go vet ./...
+cd web && npm ci && npm run build
+go test -tags integration ./...   # Linux with Docker and Caddy
+```
+
+`make test` runs the unit tests, `make lint` runs the pinned golangci-lint, and
+`make test-integration` runs the integration suite. Unit tests use the deterministic fake in
+`internal/agent/fake` and need no Docker. The integration suite deploys real Compose stacks,
+exercises Caddy over HTTPS, and checks that routes Windlass does not own survive. Run it for
+any change to deployment, proxy routing, domains or backups.
+
+The production binary embeds `web/dist`, so build the frontend first:
+
+```bash
+CGO_ENABLED=0 go build -trimpath -tags embedweb ./cmd/windlass
+```
+
+## Runtime model
+
+- One Go process serves the API and the embedded React frontend.
+- Docker Compose performs deployments.
+- Caddy owns routing and certificates. Windlass changes only its tagged route objects.
+- A loopback-only Docker socket proxy exposes the API families Compose needs. The `windlass`
+  system user is not a member of the `docker` group.
+- No Redis, Kubernetes, Swarm, Prometheus or separate job service is required.
+- CI fails any build whose Go process idles at 40 MiB RSS or more.
+
+Stopping or removing Windlass does not stop deployed applications. See
+[Life without the panel](docs/life-without-the-panel.md).
+
 ## The rules that are not negotiable
 
 These come from the architecture, not from taste. A PR that breaks one of them
@@ -32,17 +66,20 @@ will be turned down however good the code is:
 1. **The project filesystem is authoritative.** `compose.yaml` owns service
    configuration, `.env` owns environment values, `.windlass.json` owns the small
    amount of Windlass-specific config. SQLite holds platform state and rebuildable
-   indexes — never a database-only copy of Compose configuration.
+   indexes, never a database-only copy of Compose configuration.
 2. **Deployed containers must survive Windlass being stopped or removed.** It is
    a control plane, not a runtime dependency.
 3. **Privileged work stays in `internal/agent`.** Only `internal/agent/local`
    imports Docker/Moby packages or touches Docker, Caddy, project files, Git or
    exec directly. Everything else goes through the interface.
 4. **Compose operations shell out to `docker compose`.** Do not reconstruct
-   container specs — matching the real CLI is the point.
+   container specs: matching the real CLI is the point.
 5. **Caddy changes are targeted `@id` operations.** Windlass owns
    `windlass_routes`, `windlass_panel_route` and their `windlass_route_*`
    children, and nothing else. Never load or replace a whole Caddy config.
+6. **Docker access goes through the loopback socket proxy.** Never add the
+   `windlass` user to the `docker` group.
+7. **Stay under the idle memory budget.** No always-on dependencies.
 
 ## Pull requests
 
@@ -57,8 +94,8 @@ Fork, branch from `main`, and name it for what it does: `fix/compose-env-quoting
   containers kept running" is what a reviewer needs.
 - Update `docs/` if behaviour changed.
 
-Small fixes are welcome without prior discussion. For anything structural — a new
-agent operation, a change to the Caddy ownership model, a schema change — open an
+Small fixes are welcome without prior discussion. For anything structural, such as a
+new agent operation, a change to the Caddy ownership model or a schema change, open an
 issue first so the approach can be agreed before you spend a weekend on it.
 
 ## Code style
@@ -73,10 +110,10 @@ issue first so the approach can be agreed before you spend a weekend on it.
 
 Windlass is maintained by one person alongside other work.
 
-- **Issues** — usually looked at within a few days. A report with reproduction
+- **Issues:** usually looked at within a few days. A report with reproduction
   steps against a throwaway host gets attention fastest.
-- **Pull requests** — a first response within about a week.
-- **Security reports** — prioritised over everything else.
+- **Pull requests:** a first response within about a week.
+- **Security reports:** prioritised over everything else.
 
 There is **no CLA and no DCO sign-off**.
 

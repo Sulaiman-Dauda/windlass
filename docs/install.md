@@ -13,15 +13,16 @@ The installer:
 1. checks for Docker with the Compose v2 plugin, and if Docker is missing asks before
    installing it from get.docker.com (`--yes` agrees without asking, `--no-docker` refuses);
 2. installs Git with apt, dnf or apk if it is missing;
-3. installs Caddy from its official package repository unless `--no-caddy` is supplied or
+3. installs Caddy, from Caddy's own repository on apt and dnf or Alpine's on apk, unless `--no-caddy` is supplied or
    Caddy is already there. On a fresh Caddy install it replaces the packaged welcome
    Caddyfile with one that only enables the admin API on `127.0.0.1:2019`, keeping the
    original as `/etc/caddy/Caddyfile.default.bak`. An existing Caddy is left as it is;
-4. creates the `windlass` system user and `/var/lib/windlass/{projects,data,backups}`;
-5. installs `windlass-docker-proxy.service` on loopback port 2375 and does not grant the
-   Windlass user direct socket or `docker`-group access;
-6. verifies the release checksum, installs the Windlass binary and hardened systemd unit,
-   and starts both services.
+4. downloads the Windlass binary, checks it against the release's `checksums.txt`, and
+   installs it;
+5. creates the `windlass` system user and `/var/lib/windlass/{projects,data,backups}`;
+6. installs `windlass-docker-proxy.service` on loopback port 2375, without giving the
+   Windlass user direct socket or `docker`-group access, then the hardened `windlass`
+   unit, and starts both services.
 
 The installer only prompts when it would install Docker. Under `curl | sudo sh` it asks
 on your terminal; with no terminal at all, it treats the answer as no. To answer yes
@@ -31,7 +32,7 @@ up front when piping:
 curl -fsSL https://get.windlass.run | sudo sh -s -- --yes
 ```
 
-Supported flags are `--yes`, `--version vX.Y.Z`, `--no-caddy`, `--no-docker`, and
+Supported flags are `--yes`, `--version v0.60` (any release tag), `--no-caddy`, `--no-docker`, and
 `--binary PATH` (local/CI installation).
 
 ## Verifying what you are about to run
@@ -54,11 +55,12 @@ release, where a release write cannot reach it.
 To check a binary before installing it:
 
 ```sh
-gh release download v0.37 --pattern 'windlass-linux-amd64'
+gh release download v0.60 --repo Sulaiman-Dauda/windlass --pattern 'windlass-linux-amd64'
 gh attestation verify windlass-linux-amd64 --repo Sulaiman-Dauda/windlass
 ```
 
-And the container image, addressed by digest rather than by a tag that can move:
+And the container image. Its attestation is recorded against the image digest, so `gh`
+looks up the digest `latest` points to now and verifies that:
 
 ```sh
 gh attestation verify oci://ghcr.io/sulaiman-dauda/windlass:latest \
@@ -98,7 +100,7 @@ After the HTTPS hostname works, firewall public port 8080 or add a systemd overr
 | Variable | Default | Purpose |
 |---|---|---|
 | `WINDLASS_ADDR` | `:8080` | Windlass HTTP listen address |
-| `WINDLASS_DATA` | `/var/lib/windlass` | Platform database, keys, plugins, projects, and backups |
+| `WINDLASS_DATA` | `/var/lib/windlass` | Platform database, keys and plugins, and by default projects and backups |
 | `WINDLASS_PROJECTS` | `$WINDLASS_DATA/projects` | Authoritative Compose project directories |
 | `WINDLASS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 | `WINDLASS_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy admin API used for targeted route updates |

@@ -33,7 +33,7 @@ A token acts as the person who made it, limited to the access chosen when it was
 | Read only | `viewer` | Read projects, deployments, logs and metrics |
 | Deploy only | `viewer`, plus five routes | Also deploy, roll back, promote staging, restart and back up. Nothing else that writes: no compose, env, files, Git settings, domains, start, stop or restore |
 | Deploy and edit | `member` | Also create projects, edit compose and env, deploy, roll back, manage domains and backups |
-| Admin | `admin` | Also registries, Git connections, reading the S3 settings, and image pruning |
+| Admin | `admin` | Also registries, Git connections, plugins, reading the S3 settings and panel domain, checking for updates, and image pruning |
 
 The limit is worked out on every request against the owner's current role, so demoting the
 owner reduces what their tokens can do at once, and deleting the owner deletes their
@@ -55,8 +55,9 @@ panel, and the API answers `403 session_required`:
 - create, list or revoke tokens, and manage users or roles
 - set up or remove two-factor authentication, or configure sign-in providers
 - change the panel domain, apply an update, change the S3 backup destination
+- connect GitHub, or create or install the GitHub App
 - open a terminal
-- delete a project, or restore a backup over it
+- delete a project, restore a backup over it, or recreate its staging
 
 Env values come back masked (`********`) unless the token was created with **Can read env
 values**. Leave it off unless the job has to read secrets. A token without it can still
@@ -116,7 +117,7 @@ is sent back to the panel with a five-minute ticket and finishes at
 
 ## Shape of it
 
-Seventy-three paths, grouped roughly as:
+Seventy-nine paths in the OpenAPI spec, grouped roughly as:
 
 | Group | Examples |
 | --- | --- |
@@ -157,7 +158,8 @@ returning the panel's HTML with a 200.
 
 Requests through a plugin's proxy follow the same roles: any signed-in user can read, and
 anything other than `GET`, `HEAD` or `OPTIONS` needs `member`, as does opening a WebSocket.
-Windlass does not pass the caller's cookie or `Authorization` header on to the plugin.
+Windlass does not pass the caller's `windlass_session` cookie or `Authorization` header on to
+the plugin. Other cookies pass through.
 
 Rate limiting applies to authentication endpoints. API tokens are not rate limited: the
 secret is 160 random bits, so guessing one is not a practical attack.

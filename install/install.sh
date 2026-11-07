@@ -1,11 +1,11 @@
 #!/bin/sh
-# Windlass installer — https://github.com/Sulaiman-Dauda/windlass
+# Windlass installer: https://github.com/Sulaiman-Dauda/windlass
 #
 #   curl -fsSL https://get.windlass.run | sudo sh
 #
 # Flags:
 #   --yes            non-interactive (assume yes)
-#   --version vX.Y.Z install a specific version (default: latest)
+#   --version vX.Y   install a specific release, e.g. v0.60 (default: latest)
 #   --no-caddy       skip Caddy installation (no automatic HTTPS)
 #   --no-docker      skip Docker installation
 #   --binary PATH    install a local binary instead of downloading (CI/testing)

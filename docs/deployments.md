@@ -60,8 +60,9 @@ deployment you are undoing changed either, change it back before rolling back.
 
 Connect a repository in the project's Git tab with its `https://` clone URL. A public
 repository needs nothing else. For a private one, an admin first adds a connection under
-**Settings, Git**: GitHub by installing the GitHub App, with **Connect GitHub**, or with a
-token, and GitLab with a token. Windlass stores the repository, branch and auto-deploy preference in
+**Settings, Git**: GitHub by installing the GitHub App, which an admin creates under
+**Settings, Users and sign-in**, with **Connect GitHub**, or with a token, and GitLab with a
+token. Windlass stores the repository, branch and auto-deploy preference in
 `.windlass.json`, in the project directory, next to the compose file.
 
 The repository is checked out into `src/` inside the project directory. The project's own
