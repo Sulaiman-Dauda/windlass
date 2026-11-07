@@ -452,6 +452,38 @@ func (s *Service) GetEnv(ctx context.Context, project string) (map[string]string
 	return out, nil
 }
 
+// ReadEnv returns the project's env values without side effects: unlike
+// GetEnv it never refreshes the encrypted cache or creates .env. It is for
+// callers that only need to recognise values, like the MCP log scrubber,
+// and must not write on a read. Without a .env file it falls back to the
+// cached rows, which is what an install from before filesystem env has.
+func (s *Service) ReadEnv(ctx context.Context, project string) (map[string]string, error) {
+	p, err := s.Get(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	data, fileErr := s.agent.FS().ReadFile(ctx, project, ".env")
+	if fileErr == nil {
+		return parseEnvFile(string(data))
+	}
+	if !errors.Is(fileErr, fs.ErrNotExist) {
+		return nil, fileErr
+	}
+	rows, err := s.q.ListEnvVars(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(rows))
+	for _, row := range rows {
+		plain, err := s.box.Decrypt(row.ValueEnc)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt %s: %w", row.Key, err)
+		}
+		out[row.Key] = string(plain)
+	}
+	return out, nil
+}
+
 // SetEnv replaces the project's environment with vars.
 func (s *Service) SetEnv(ctx context.Context, project string, vars map[string]string) error {
 	p, err := s.Get(ctx, project)

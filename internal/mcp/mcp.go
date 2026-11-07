@@ -11,6 +11,8 @@ package mcp
 import (
 	"context"
 	"net/http"
+	"strings"
+	"time"
 )
 
 // Protocol revisions the server answers. Both are served statelessly: JSON
@@ -30,8 +32,10 @@ type Config struct {
 	Version string
 	// APIPrefix is where the REST API is mounted, normally "/api/v1".
 	APIPrefix string
-	// EnvValues returns the current .env values of a project, used only to
-	// scrub them out of log output before it reaches a model. It is called
+	// EnvValues returns the current env values of a project, used only to
+	// scrub them out of log output before it reaches a model. Keys are the
+	// variable names, optionally after a prefix ending in a colon; a name
+	// that says it holds a secret lowers the length scrubbed. It is called
 	// after the logs request for that project has already succeeded, so the
 	// caller is known to be allowed to read the project.
 	EnvValues func(ctx context.Context, project string) (map[string]string, error)
@@ -43,20 +47,43 @@ type Config struct {
 // Server is the MCP endpoint. It is an http.Handler mounted inside the
 // authenticated /api/v1 group.
 type Server struct {
-	cfg Config
-	api http.Handler
+	cfg     Config
+	api     http.Handler
+	tools   []toolDef
+	byName  map[string]*toolDef
+	limiter *limiter
 }
+
+// Tool calls allowed per token per minute. An agent takes a model turn per
+// call, so a legitimate one stays far below this; a runaway loop does not.
+const callsPerMinute = 120
 
 // New builds the server from cfg. The API handler is set later with SetAPI,
 // because the router the tools call also mounts this server.
 func New(cfg Config) *Server {
-	panic("scaffold: build a Server from cfg, with the tool catalogue from Tools")
+	if cfg.APIPrefix == "" {
+		cfg.APIPrefix = "/api/v1"
+	}
+	cfg.APIPrefix = strings.TrimRight(cfg.APIPrefix, "/")
+	if cfg.Version == "" {
+		cfg.Version = "dev"
+	}
+	s := &Server{
+		cfg:     cfg,
+		tools:   catalogue(),
+		limiter: newLimiter(callsPerMinute, time.Minute),
+	}
+	s.byName = make(map[string]*toolDef, len(s.tools))
+	for i := range s.tools {
+		s.byName[s.tools[i].Name] = &s.tools[i]
+	}
+	return s
 }
 
 // SetAPI gives the server the root HTTP handler its tools send in-process
 // requests to. It must be called once, before the server takes traffic.
 func (s *Server) SetAPI(h http.Handler) {
-	panic("scaffold: store the root handler the tools call")
+	s.api = h
 }
 
 // ServeHTTP answers one MCP request. It refuses a request without an
@@ -66,5 +93,42 @@ func (s *Server) SetAPI(h http.Handler) {
 // initialize, tools/list and tools/call. Tool failures come back as results
 // with isError set; protocol failures as JSON-RPC errors.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	panic("scaffold: serve one stateless MCP request")
+	// A browser sends Origin; an MCP client does not. Refusing every Origin
+	// closes DNS rebinding and any page that got hold of a token.
+	if _, ok := r.Header["Origin"]; ok {
+		writeRPCError(w, http.StatusForbidden, nil, codeInvalidRequest,
+			"browser requests are not accepted here", nil)
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeRPCError(w, http.StatusMethodNotAllowed, nil, codeInvalidRequest,
+			"POST one JSON-RPC message; this server holds no sessions or streams", nil)
+		return
+	}
+	if _, ok := bearerToken(r); !ok {
+		writeAPIError(w, http.StatusUnauthorized, "token_required",
+			"MCP needs an API token in the Authorization header; a panel session is not enough")
+		return
+	}
+	if s.api == nil {
+		writeRPCError(w, http.StatusServiceUnavailable, nil, codeInternal, "server is starting", nil)
+		return
+	}
+	s.serveRPC(w, r)
+}
+
+// tokenPrefix is the Windlass API token prefix. The auth middleware has
+// already validated any bearer value carrying it; this package only checks
+// that the request came with one rather than with a cookie.
+const tokenPrefix = "wl_pat_"
+
+// bearerToken returns the Windlass token in the Authorization header.
+func bearerToken(r *http.Request) (string, bool) {
+	scheme, value, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return "", false
+	}
+	value = strings.TrimSpace(value)
+	return value, strings.HasPrefix(value, tokenPrefix)
 }

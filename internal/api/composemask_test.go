@@ -128,3 +128,82 @@ func TestMaskComposeFileLeavesOtherYAMLAndHidesBroken(t *testing.T) {
 		t.Errorf("broken YAML = %q", got)
 	}
 }
+
+// The MCP scrubber is given what the masker hides, so every value the
+// masker would replace has to come back, under its key.
+func TestComposeInlineValues(t *testing.T) {
+	in := `x-db: &db
+  DB_PASSWORD: anchorsekret
+services:
+  app:
+    environment:
+      <<: *db
+      API_KEY: mapsekret
+      FROM_ENV: ${API_KEY}
+      EMPTY:
+      PIN: "1234"
+    build:
+      args:
+        - NPM_TOKEN=argsekret
+        - PLAIN_PASSTHROUGH
+        - REF=$HOME
+  db:
+    environment:
+      - POSTGRES_PASSWORD=listsekret
+configs:
+  conf:
+    content: |
+      password = configsekret
+`
+	got, err := composeInlineValues(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"DB_PASSWORD": "anchorsekret", "API_KEY": "mapsekret", "PIN": "1234", "NPM_TOKEN": "argsekret",
+		"POSTGRES_PASSWORD": "listsekret",
+	}
+	seen := map[string]string{}
+	var content []string
+	for _, kv := range got {
+		if kv[0] == "content" {
+			content = append(content, kv[1])
+			continue
+		}
+		seen[kv[0]] = kv[1]
+	}
+	if len(seen) != len(want) {
+		t.Errorf("got %v, want %d keyed values", got, len(want))
+	}
+	for k, v := range want {
+		if seen[k] != v {
+			t.Errorf("%s = %q, want %q", k, seen[k], v)
+		}
+	}
+	// The whole config, and the value on its line alone.
+	if strings.Join(content, "|") != "password = configsekret\n|configsekret" {
+		t.Errorf("content values = %q", content)
+	}
+	for line, want := range map[string]string{
+		`password = "s3cret";`: "s3cret", `  "token": "abc123",`: "abc123", "url: https://x:y@h": "https://x:y@h",
+		"listen 80": "", "key=${REF}": "", "a=b=c": "b=c", "proxy_pass http://app:3000;": "",
+	} {
+		if got, _ := configLineValue(line); got != want {
+			t.Errorf("configLineValue(%q) = %q, want %q", line, got, want)
+		}
+	}
+	// The hard cases the masker handles, each holding sekret1.
+	for name, doc := range map[string]string{
+		"service merge": "x-base: &base\n  environment:\n    SECRET: sekret1\nservices:\n  web:\n    <<: *base\n",
+		"root merge":    "x-root: &root\n  services:\n    web:\n      environment:\n        A: sekret1\n<<: *root\n",
+		"multi doc":     "services:\n  a:\n    image: nginx\n---\nservices:\n  web:\n    environment:\n      A: sekret1\n",
+	} {
+		vals, err := composeInlineValues(doc)
+		if err != nil || len(vals) != 1 || vals[0][1] != "sekret1" {
+			t.Errorf("%s = %v, %v", name, vals, err)
+		}
+	}
+	if _, err := composeInlineValues("services:\n  web: [\n"); err == nil {
+		t.Error("broken YAML gave no error")
+	}
+}

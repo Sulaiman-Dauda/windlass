@@ -70,9 +70,63 @@ func maskComposeFile(content string) string {
 	return out.String()
 }
 
+// configLineValue returns what follows the first "=" or ": " on a line of
+// config content, without the quotes, commas and semicolons around it.
+func configLineValue(line string) (string, bool) {
+	i := strings.IndexByte(line, '=')
+	if j := strings.Index(line, ": "); j >= 0 && (i < 0 || j < i) {
+		i = j + 1
+	}
+	if i < 0 {
+		return "", false
+	}
+	value := strings.Trim(strings.TrimSpace(line[i+1:]), `"',;`)
+	if value == "" || envRefRe.MatchString(value) {
+		return "", false
+	}
+	return value, true
+}
+
 type composeMasker struct {
 	seen    map[*yaml.Node]bool
 	changed bool
+	// record, when set, is given each value just before it is masked, with
+	// the key it is set under ("content" for a config).
+	record func(key, value string)
+}
+
+// composeInlineValues returns the values maskComposeFile hides, each with
+// its key, so the MCP server can scrub them from logs the way the panel
+// hides them from viewers. Config content is a whole file, so the value on
+// each of its "key = value" or "key: value" lines is returned too: an app
+// may log the password without the line it came from. A file that does
+// not parse is an error: there is no telling where its values are.
+func composeInlineValues(content string) ([][2]string, error) {
+	var out [][2]string
+	m := composeMasker{seen: map[*yaml.Node]bool{}, record: func(k, v string) {
+		out = append(out, [2]string{k, v})
+		if k == "content" {
+			for _, line := range strings.Split(v, "\n") {
+				if value, ok := configLineValue(line); ok {
+					out = append(out, [2]string{k, value})
+				}
+			}
+		}
+	}}
+	dec := yaml.NewDecoder(strings.NewReader(content))
+	for {
+		var doc yaml.Node
+		err := dec.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(doc.Content) == 1 {
+			m.document(doc.Content[0])
+		}
+	}
 }
 
 func (m *composeMasker) document(root *yaml.Node) {
@@ -130,7 +184,7 @@ func (m *composeMasker) block(n *yaml.Node, key string) {
 	for _, pair := range lookupAll(n, key) {
 		uncomment(pair[0])
 		if key == "content" {
-			m.scalar(pair[1])
+			m.scalar(pair[1], key)
 		} else {
 			m.values(pair[1])
 		}
@@ -147,7 +201,7 @@ func (m *composeMasker) values(n *yaml.Node) {
 		return
 	}
 	if n.Kind == yaml.ScalarNode {
-		m.scalar(n)
+		m.scalar(n, "")
 		return
 	}
 	if m.seen[n] {
@@ -167,13 +221,13 @@ func (m *composeMasker) values(n *yaml.Node) {
 				}
 				continue
 			}
-			m.scalar(v)
+			m.scalar(v, k.Value)
 		}
 	case yaml.SequenceNode:
 		for _, item := range n.Content {
 			r := resolve(item)
 			if r.Kind != yaml.ScalarNode {
-				m.scalar(item)
+				m.scalar(item, "")
 				continue
 			}
 			uncomment(r)
@@ -184,14 +238,17 @@ func (m *composeMasker) values(n *yaml.Node) {
 			if value == "" || envRefRe.MatchString(value) {
 				continue
 			}
+			if m.record != nil {
+				m.record(key, value)
+			}
 			m.replace(r, key+"="+maskedEnvValue)
 		}
 	}
 }
 
-// scalar masks one value, following an alias to where it is written. A
-// mapping or list where a value belongs is replaced whole.
-func (m *composeMasker) scalar(n *yaml.Node) {
+// scalar masks one value set under key, following an alias to where it is
+// written. A mapping or list where a value belongs is replaced whole.
+func (m *composeMasker) scalar(n *yaml.Node, key string) {
 	n = resolve(n)
 	if n == nil || m.seen[n] {
 		return
@@ -200,6 +257,9 @@ func (m *composeMasker) scalar(n *yaml.Node) {
 	uncomment(n)
 	if n.Kind == yaml.ScalarNode && (n.Tag == "!!null" || n.Value == "" || envRefRe.MatchString(n.Value)) {
 		return
+	}
+	if m.record != nil && n.Kind == yaml.ScalarNode {
+		m.record(key, n.Value)
 	}
 	m.replace(n, maskedEnvValue)
 }

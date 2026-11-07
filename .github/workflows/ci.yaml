@@ -118,6 +118,22 @@ jobs:
           sudo systemctl disable caddy || true
       - run: go test -tags integration -count=1 ./...
 
+  mcp-conformance:
+    name: MCP conformance suite
+    runs-on: ubuntu-latest
+    needs: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # The test runs the suite through npx, pinned to the version it was
+      # written against, and judges its checks.json against failsByDesign.
+      - run: go test -tags mcpconformance -count=1 -v -run TestMCPConformance ./internal/server
+
   e2e:
     name: Playwright smoke
     runs-on: ubuntu-latest
