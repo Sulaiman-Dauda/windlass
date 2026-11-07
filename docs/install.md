@@ -97,19 +97,19 @@ After the HTTPS hostname works, firewall public port 8080 or add a systemd overr
 
 ## Runtime configuration
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `WINDLASS_ADDR` | `:8080` | Windlass HTTP listen address |
-| `WINDLASS_DATA` | `/var/lib/windlass` | Platform database, keys and plugins, and by default projects and backups |
-| `WINDLASS_PROJECTS` | `$WINDLASS_DATA/projects` | Authoritative Compose project directories |
-| `WINDLASS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
-| `WINDLASS_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy admin API used for targeted route updates |
-| `WINDLASS_PANEL_UPSTREAM` | `127.0.0.1:8080` | Address Caddy dials for the Settings-managed panel route |
-| `WINDLASS_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128` | Proxy IPs/CIDRs allowed to supply client forwarding headers |
-| `WINDLASS_NO_SELF_UPDATE` | unset | Disable binary self-update when set |
-| `WINDLASS_UPDATE_REPO` | `Sulaiman-Dauda/windlass` | Repository checked for releases |
-| `WINDLASS_UPDATE_TOKEN` | unset | GitHub token for a private update repository |
-| `DOCKER_HOST` | Docker client default | Installer sets `tcp://127.0.0.1:2375` in systemd |
+| Variable | Purpose |
+| --- | --- |
+| `WINDLASS_ADDR` | Default `:8080`. Windlass HTTP listen address. |
+| `WINDLASS_DATA` | Default `/var/lib/windlass`. Platform database, keys and plugins, and by default projects and backups. |
+| `WINDLASS_PROJECTS` | Default `$WINDLASS_DATA/projects`. Authoritative Compose project directories. |
+| `WINDLASS_LOG_LEVEL` | Default `info`. One of `debug`, `info`, `warn` or `error`. |
+| `WINDLASS_CADDY_ADMIN` | Default `http://127.0.0.1:2019`. Caddy admin API used for targeted route updates. |
+| `WINDLASS_PANEL_UPSTREAM` | Default `127.0.0.1:8080`. Address Caddy dials for the Settings-managed panel route. |
+| `WINDLASS_TRUSTED_PROXIES` | Default `127.0.0.0/8,::1/128`. Proxy IPs/CIDRs allowed to supply client forwarding headers. |
+| `WINDLASS_NO_SELF_UPDATE` | Unset by default. Disable binary self-update when set. |
+| `WINDLASS_UPDATE_REPO` | Default `Sulaiman-Dauda/windlass`. Repository checked for releases. |
+| `WINDLASS_UPDATE_TOKEN` | Unset by default. GitHub token for a private update repository. |
+| `DOCKER_HOST` | Defaults to the Docker client's default. The installer sets `tcp://127.0.0.1:2375` in systemd. |
 
 [Configuration](./configuration.md) explains each one.
 

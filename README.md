@@ -53,7 +53,7 @@ Checked against each project's own docs and source on 30/10/2026. Corrections we
 | | Windlass | Coolify | Dokploy | CapRover | Dokku |
 |---|---|---|---|---|---|
 | Deploys your compose file with | `docker compose`, file unchanged | its own labels, networks and volume names added ("Raw" mode leaves it mostly alone) | `docker compose`, Traefik labels written into the file | converted into CapRover apps; `build`, `networks` and `deploy` ignored | no compose support; git push, image or archive |
-| Runs alongside | Caddy, SQLite | Postgres, Redis, Traefik or Caddy | Docker Swarm, Postgres, Traefik | Docker Swarm, nginx | nginx (other proxies optional) |
+| Runs alongside | Caddy and a restricted Docker socket proxy; SQLite is built in | Postgres, Redis, Traefik or Caddy | Docker Swarm, Postgres, Traefik | Docker Swarm, nginx | nginx (other proxies optional) |
 | Stated server minimum | none; the panel idles at about 24 MB | 2 GB RAM | 2 GB RAM | 1 GB RAM recommended | 1 GB RAM |
 | Licence | Apache-2.0 | Apache-2.0 | Apache-2.0, except `/proprietary` | Apache-2.0 | MIT |
 
