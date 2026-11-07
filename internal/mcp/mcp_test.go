@@ -29,6 +29,7 @@ type fakeAPI struct {
 	projects int
 	logLines []string
 	events   int
+	doneMsg  string // the last event's message; "failed" when empty
 	staging  bool
 
 	// What /auth/tokens/current reports, and whether the write routes
@@ -46,6 +47,9 @@ type fakeAPI struct {
 	restartFails bool
 	backupFails  bool
 	backupBody   string
+	// madeBackups, when set, makes each backup POST add a manual backup to
+	// the list, as the real route does.
+	madeBackups *[]map[string]any
 }
 
 func newFakeAPI() *fakeAPI {
@@ -130,6 +134,12 @@ func (f *fakeAPI) serveWrite(w http.ResponseWriter, r *http.Request, path string
 			writeTestJSON(w, 502, map[string]any{"id": 3, "status": "failed", "error": "pg_dump: " + plantedSecret})
 			return
 		}
+		if f.madeBackups != nil {
+			f.mu.Lock()
+			*f.madeBackups = append(*f.madeBackups, map[string]any{"id": 100 + len(*f.madeBackups), "kind": "manual",
+				"status": "done", "created_at": time.Now().UTC().Format(time.RFC3339Nano)})
+			f.mu.Unlock()
+		}
 		writeTestJSON(w, 201, map[string]any{"id": 3, "status": "succeeded", "destination": "local", "size_bytes": 1024})
 	}
 }
@@ -212,7 +222,11 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for i := 1; i <= f.events; i++ {
 			writeSSE(w, "deployment.log", map[string]any{"seq": i, "type": "log", "message": fmt.Sprintf("step %d %s", i, plantedSecret)})
 		}
-		writeSSE(w, "deployment.done", map[string]any{"seq": f.events + 1, "type": "done", "message": "failed"})
+		done := f.doneMsg
+		if done == "" {
+			done = "failed"
+		}
+		writeSSE(w, "deployment.done", map[string]any{"seq": f.events + 1, "type": "done", "message": done})
 	case "/projects/web/logs":
 		if r.URL.Query().Get("follow") != "false" {
 			writeTestJSON(w, 400, map[string]any{"error": map[string]string{"message": "the tools must not follow"}})
@@ -231,8 +245,14 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeTestJSON(w, 200, map[string]any{"live": "web", "staging": "web-staging", "drift": []any{},
 			"promotable": map[string]any{"number": 5, "status": "succeeded"}})
 	case "/projects/web/backups":
-		writeTestJSON(w, 200, []map[string]any{{"id": 1, "kind": "volume", "destination": "local", "status": "failed",
-			"error": "pg_dump: " + plantedSecret}})
+		list := []map[string]any{{"id": 1, "kind": "volume", "destination": "local", "status": "failed",
+			"error": "pg_dump: " + plantedSecret}}
+		if f.madeBackups != nil {
+			f.mu.Lock()
+			list = append(list, *f.madeBackups...)
+			f.mu.Unlock()
+		}
+		writeTestJSON(w, 200, list)
 	case "/projects/web/backups/schedule":
 		writeTestJSON(w, 200, map[string]any{"interval": "daily", "destination": "local", "retention_count": 7, "enabled": true})
 	default:
@@ -559,6 +579,10 @@ func TestProtocolErrors(t *testing.T) {
 		if rep.status != c.status || rep.msg.Error == nil || rep.msg.Error.Code != c.code {
 			t.Errorf("%s: %d %s, want %d code %d", c.name, rep.status, rep.body, c.status, c.code)
 		}
+		// JSON-RPC: an error whose request id is unknown still has one, null.
+		if !strings.Contains(rep.body, `"id":`) {
+			t.Errorf("%s: no id in %s", c.name, rep.body)
+		}
 	}
 	// Big bodies stop at 1 MiB.
 	rep := send(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"x":"`+strings.Repeat("a", maxBody)+`"}}`, nil)
@@ -603,7 +627,7 @@ var readTools = map[string]bool{
 }
 
 // destructiveTools change what is running and need confirm.
-var destructiveTools = map[string]bool{"deploy": true, "restart": true, "rollback": true, "promote": true}
+var destructiveTools = map[string]bool{"deploy": true, "restart": true, "rollback": true, "promote": true, "create_backup": true}
 
 func TestNoToolReturnsEnv(t *testing.T) {
 	api := deployFake()
@@ -620,7 +644,7 @@ func TestNoToolReturnsEnv(t *testing.T) {
 		"restart":          {"project": "web", "confirm": true},
 		"rollback":         {"project": "web", "number": 2, "confirm": true},
 		"promote":          {"project": "web", "confirm": true},
-		"create_backup":    {"project": "web"},
+		"create_backup":    {"project": "web", "confirm": true},
 	}
 	if len(calls) != len(Tools()) {
 		t.Fatalf("test covers %d tools, catalogue has %d", len(calls), len(Tools()))
@@ -772,6 +796,17 @@ func TestLimitsAreReported(t *testing.T) {
 	if last, _ := events[len(events)-1].(map[string]any); last["type"] != "done" {
 		t.Errorf("get_deployment dropped the newest event: %v", last)
 	}
+	// Newest event alone past MaxLogBytes: the end of it, where the reason is.
+	api.doneMsg = strings.Repeat("x", MaxLogBytes) + " the reason"
+	out, _, _ = callTool(t, s, "get_deployment", map[string]any{"project": "web", "number": 2})
+	events, _ = out["events"].([]any)
+	if len(events) != 1 || out["events_truncated"] != true {
+		t.Fatalf("get_deployment big event: %d events truncated %v", len(events), out["events_truncated"])
+	}
+	if msg, _ := events[0].(map[string]any)["message"].(string); len(msg) > MaxLogBytes || !strings.HasSuffix(msg, " the reason") {
+		t.Errorf("get_deployment big event: %d bytes, ends %q", len(msg), msg[max(0, len(msg)-20):])
+	}
+	api.doneMsg = ""
 
 	out, _, _ = callTool(t, s, "list_deployments", map[string]any{"project": "web", "limit": 1})
 	if out["returned"] != float64(1) || out["truncated"] != false {
@@ -826,10 +861,6 @@ func TestEveryToolHasAllAnnotations(t *testing.T) {
 		case destructiveTools[tool.Name]:
 			if tool.Annotations != destructive || !confirmRequired {
 				t.Errorf("%s: destructive tool annotations %+v, confirm required %v", tool.Name, tool.Annotations, confirmRequired)
-			}
-		case tool.Name == "create_backup":
-			if tool.Annotations != additive || hasConfirm {
-				t.Errorf("%s: annotations %+v, confirm %v", tool.Name, tool.Annotations, hasConfirm)
 			}
 		default:
 			t.Errorf("%s is not in the test's lists", tool.Name)
@@ -972,7 +1003,7 @@ func TestWriteToolsNeedADeployToken(t *testing.T) {
 	if _, text, _ := callTool(t, s, "deploy", map[string]any{"project": "web"}); !strings.Contains(text, "needs a token that can deploy") {
 		t.Errorf("read token without confirm = %s", text)
 	}
-	if _, text, _ := callTool(t, s, "create_backup", map[string]any{"project": "web"}); !strings.Contains(text, "needs a token that can deploy") {
+	if _, text, _ := callTool(t, s, "create_backup", map[string]any{"project": "web", "confirm": true}); !strings.Contains(text, "needs a token that can deploy") {
 		t.Errorf("create_backup with a read token = %s", text)
 	}
 	if posts := api.posts(); len(posts) != 0 {
@@ -1044,7 +1075,7 @@ func TestWritesAreAudited(t *testing.T) {
 	if _, text, isError := callTool(t, s, "promote", map[string]any{"project": "web", "number": 4, "confirm": true}); isError {
 		t.Errorf("promote 4 = %s", text)
 	}
-	if _, text, isError := callTool(t, s, "create_backup", map[string]any{"project": "web", "destination": "s3"}); isError {
+	if _, text, isError := callTool(t, s, "create_backup", map[string]any{"project": "web", "destination": "s3", "confirm": true}); isError {
 		t.Errorf("create_backup = %s", text)
 	}
 	if !strings.Contains(api.backupBody, `"destination":"s3"`) {
@@ -1071,7 +1102,7 @@ func TestWritesAreAudited(t *testing.T) {
 	if !isError || strings.Contains(text, plantedSecret) || !strings.Contains(text, "bad value [redacted]") {
 		t.Errorf("failed restart = %s", text)
 	}
-	_, text, isError = callTool(t, s, "create_backup", map[string]any{"project": "web"})
+	_, text, isError = callTool(t, s, "create_backup", map[string]any{"project": "web", "confirm": true})
 	if !isError || strings.Contains(text, plantedSecret) || !strings.Contains(text, "backup of web failed: pg_dump: [redacted]") {
 		t.Errorf("failed backup = %s", text)
 	}
@@ -1149,5 +1180,53 @@ func TestWriteOutlivesTheClient(t *testing.T) {
 	}
 	if cancelled := <-api.restarts; cancelled {
 		t.Error("the slow restart was cancelled")
+	}
+}
+
+func TestNewestRecentManual(t *testing.T) {
+	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
+	b := func(id, kind, status string, ago time.Duration) object {
+		return object{"id": json.RawMessage(id), "kind": json.RawMessage(`"` + kind + `"`),
+			"status":     json.RawMessage(`"` + status + `"`),
+			"created_at": json.RawMessage(`"` + now.Add(-ago).Format("2006-01-02T15:04:05.000Z") + `"`)}
+	}
+	for name, c := range map[string]struct {
+		list []object
+		want string
+	}{
+		"none":              {nil, ""},
+		"old manual":        {[]object{b("1", "manual", "done", 11*time.Minute)}, ""},
+		"failed manual":     {[]object{b("1", "manual", "failed", time.Minute)}, ""},
+		"recent scheduled":  {[]object{b("1", "scheduled", "done", time.Minute)}, ""},
+		"recent manual":     {[]object{b("1", "manual", "done", 9*time.Minute)}, "1"},
+		"pending manual":    {[]object{b("1", "manual", "pending", 0)}, "1"},
+		"newest of several": {[]object{b("1", "manual", "done", 8*time.Minute), b("2", "manual", "done", 2*time.Minute)}, "2"},
+	} {
+		got := newestRecentManual(c.list, now)
+		if id := string(got["id"]); id != c.want {
+			t.Errorf("%s: got id %q, want %q", name, id, c.want)
+		}
+	}
+}
+
+// Calls at once still take one backup: the gap check and the POST are one
+// step per project.
+func TestParallelBackupsTakeOne(t *testing.T) {
+	api := deployFake()
+	api.madeBackups = &[]map[string]any{}
+	s := newTestServer(t, api)
+	var wg sync.WaitGroup
+	for range 5 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			callTool(t, s, "create_backup", map[string]any{"project": "web", "confirm": true})
+		}()
+	}
+	wg.Wait()
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if n := len(*api.madeBackups); n != 1 {
+		t.Errorf("%d backups taken, want 1", n)
 	}
 }

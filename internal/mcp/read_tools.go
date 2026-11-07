@@ -230,16 +230,22 @@ func getDeployment(t *toolCtx) (any, error) {
 	}
 	// Keep the newest events within MaxLogBytes of message text: the end of
 	// a failed deployment is where the reason is.
+	const eventOverhead = 64
 	truncated := res.truncated
 	total, start := 0, len(events)
 	for start > 0 {
-		n := len(events[start-1].Message) + 64
+		n := len(events[start-1].Message) + eventOverhead
 		if total+n > MaxLogBytes {
 			truncated = true
 			break
 		}
 		total += n
 		start--
+	}
+	if start == len(events) && start > 0 {
+		// Not even the newest event fits: keep the end of its message.
+		start--
+		events[start].Message = keepEnd(events[start].Message, MaxLogBytes-eventOverhead)
 	}
 	out["events"] = events[start:]
 	out["events_truncated"] = truncated

@@ -12,6 +12,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -52,6 +53,9 @@ type Server struct {
 	tools   []toolDef
 	byName  map[string]*toolDef
 	limiter *limiter
+	// backupLocks holds a *sync.Mutex per project, so that two create_backup
+	// calls at once cannot both pass the backupGap check.
+	backupLocks sync.Map
 }
 
 // Tool calls allowed per token per minute. An agent takes a model turn per

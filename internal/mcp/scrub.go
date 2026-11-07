@@ -164,17 +164,24 @@ func tailLines(lines []string, maxLines, maxBytes int) ([]string, bool) {
 	}
 	if start == len(lines) && len(lines) > 0 {
 		// Not even the newest line fits: keep its end.
-		last := lines[len(lines)-1]
-		keep := last[len(last)-(maxBytes-1):]
-		for len(keep) > 0 && !utf8.RuneStart(keep[0]) {
-			keep = keep[1:]
-		}
-		return []string{keep}, true
+		return []string{keepEnd(lines[len(lines)-1], maxBytes-1)}, true
 	}
 	if start > 0 {
 		cut = true
 	}
 	return lines[start:], cut
+}
+
+// keepEnd returns the last max bytes of s at most, cut on a rune boundary.
+func keepEnd(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	keep := s[len(s)-max:]
+	for len(keep) > 0 && !utf8.RuneStart(keep[0]) {
+		keep = keep[1:]
+	}
+	return keep
 }
 
 // stripURLCredentials removes a user:password@ part from a URL, in case

@@ -36,7 +36,9 @@ See `ARCHITECTURE.md`. Settled by Pablo 30/10/2026, do not reopen:
   Amended 07/11/2026 after the code review (flagged for Pablo): the values also include those
   the top-level Compose files set inline, the ones the panel masks from viewers
   (`api.MCPEnvValues`, which reuses the masker's walk), with the value on each `key = value`
-  line of config content; a Compose file that will not parse withholds the text. Under a key that names a secret (`PASS`, `PWD`, `SECRET`, `TOKEN`,
+  line of config content and, from the v0.60 review, each `${NAME:-value}` default and each
+  config line of 16 or more characters with no spaces (a PEM body), never a whole multi-line
+  config; a Compose file that will not parse withholds the text. Under a key that names a secret (`PASS`, `PWD`, `SECRET`, `TOKEN`,
   `PRIVATE`, `CREDENTIAL`, `API_KEY`, `*_KEY`) the floor is 4 characters, booleans excepted.
 - Tools: `list_projects`, `get_project` (services and their state, domains, last deployment),
   `list_deployments`, `get_deployment` (with its events), `get_logs` (project, optional

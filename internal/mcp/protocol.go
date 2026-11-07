@@ -46,7 +46,7 @@ const instructions = "Windlass runs Docker Compose projects on one server. " +
 	"or Compose file in Git and deploy; this server never edits files or env. " +
 	"Start with list_projects, then get_project. Env values are never returned, and log " +
 	"text has the project's env values and API tokens replaced with [redacted]. " +
-	"With a deploy token, deploy, restart, rollback and promote change what is running: " +
+	"With a deploy token, deploy, restart, rollback, promote and create_backup change the server: " +
 	"ask the user before each one and pass confirm true only once they agree. " +
 	"Prefer a project's staging and promote over changing live directly."
 
@@ -73,7 +73,7 @@ type rpcError struct {
 
 type rpcResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
+	ID      json.RawMessage `json:"id"` // null when the request's id is unknown, as JSON-RPC requires
 	Result  any             `json:"result,omitempty"`
 	Error   *rpcError       `json:"error,omitempty"`
 }

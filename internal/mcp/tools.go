@@ -113,9 +113,6 @@ var readOnly = Annotations{ReadOnlyHint: true, DestructiveHint: false, Idempoten
 // clients ask the user before each call.
 var destructive = Annotations{ReadOnlyHint: false, DestructiveHint: true, IdempotentHint: false, OpenWorldHint: false}
 
-// additive is for a write that only adds (a manual backup never prunes).
-var additive = Annotations{ReadOnlyHint: false, DestructiveHint: false, IdempotentHint: false, OpenWorldHint: false}
-
 // confirmParam is required on every destructive tool, because annotations
 // are only hints and not every client asks the user.
 var confirmParam = param{
@@ -296,14 +293,16 @@ func catalogue() []toolDef {
 				Name:  "create_backup",
 				Title: "Back up a project",
 				Description: "Take a backup of a project now: its volumes and any databases Windlass detects, to local " +
-					"storage or S3. It only adds a backup and never deletes old ones. A big project can take minutes; " +
-					"if it is still running when this returns, check list_backups. Restoring is done in the panel, not here.",
-				Annotations: additive,
+					"storage or S3. It counts toward the project's backup retention, so the next scheduled backup " +
+					"may delete the oldest one to make room. One every 10 minutes at most. A big project can take " +
+					"minutes; if it is still running when this returns, check list_backups. Restoring is done in " +
+					"the panel, not here.",
+				Annotations: destructive,
 			},
 			params: []param{projectParam, {
 				name: "destination", kind: kindString, pattern: destinationRE, maxLen: 5,
 				description: "local (the default) or s3, if an S3 destination is set up in the panel.",
-			}},
+			}, confirmParam},
 			run:      createBackup,
 			minScope: scopeDeploy,
 		},

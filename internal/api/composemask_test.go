@@ -161,7 +161,7 @@ configs:
 	}
 	want := map[string]string{
 		"DB_PASSWORD": "anchorsekret", "API_KEY": "mapsekret", "PIN": "1234", "NPM_TOKEN": "argsekret",
-		"POSTGRES_PASSWORD": "listsekret",
+		"POSTGRES_PASSWORD": "listsekret", "content:password": "configsekret",
 	}
 	seen := map[string]string{}
 	var content []string
@@ -180,17 +180,39 @@ configs:
 			t.Errorf("%s = %q, want %q", k, seen[k], v)
 		}
 	}
-	// The whole config, and the value on its line alone.
-	if strings.Join(content, "|") != "password = configsekret\n|configsekret" {
+	// The whole config; its line's value is keyed by the line's own key.
+	if strings.Join(content, "|") != "password = configsekret\n" {
 		t.Errorf("content values = %q", content)
 	}
-	for line, want := range map[string]string{
-		`password = "s3cret";`: "s3cret", `  "token": "abc123",`: "abc123", "url: https://x:y@h": "https://x:y@h",
-		"listen 80": "", "key=${REF}": "", "a=b=c": "b=c", "proxy_pass http://app:3000;": "",
+	for line, want := range map[string][2]string{
+		`password = "s3cret";`: {"password", "s3cret"}, `  "token": "abc123",`: {"token", "abc123"},
+		"url: https://x:y@h": {"url", "https://x:y@h"}, "a=b=c": {"a", "b=c"},
+		"listen 80": {}, "key=${REF}": {}, "proxy_pass http://app:3000;": {},
 	} {
-		if got, _ := configLineValue(line); got != want {
-			t.Errorf("configLineValue(%q) = %q, want %q", line, got, want)
+		if key, value, _ := configLineValue(line); key != want[0] || value != want[1] {
+			t.Errorf("configLineValue(%q) = %q, %q, want %q, %q", line, key, value, want[0], want[1])
 		}
+	}
+	// A file's lines are config, not secrets: only values and token lines
+	// come back. A default, and a value set as a block, come back too.
+	multi := "services:\n  web:\n    environment:\n      DB_PASS: ${DB_PASS:-defsekret}\n      KEY:\n        nested: leafsekret\n" +
+		"      N: ${A:-${B:-innersekret}}\n" +
+		"configs:\n  site:\n    content: |\n      server {\n        listen 80;\n        auth = linesekret\n" +
+		"      }\n      -----BEGIN PRIVATE KEY-----\n      MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\n      MIIEvQIBADANBgkqhkiG9w0B==\n" +
+		"      -----END PRIVATE KEY-----\n"
+	vals, err := composeInlineValues(multi)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotVals []string
+	for _, kv := range vals {
+		gotVals = append(gotVals, kv[0]+"="+kv[1])
+	}
+	if strings.Join(gotVals, "|") != "DB_PASS=${DB_PASS:-defsekret}|DB_PASS=defsekret|DB_PASS=defsekret|KEY=leafsekret|"+
+		"N=${A:-${B:-innersekret}}|N=${B:-innersekret|N=innersekret|"+
+		"content:auth=linesekret|content=MIIEvQIBADANBgkqhkiG9w0BAQEFAASC|"+
+		"content:MIIEvQIBADANBgkqhkiG9w0B==|content=MIIEvQIBADANBgkqhkiG9w0B==" {
+		t.Errorf("multi-line values = %q", gotVals)
 	}
 	// The hard cases the masker handles, each holding sekret1.
 	for name, doc := range map[string]string{

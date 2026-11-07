@@ -276,10 +276,15 @@ func TestMCPDeployTokenThroughTheRouter(t *testing.T) {
 		rep.out["result"] != "restarted" {
 		t.Errorf("restart = %s", rep.body)
 	}
-	backup := e.mcpCall(t, dep.Token, "create_backup", map[string]any{"project": "app"})
+	backup := e.mcpCall(t, dep.Token, "create_backup", map[string]any{"project": "app", "confirm": true})
 	// No destination, so no request body: the route must still get one.
 	if backup.isError || backup.out["result"] != "backed up" {
 		t.Errorf("create_backup = %s", backup.body)
+	}
+	// A second within ten minutes is refused, so a loop cannot fill the disk.
+	if again := e.mcpCall(t, dep.Token, "create_backup", map[string]any{"project": "app", "confirm": true}); !again.isError ||
+		!strings.Contains(again.text, "already has a manual backup") {
+		t.Errorf("second create_backup = %s", again.body)
 	}
 	// No staging: promote says so.
 	if rep := e.mcpCall(t, dep.Token, "promote", map[string]any{"project": "app", "confirm": true}); !rep.isError ||
@@ -338,15 +343,15 @@ func TestMCPScrubsInlineComposeValues(t *testing.T) {
 	ctx := context.Background()
 	e.prepareDeployableProject(t, cookie, "app")
 	compose := "services:\n  web:\n    image: nginx\n    environment:\n      SMTP_PASS: inline-sekret-77\n      DB_PWD: k7q2\n" +
-		"configs:\n  app:\n    content: |\n      api_secret = cfg-sekret-5\n"
+		"configs:\n  app:\n    content: |\n      api_secret = cfg-sekret-5\n      DB_PASSWORD: q8w3z\n"
 	if err := e.agent.FS().WriteFile(ctx, "app", "compose.yaml", []byte(compose), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e.agent.Containers = []agent.Container{{ID: "c-inline-sekret-77-k7q2-cfg-sekret-5", Name: "app-web-1", ComposeProject: "app", ComposeService: "web"}}
+	e.agent.Containers = []agent.Container{{ID: "c-inline-sekret-77-k7q2-cfg-sekret-5-q8w3z", Name: "app-web-1", ComposeProject: "app", ComposeService: "web"}}
 	read := e.createToken(t, cookie, map[string]any{"name": "agent", "scope": "read"})
 
 	logs := e.mcpCall(t, read.Token, "get_logs", map[string]any{"project": "app"})
-	if got, _ := logs.out["log"].(string); got != "log line from c-[redacted]-[redacted]-[redacted]" {
+	if got, _ := logs.out["log"].(string); got != "log line from c-[redacted]-[redacted]-[redacted]-[redacted]" {
 		t.Errorf("get_logs = %s", logs.body)
 	}
 

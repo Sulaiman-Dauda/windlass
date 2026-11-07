@@ -38,8 +38,10 @@ flagged for Pablo:
 - **Restart only.** A deploy token may restart a project but not start or stop it
   (`POST /projects/{name}/actions/restart` is its own route). The spec lists restart only.
 - **Destructive:** `deploy`, `restart`, `rollback`, `promote` carry `destructiveHint: true` and
-  a required `confirm` that must be `true`. `create_backup` is additive (a manual backup never
-  prunes), so it has neither.
+  a required `confirm` that must be `true`. `create_backup` was planned as additive, with
+  neither. Amended 07/11/2026 after review: a manual backup counts toward retention, so the
+  next scheduled prune can delete older backups. It is now destructive with `confirm`, and
+  refuses a second manual backup within 10 minutes.
 - **Writes outlive the client.** A write tool's in-process call is not cancelled when the MCP
   client hangs up, so a restart or backup is never cut off halfway. It waits a bounded time;
   past that, the tool says the work is still running and how to check it.

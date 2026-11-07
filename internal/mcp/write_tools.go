@@ -5,21 +5,60 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
 // How long a write tool waits for its API call, and how long the call may
 // run in all. Deploy, rollback and promote only queue a deployment, so they
-// answer at once. A restart is bounded by Compose (2 minutes); a backup by
-// the size of the project's volumes. Variables so a test can shorten them.
+// answer at once. The restart route stops itself at 2 minutes. A backup has
+// no limit in the panel or the scheduler, so the bound here is only a
+// backstop against a call that never returns, set well past any real one.
+// Variables so a test can shorten them.
 var (
 	queueWait    = defaultCallTimeout
 	queueLimit   = time.Minute
 	restartWait  = time.Minute
 	restartLimit = 3 * time.Minute
 	backupWait   = time.Minute
-	backupLimit  = time.Hour
+	backupLimit  = 12 * time.Hour
 )
+
+// backupGap is how long create_backup waits after a manual backup that did
+// not fail. Manual backups count toward a schedule's retention, so an agent
+// in a loop could otherwise push every older backup out at the next prune;
+// the panel can still take one at any time.
+const backupGap = 10 * time.Minute
+
+// recentManualBackup returns the newest manual backup of project made
+// within backupGap that did not fail, if there is one.
+func (t *toolCtx) recentManualBackup(project string, now time.Time) (object, error) {
+	raw, err := t.getJSON(projectPath(project, "backups"), nil)
+	if err != nil {
+		return nil, err
+	}
+	list, err := decodeList(raw)
+	if err != nil {
+		return nil, err
+	}
+	return newestRecentManual(list, now), nil
+}
+
+func newestRecentManual(list []object, now time.Time) object {
+	var newest object
+	var newestAt time.Time
+	for _, b := range list {
+		if stringField(b, "kind") != "manual" || stringField(b, "status") == "failed" {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, stringField(b, "created_at"))
+		if err != nil || now.Sub(at) >= backupGap || at.Before(newestAt) {
+			continue
+		}
+		newest, newestAt = b, at
+	}
+	return newest
+}
 
 // stillRunning is the status of a write that had not finished in its wait.
 const stillRunning = "still_running"
@@ -271,6 +310,20 @@ func promoteStaging(t *toolCtx) (any, error) {
 
 func createBackup(t *toolCtx) (any, error) {
 	name := t.str("project")
+	// Held until the POST has answered or its wait has passed; the backup's
+	// row exists from the start of the POST, so the next check sees it.
+	lock, _ := t.s.backupLocks.LoadOrStore(name, &sync.Mutex{})
+	lock.(*sync.Mutex).Lock()
+	defer lock.(*sync.Mutex).Unlock()
+	recent, err := t.recentManualBackup(name, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if recent != nil {
+		return nil, fmt.Errorf("%s already has a manual backup from the last %d minutes (id %s, %s, %s); use that one. "+
+			"Another can be taken here after that, or now in the panel", name, int(backupGap.Minutes()),
+			string(recent["id"]), stringField(recent, "created_at"), stringField(recent, "status"))
+	}
 	var body any
 	if dest := t.str("destination"); dest != "" {
 		body = map[string]string{"destination": dest}

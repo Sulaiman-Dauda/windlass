@@ -127,11 +127,14 @@ curl -sS https://panel.example/api/v1/mcp \
 - **Env values.** No tool returns `.env` or env values, whatever the token's access or its
   env values setting. Log output has `[redacted]` in place of any Windlass API token and of
   the project's env values: those in `.env` and those its top-level Compose files set inline
-  (`environment`, build `args`, config `content`). If Windlass cannot read those values, or
-  a Compose file will not parse, it withholds the log text rather than send it unscrubbed.
+  (`environment` and build `args`, the default in `${NAME:-value}` included, and in config
+  `content` each line's value and each long line with no spaces, such as a key's body). If
+  Windlass cannot read those values, or a Compose file will not parse, it withholds the log
+  text rather than send it unscrubbed.
   The match is exact, so some values get through: one shorter than 6 characters, or than 4
   under a name such as `DB_PASSWORD`, `API_TOKEN` or `SECRET_KEY`; one from another env file
-  named by `env_file`; one the app prints encoded or in pieces. Keep secrets out of logs
+  named by `env_file`; a line of a multi-line config `content` that is neither `key = value`
+  nor 16 characters with no spaces; one the app prints encoded or in pieces. Keep secrets out of logs
   regardless.
 - **Changes beyond the five writes.** No editing Compose, env, files, Git settings or
   domains; no start, stop, delete, restore, staging create, terminal, users or tokens. The
@@ -141,14 +144,17 @@ curl -sS https://panel.example/api/v1/mcp \
 
 ## Writes
 
-`deploy`, `restart`, `rollback` and `promote` are marked destructive and need `confirm: true`.
+`deploy`, `restart`, `rollback`, `promote` and `create_backup` are marked destructive and need
+`confirm: true`.
 The server tells the agent to ask you before each one and to prefer staging and promote over
 changing live directly. That relies on the agent: a model can set `confirm` without asking,
 and in testing one did when told plainly to redeploy. Treat `confirm` as a speed bump. The
-real controls are your client's prompt to approve each tool call (leave it on for these four)
+real controls are your client's prompt to approve each tool call (leave it on for these five)
 and the token's access, so give an agent a Read only token unless you want it to deploy.
 
-`create_backup` only adds a backup, so it has no `confirm`. Restoring stays in the panel.
+`create_backup` is in that list because a manual backup counts toward the project's retention:
+the next scheduled backup can delete the oldest to make room. It takes one every 10 minutes at
+most. Restoring stays in the panel.
 
 Deploy, rollback and promote answer once the deployment is queued, with the number to follow
 through `get_deployment`. A restart or backup waits up to a minute; past that the tool answers

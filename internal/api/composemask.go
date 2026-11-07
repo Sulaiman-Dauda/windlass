@@ -26,6 +26,20 @@ func isYAMLFile(rel string) bool {
 // what a viewer needs to see to understand where a value comes from.
 var envRefRe = regexp.MustCompile(`^\$(\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)$`)
 
+// interpolatedRe finds the fallback in ${NAME:-value} or ${NAME-value}, and
+// the alternative in ${NAME:+value} or ${NAME+value}. Compose puts either in
+// the container, so each is a value to scrub on its own.
+var interpolatedRe = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*:?[-+]([^}]*)\}`)
+
+// innermostInterpolatedRe finds the same in an innermost ${...}, for a
+// default nested in another: ${A:-${B:-value}}.
+var innermostInterpolatedRe = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*:?[-+]([^${}]*)\}`)
+
+// tokenLineMin is the shortest line without a separator in multi-line config
+// content that is taken for a secret: long enough for a PEM or base64 line,
+// past most config directives.
+const tokenLineMin = 16
+
 // maskComposeFile hides the values a Compose file sets inline: each
 // service's environment and build args, and inline config content, along
 // with the comments written among them. Values reached through YAML anchors,
@@ -70,21 +84,22 @@ func maskComposeFile(content string) string {
 	return out.String()
 }
 
-// configLineValue returns what follows the first "=" or ": " on a line of
-// config content, without the quotes, commas and semicolons around it.
-func configLineValue(line string) (string, bool) {
-	i := strings.IndexByte(line, '=')
-	if j := strings.Index(line, ": "); j >= 0 && (i < 0 || j < i) {
-		i = j + 1
+// configLineValue splits a line of config content at its first "=" or
+// ": ", returning the key before it and the value after it, without the
+// quotes, commas and semicolons around them.
+func configLineValue(line string) (key, value string, ok bool) {
+	sep, skip := strings.IndexByte(line, '='), 1
+	if j := strings.Index(line, ": "); j >= 0 && (sep < 0 || j < sep) {
+		sep, skip = j, 2
 	}
-	if i < 0 {
-		return "", false
+	if sep < 0 {
+		return "", "", false
 	}
-	value := strings.Trim(strings.TrimSpace(line[i+1:]), `"',;`)
+	value = strings.Trim(strings.TrimSpace(line[sep+skip:]), `"',;`)
 	if value == "" || envRefRe.MatchString(value) {
-		return "", false
+		return "", "", false
 	}
-	return value, true
+	return strings.Trim(strings.TrimSpace(line[:sep]), `"'`), value, true
 }
 
 type composeMasker struct {
@@ -97,19 +112,41 @@ type composeMasker struct {
 
 // composeInlineValues returns the values maskComposeFile hides, each with
 // its key, so the MCP server can scrub them from logs the way the panel
-// hides them from viewers. Config content is a whole file, so the value on
-// each of its "key = value" or "key: value" lines is returned too: an app
-// may log the password without the line it came from. A file that does
-// not parse is an error: there is no telling where its values are.
+// hides them from viewers. The default in ${NAME:-value} comes back on its
+// own too. Config content on one line is returned whole. Content on several
+// lines is a file, and is never returned whole, as its lines are config
+// that logs quote: what comes back is the value on each "key = value" or
+// "key: value" line, keyed "content:<key>" so a secret-named line gets the
+// lower scrub floor, and each line with no separator or space that is at
+// least tokenLineMin long, such as a PEM body. A file that does not parse
+// is an error: there is no telling where its values are.
 func composeInlineValues(content string) ([][2]string, error) {
 	var out [][2]string
-	m := composeMasker{seen: map[*yaml.Node]bool{}, record: func(k, v string) {
+	add := func(k, v string) {
 		out = append(out, [2]string{k, v})
-		if k == "content" {
-			for _, line := range strings.Split(v, "\n") {
-				if value, ok := configLineValue(line); ok {
-					out = append(out, [2]string{k, value})
+		for _, re := range []*regexp.Regexp{interpolatedRe, innermostInterpolatedRe} {
+			for _, m := range re.FindAllStringSubmatch(v, -1) {
+				if m[1] != "" {
+					out = append(out, [2]string{k, m[1]})
 				}
+			}
+		}
+	}
+	m := composeMasker{seen: map[*yaml.Node]bool{}, record: func(k, v string) {
+		if k != "content" {
+			add(k, v)
+			return
+		}
+		if !strings.Contains(strings.TrimSpace(v), "\n") {
+			add(k, v)
+		}
+		for _, line := range strings.Split(v, "\n") {
+			// Both rules: a base64 line ending in == also reads as key=value.
+			if key, value, ok := configLineValue(line); ok {
+				add(k+":"+key, value)
+			}
+			if line = strings.TrimSpace(line); len(line) >= tokenLineMin && !strings.ContainsAny(line, " \t") {
+				add(k, line)
 			}
 		}
 	}}
@@ -258,10 +295,32 @@ func (m *composeMasker) scalar(n *yaml.Node, key string) {
 	if n.Kind == yaml.ScalarNode && (n.Tag == "!!null" || n.Value == "" || envRefRe.MatchString(n.Value)) {
 		return
 	}
-	if m.record != nil && n.Kind == yaml.ScalarNode {
-		m.record(key, n.Value)
+	if m.record != nil {
+		recordLeaves(n, key, m.record, 0)
 	}
 	m.replace(n, maskedEnvValue)
+}
+
+// recordLeaves passes each scalar under n to record: a mapping or list set
+// where a value belongs is masked whole, so all of it is a value.
+func recordLeaves(n *yaml.Node, key string, record func(key, value string), depth int) {
+	n = resolve(n)
+	if n == nil || depth > 32 {
+		return
+	}
+	if n.Kind == yaml.ScalarNode {
+		if n.Tag != "!!null" && n.Value != "" && !envRefRe.MatchString(n.Value) {
+			record(key, n.Value)
+		}
+		return
+	}
+	step := 1
+	if n.Kind == yaml.MappingNode {
+		step = 2 // the values, not their keys
+	}
+	for i := step - 1; i < len(n.Content); i += step {
+		recordLeaves(n.Content[i], key, record, depth+1)
+	}
 }
 
 // replace turns n into a quoted string scalar, keeping its anchor so any
