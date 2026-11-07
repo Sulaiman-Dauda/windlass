@@ -89,6 +89,9 @@ func (a *API) Routes(r chi.Router) {
 		r.Get("/auth/tokens/current", a.handleCurrentToken)
 		if a.MCP != nil {
 			r.Handle("/mcp", a.MCP)
+			// The AI agents page reads these, so they exist only with /mcp.
+			r.Get("/mcp/tools", handleMCPTools)
+			r.Get("/mcp/endpoint", a.handleMCPEndpoint)
 		}
 		// Browser-only: a token must never manage tokens or second factors.
 		r.Group(func(r chi.Router) {

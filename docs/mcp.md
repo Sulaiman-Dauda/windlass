@@ -1,21 +1,27 @@
 # AI agents (MCP)
 
 Windlass serves a [Model Context Protocol](https://modelcontextprotocol.io) server at
-`/api/v1/mcp` on your panel. Connect Claude Code, Cursor, VS Code or Codex to it with an API
-token and an agent can answer "what is running, is it healthy, what changed, what do the logs
+`/api/v1/mcp` on your panel. Connect Claude Code, Cursor, VS Code, Codex, Gemini CLI or Zed to
+it with an API token and an agent can answer "what is running, is it healthy, what changed, what do the logs
 say, is staging ahead of live". With a Deploy only token it can also deploy, restart, roll
 back, promote staging and take a backup.
 
 It cannot edit Compose files or `.env`. Agents change code in Git and deploy it; the compose
 file stays the authority, as it is everywhere else in Windlass.
 
+The quickest way in is the panel: open **AI agents** in the sidebar. It shows your endpoint,
+creates a Read only or Deploy only token, and gives the setup for each client below with your
+panel's address filled in. This page is the same thing in long form.
+
+![The AI agents page: the endpoint, a token form with Read only and Deploy only, and the tools an agent can call](./screenshots/agents-light.png)
+
 ## Before you start
 
 - Windlass v0.60 or later. An admin sees the running version under **Settings, System**.
 - The panel on an HTTPS domain, set in **Settings, General, Panel domain**. The token travels
   in a header on every call, and over plain HTTP anyone on the path can read it.
-- An MCP client that connects to remote servers over HTTP with a bearer token. The four
-  below do.
+- An MCP client that connects to remote servers over HTTP with a bearer token. The six
+  below do; see [Clients that need OAuth](#clients-that-need-oauth) for the ones that do not.
 
 ## Connect
 
@@ -96,6 +102,48 @@ In `~/.codex/config.toml`. Codex reads the token from `WINDLASS_TOKEN`:
 url = "https://panel.example/api/v1/mcp"
 bearer_token_env_var = "WINDLASS_TOKEN"
 ```
+
+### Gemini CLI
+
+In `~/.gemini/settings.json`. Use `httpUrl`: `url` means the older SSE transport. Gemini CLI
+fills `${WINDLASS_TOKEN}` from its environment:
+
+```json
+{
+  "mcpServers": {
+    "windlass": {
+      "httpUrl": "https://panel.example/api/v1/mcp",
+      "headers": { "Authorization": "Bearer ${WINDLASS_TOKEN}" }
+    }
+  }
+}
+```
+
+### Zed
+
+Zed does not fill environment variables into a remote server's headers, so a token there would
+sit in `settings.json` as plain text. To keep it out, run
+[mcp-remote](https://www.npmjs.com/package/mcp-remote), an open-source bridge from npm, through
+`sh`, which puts `WINDLASS_TOKEN` into the header. mcp-remote does not expand `${...}` itself. It
+needs Node and works on macOS and Linux. The token passes through mcp-remote and sits in its
+process arguments, where other users on the same machine can see it with `ps`. In
+`~/.config/zed/settings.json`, with Zed started from a shell where `WINDLASS_TOKEN` is set:
+
+```json
+{
+  "context_servers": {
+    "windlass": {
+      "command": "sh",
+      "args": ["-c", "exec npx -y mcp-remote https://panel.example/api/v1/mcp --header \"Authorization:Bearer $WINDLASS_TOKEN\""]
+    }
+  }
+}
+```
+
+### Clients that need OAuth
+
+ChatGPT, Claude.ai and Claude Desktop add remote servers only through an OAuth sign-in, which
+Windlass does not have yet, so they cannot connect.
 
 ### Check it
 
@@ -197,7 +245,7 @@ and DELETE answer 405. Three revisions are accepted:
 - **2025-06-18**, served as 2025-11-25, which has the same tool shapes
 
 There is no OAuth sign-in yet, so a client that can connect to remote servers only through
-OAuth cannot use it.
+OAuth cannot use it. See [Clients that need OAuth](#clients-that-need-oauth).
 
 ## Troubleshooting
 

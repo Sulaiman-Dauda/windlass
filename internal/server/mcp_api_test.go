@@ -363,3 +363,88 @@ func TestMCPScrubsInlineComposeValues(t *testing.T) {
 		t.Errorf("get_logs with a broken compose file = %s", logs.body)
 	}
 }
+
+// TestMCPToolsList is the catalogue the panel's AI agents page shows: every
+// tool, in order, with the deploy-scope ones marked.
+func TestMCPToolsList(t *testing.T) {
+	e := newTestEnv(t)
+	if rec := e.do(t, http.MethodGet, "/api/v1/mcp/tools", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("signed out: status %d, want 401", rec.Code)
+	}
+	rec := e.do(t, http.MethodGet, "/api/v1/mcp/tools", nil, e.login(t))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var got []api.MCPTool
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	tools := mcp.Tools()
+	if len(got) != len(tools) {
+		t.Fatalf("%d tools, want %d", len(got), len(tools))
+	}
+	for i, tool := range tools {
+		g := got[i]
+		if g.Name != tool.Name || g.Summary != tool.Title || g.Destructive != tool.Annotations.DestructiveHint {
+			t.Errorf("row %d = %+v, want %s", i, g, tool.Name)
+		}
+		if want := map[bool]string{true: "read", false: "deploy"}[tool.Annotations.ReadOnlyHint]; g.Needs != want {
+			t.Errorf("%s needs %q, want %q", g.Name, g.Needs, want)
+		}
+	}
+}
+
+// Members and viewers cannot read the panel domain's settings, but the AI
+// agents page must still show them the HTTPS endpoint under it.
+func TestMCPEndpointForAnySignedInUser(t *testing.T) {
+	e := newTestEnv(t)
+	if rec := e.do(t, http.MethodGet, "/api/v1/mcp/endpoint", nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("signed out: status %d, want 401", rec.Code)
+	}
+	admin := e.login(t)
+	viewer := e.viewerCookie(t, admin)
+	get := func() api.MCPEndpoint {
+		t.Helper()
+		rec := e.do(t, http.MethodGet, "/api/v1/mcp/endpoint", nil, viewer)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var got api.MCPEndpoint
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := get(); got.URL != "" {
+		t.Fatalf("no panel domain: url %q, want empty", got.URL)
+	}
+	if rec := e.do(t, http.MethodPut, "/api/v1/system/panel-domain", map[string]string{"hostname": "windlass.example.com"}, admin); rec.Code != http.StatusOK {
+		t.Fatalf("set panel domain = %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := get(); got.URL != "https://windlass.example.com/api/v1/mcp" {
+		t.Fatalf("url %q", got.URL)
+	}
+	// Saved but Caddy unreachable: the domain may not serve yet.
+	e.agent.ProxyAvailable = false
+	if got := get(); got.URL != "" {
+		t.Fatalf("Caddy down: url %q, want empty", got.URL)
+	}
+}
+
+// Without the MCP server the page's routes are absent too, so it never
+// lists tools for an endpoint that does not answer.
+func TestMCPPageRoutesNeedMCP(t *testing.T) {
+	e := newTestEnv(t)
+	e.api.MCP = nil
+	h, err := New(config.Config{Addr: ":0", DataDir: t.TempDir()}, e.api.Logger, e.api)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.handler = h
+	cookie := e.login(t)
+	for _, path := range []string{"/api/v1/mcp", "/api/v1/mcp/tools", "/api/v1/mcp/endpoint"} {
+		if rec := e.do(t, http.MethodGet, path, nil, cookie); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status %d, want 404", path, rec.Code)
+		}
+	}
+}

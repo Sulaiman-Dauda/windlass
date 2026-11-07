@@ -28,6 +28,31 @@ components:
       scheme: bearer
       description: Personal API token, `wl_pat_` followed by 60 hex characters.
   schemas:
+    JSONRPCRequest:
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc: { type: string, enum: ["2.0"] }
+        id:
+          oneOf: [{ type: string }, { type: integer }]
+          description: Absent for a notification
+        method: { type: string, example: tools/list }
+        params: { type: object, additionalProperties: true }
+    JSONRPCResponse:
+      type: object
+      required: [jsonrpc]
+      properties:
+        jsonrpc: { type: string, enum: ["2.0"] }
+        id:
+          type: [string, integer, "null"]
+        result: { type: object, additionalProperties: true }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: integer }
+            message: { type: string }
+            data: {}
     Error:
       type: object
       required: [error]
@@ -403,6 +428,110 @@ paths:
                           routes accept this token now: scope deploy, write or admin,
                           with an owner who is a member or admin.
         "404": { description: The request used a session, not a token }
+
+  /mcp:
+    post:
+      summary: Model Context Protocol server for AI agents
+      description: |
+        Streamable HTTP, stateless: one JSON-RPC 2.0 request per POST, answered
+        with JSON. No sessions, no server-sent events, no batches. Takes an API
+        token only, never the session cookie, and refuses any request with an
+        Origin header. The methods are defined by the MCP specification; see
+        docs/mcp.md for the tools and the protocol revisions accepted. GET and
+        DELETE answer 405.
+      operationId: mcp
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: MCP-Protocol-Version
+          in: header
+          required: false
+          schema: { type: string, example: "2025-11-25" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/JSONRPCRequest" }
+      responses:
+        "200":
+          description: A JSON-RPC result, or a JSON-RPC error for a tool or params problem
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONRPCResponse" }
+        "202": { description: A notification was accepted; no body }
+        "400":
+          description: Not a JSON-RPC request, a batch, bad params or an unsupported protocol version
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONRPCResponse" }
+        "401":
+          description: No API token, or the request used only a session cookie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: The request carried an Origin header
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONRPCResponse" }
+        "404":
+          description: Unknown method
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONRPCResponse" }
+        "405": { description: GET or DELETE }
+        "413": { description: Body over 1 MiB }
+        "503": { description: The server is still starting }
+
+  /mcp/tools:
+    get:
+      summary: The tools an AI agent connected to /mcp can call
+      description: |
+        The MCP tool catalogue in the order tools/list returns it, for the
+        panel's AI agents page. A token sees in tools/list only the tools its
+        scope allows; this list shows them all.
+      operationId: listMCPTools
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200":
+          description: Tools in catalogue order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [name, summary, needs, destructive]
+                  properties:
+                    name: { type: string, example: list_projects }
+                    summary: { type: string, example: List projects }
+                    needs:
+                      type: string
+                      enum: [read, deploy]
+                      description: read for any token; deploy for a token that can deploy
+                    destructive:
+                      type: boolean
+                      description: Changes what is running; needs confirm true
+
+  /mcp/endpoint:
+    get:
+      summary: The HTTPS address an AI agent should connect to
+      description: |
+        The MCP endpoint under the panel domain, for any signed-in user. url
+        is empty when no panel domain is set or Caddy is unreachable; the AI
+        agents page then uses the address the browser reached the panel on.
+      operationId: getMCPEndpoint
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200":
+          description: The endpoint
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                properties:
+                  url: { type: string, example: "https://windlass.example.com/api/v1/mcp" }
+        "401": { description: Not signed in }
 
   /users/{id}/tokens:
     get:
