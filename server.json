@@ -1,0 +1,33 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "run.windlass/windlass",
+  "title": "Windlass",
+  "description": "Read projects, logs and deployments on a self-hosted Windlass server; deploy, roll back, promote.",
+  "version": "0.60.0",
+  "websiteUrl": "https://windlass.run/guides/mcp/",
+  "repository": {
+    "url": "https://github.com/Sulaiman-Dauda/windlass",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://{host}/api/v1/mcp",
+      "variables": {
+        "host": {
+          "description": "Your Windlass server's domain, for example panel.example.com",
+          "isRequired": true,
+          "placeholder": "panel.example.com"
+        }
+      },
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer followed by a Windlass API token from Settings, API tokens",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
