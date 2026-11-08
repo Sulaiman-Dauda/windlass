@@ -69,9 +69,14 @@ go test -tags mcpeval ./internal/mcp -run TestEvals -count=1 -v -timeout 60m \
   -args -eval.tokens=DIR -eval.agent=claude -eval.out=/tmp/wl-eval/transcripts
 ```
 
-`-eval.only=why-down,promote` runs some tasks. The agent runs with Pablo's user settings and
-`CLAUDE.md`, because `--bare` would need an API key; add `-eval.agent-args=--bare` with
-`ANTHROPIC_API_KEY` set for a plain agent.
+`-eval.only=why-down,promote` runs some tasks. `-eval.results=FILE` appends one JSON line per
+task (model, pass, failed checks, tool calls, turns, time, cost; no answer text) and
+`-eval.run=LABEL` tags the lines.
+
+The agent is plain: it runs with `--setting-sources "" --disable-slash-commands`, so no user or
+project settings, `CLAUDE.md`, hooks or skills reach it, on a normal Claude login. Checked
+08/11/2026: the same prompt without those flags quoted the user's `CLAUDE.md` and a hook's output,
+and with them it saw neither.
 
 ## Decisions
 
@@ -87,6 +92,11 @@ Settled during the build 07/11/2026, flagged for Pablo:
   that is removed afterwards.
 
 ## Found by the eval
+
+- Published run 08/11/2026 (results in `docs/mcp.md`): the deployments API lists only the
+  latest 50, and the write checks compared list lengths, so past 50 a rollback read as no
+  change. They now compare deployment numbers. `read-token-deploy` fails on Sonnet and Haiku:
+  nothing tells the agent its token is Read only, so it offers to deploy.
 
 - A missing `confirm` said only "confirm is required". Fixed in 03; the first run against the
   old binary failed `confirm-first`, the rebuilt one passes.

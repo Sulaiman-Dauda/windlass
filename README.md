@@ -35,7 +35,8 @@ Runs on Linux, x86_64 or arm64. Claiming the instance and setting the panel doma
   and image digests to live. See [Staging](docs/staging.md).
 - **An MCP server for AI agents.** Claude Code, Cursor, VS Code or Codex can read projects,
   logs and deployments, and with a Deploy only token can deploy, roll back and promote. The MCP
-  server cannot edit a compose file or `.env`. See [AI agents (MCP)](docs/mcp.md).
+  server cannot edit a compose file or `.env`. Its eval results across Claude models are
+  published. See [AI agents (MCP)](docs/mcp.md) and [Evals](docs/mcp.md#evals).
 
 ## Status
 
