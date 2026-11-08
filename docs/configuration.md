@@ -17,19 +17,19 @@ Environment=WINDLASS_LOG_LEVEL=debug
 
 ## Variables
 
-| Variable | Default | What it does |
-| --- | --- | --- |
-| `WINDLASS_ADDR` | `:8080` | Listen address for the HTTP server. |
-| `WINDLASS_DATA` | `/var/lib/windlass` | Platform state: the SQLite database and keys, projects, plugins. |
-| `WINDLASS_PROJECTS` | `<data>/projects` | Where project directories live. Point it at an existing stacks directory to adopt what is already there. Local backups go in a `backups` directory beside it. |
-| `WINDLASS_LOG_LEVEL` | `info` | One of `debug`, `info`, `warn`, `error`. An unrecognised value is a startup error rather than a silent fallback. |
-| `WINDLASS_CADDY_ADMIN` | `http://127.0.0.1:2019` | Caddy admin API. Set this when Caddy runs in a container: `http://caddy:2019`. |
-| `WINDLASS_PANEL_UPSTREAM` | `127.0.0.1:8080` | The address Caddy dials to reach the panel, used by the Settings-managed panel hostname. Change it when Caddy is not on the host network. |
-| `WINDLASS_TRUSTED_PROXIES` | `127.0.0.0/8,::1/128` | Sources whose `X-Forwarded-For` and `X-Real-IP` headers Windlass believes when it records a client's address. The default covers the recommended local Caddy. Widen it only for a proxy you control. |
-| `WINDLASS_UPDATE_REPO` | `Sulaiman-Dauda/windlass` | Repository checked for releases. |
-| `WINDLASS_UPDATE_TOKEN` | unset | Authenticates release checks and downloads. Required only for a private update repository. Windlass removes it from its environment once read, so Compose, Git and plugins never see it. |
-| `WINDLASS_NO_SELF_UPDATE` | unset | Any non-empty value disables self-update. Useful when a package manager or image tag owns the version. The panel still shows when a new version exists, without the Update now button. |
-| `DOCKER_HOST` | Docker's default socket | Where Windlass and the `docker compose` it runs reach Docker. The installer sets `tcp://127.0.0.1:2375`, the restricted socket proxy, and the container install points it at the proxy service. |
+| Variable | What it does |
+| --- | --- |
+| `WINDLASS_ADDR` | Default `:8080`. Listen address for the HTTP server. |
+| `WINDLASS_DATA` | Default `/var/lib/windlass`. Platform state: the SQLite database and keys, projects, plugins. |
+| `WINDLASS_PROJECTS` | Default `<data>/projects`. Where project directories live. Point it at an existing stacks directory to adopt what is already there. Local backups go in a `backups` directory beside it. |
+| `WINDLASS_LOG_LEVEL` | Default `info`. One of `debug`, `info`, `warn`, `error`. An unrecognised value is a startup error rather than a silent fallback. |
+| `WINDLASS_CADDY_ADMIN` | Default `http://127.0.0.1:2019`. Caddy admin API. Set this when Caddy runs in a container: `http://caddy:2019`. |
+| `WINDLASS_PANEL_UPSTREAM` | Default `127.0.0.1:8080`. The address Caddy dials to reach the panel, used by the Settings-managed panel hostname. Change it when Caddy is not on the host network. |
+| `WINDLASS_TRUSTED_PROXIES` | Default `127.0.0.0/8,::1/128`. Sources whose `X-Forwarded-For` and `X-Real-IP` headers Windlass believes when it records a client's address. The default covers the recommended local Caddy. Widen it only for a proxy you control. |
+| `WINDLASS_UPDATE_REPO` | Default `Sulaiman-Dauda/windlass`. Repository checked for releases. |
+| `WINDLASS_UPDATE_TOKEN` | Unset by default. Authenticates release checks and downloads. Required only for a private update repository. Windlass removes it from its environment once read, so Compose, Git and plugins never see it. |
+| `WINDLASS_NO_SELF_UPDATE` | Unset by default. Any non-empty value disables self-update. Useful when a package manager or image tag owns the version. The panel still shows when a new version exists, without the Update now button. |
+| `DOCKER_HOST` | Defaults to Docker's own socket. Where Windlass and the `docker compose` it runs reach Docker. The installer sets `tcp://127.0.0.1:2375`, the restricted socket proxy, and the container install points it at the proxy service. |
 
 `WINDLASS_TRUSTED_PROXIES` decides whether a client-supplied `X-Forwarded-For` is believed.
 Trusting an address you do not control lets a client claim any source IP, which matters
