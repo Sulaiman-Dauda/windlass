@@ -38,6 +38,17 @@ jobs:
           go vet ./...
           go test ./...
 
+      # server.json is the MCP registry listing. It is published by hand, so a
+      # stale version only warns: it must never hold up a release.
+      - name: Check the MCP registry version
+        run: |
+          want=${GITHUB_REF_NAME#v}
+          have=$(jq -r .version server.json)
+          case "$have" in
+            "$want"|"$want".0) ;;
+            *) echo "::warning file=server.json::server.json version is $have, the tag is $GITHUB_REF_NAME. Bump it and run mcp-publisher publish." ;;
+          esac
+
       - name: Build frontend
         working-directory: web
         run: npm ci && npm run build
