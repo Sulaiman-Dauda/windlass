@@ -83,7 +83,7 @@ func TestDoRetriesDroppedConnection(t *testing.T) {
 		t.Fatalf("first PATCH: %v", err)
 	}
 	_, _ = io.Copy(io.Discard, first.Body)
-	first.Body.Close()
+	_ = first.Body.Close()
 
 	resp, err := p.do(ctx, http.MethodPatch, "/id/windlass_routes", map[string]any{})
 	if err != nil {
