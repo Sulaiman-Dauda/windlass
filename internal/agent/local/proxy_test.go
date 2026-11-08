@@ -83,7 +83,9 @@ func TestDoRetriesDroppedConnection(t *testing.T) {
 		t.Fatalf("first PATCH: %v", err)
 	}
 	_, _ = io.Copy(io.Discard, first.Body)
-	_ = first.Body.Close()
+	if err := first.Body.Close(); err != nil {
+		t.Fatalf("close first response: %v", err)
+	}
 
 	resp, err := p.do(ctx, http.MethodPatch, "/id/windlass_routes", map[string]any{})
 	if err != nil {
@@ -98,9 +100,10 @@ func TestDoRetriesDroppedConnection(t *testing.T) {
 	}
 }
 
-// A POST is never retried, because a retry could apply the write twice.
-func TestDoDoesNotRetryPost(t *testing.T) {
-	t.Parallel()
+// assertNotRetried makes one call that the server always drops, and checks that
+// the client sent it exactly once and returned an error.
+func assertNotRetried(t *testing.T, method, path string) {
+	t.Helper()
 
 	var attempts atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,12 +118,25 @@ func TestDoDoesNotRetryPost(t *testing.T) {
 	defer srv.Close()
 
 	p := proxyLocal{l: &Local{cfg: Config{CaddyAdmin: srv.URL}}}
-	if _, err := p.do(context.Background(), http.MethodPost, "/config/apps/http/servers/x/routes", map[string]any{}); err == nil {
-		t.Fatal("POST on dropped connection: want error, got nil")
+	if _, err := p.do(context.Background(), method, path, map[string]any{}); err == nil {
+		t.Fatalf("%s on dropped connection: want error, got nil", method)
 	}
 	if got := attempts.Load(); got != 1 {
-		t.Fatalf("attempts = %d, want 1 (POST must not be retried)", got)
+		t.Fatalf("attempts = %d, want 1 (%s must not be retried)", got, method)
 	}
+}
+
+// A POST is never retried, because a retry could apply the write twice.
+func TestDoDoesNotRetryPost(t *testing.T) {
+	t.Parallel()
+	assertNotRetried(t, http.MethodPost, "/config/apps/http/servers/x/routes")
+}
+
+// A PUT is never retried: it is not idempotent in Caddy's admin API, since
+// PUT .../routes/0 inserts at index 0 and a repeat could insert the route twice.
+func TestDoDoesNotRetryPut(t *testing.T) {
+	t.Parallel()
+	assertNotRetried(t, http.MethodPut, "/config/apps/http/servers/x/routes/0")
 }
 
 // Golden test: the exact JSON shape Windlass writes into Caddy. If this

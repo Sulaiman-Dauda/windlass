@@ -126,14 +126,16 @@ func buildRoutesObject(routes []agent.Route) caddyRoute {
 	}
 }
 
-// do sends one admin API call. A keep-alive connection can be closed by the
-// server while it sits in the pool (Caddy's /load restarts its admin server),
-// and Go's transport does not replay a PATCH with a body, so the call fails with
-// EOF even though Caddy is healthy. PUT, PATCH, DELETE and GET are idempotent
-// here, so one retry is safe, and it is limited to the errors that signal a
-// dropped connection. Refused, timed-out, TLS and malformed-request errors
-// return at once. POST is never retried: a repeated append to the routes array
-// could insert the route twice.
+// do sends one admin API call. Caddy can close idle admin connections when it
+// applies a config change (its /load restarts the admin server), and Go's
+// transport does not replay a request with a body, so the next call on that
+// pooled connection fails with EOF even though Caddy is healthy. PATCH, DELETE
+// and GET are idempotent here, so one retry is safe, and it is limited to the
+// errors that signal a dropped connection. Refused, timed-out, TLS and
+// malformed-request errors return at once. PUT is not retried: it is not
+// idempotent in Caddy's admin API, because install PUTs .../routes/0, which
+// inserts at index 0, so a repeated PUT could insert the route twice. POST is
+// not retried for the same reason: a repeated append could insert it twice.
 func (p proxyLocal) do(ctx context.Context, method, path string, body any) (*http.Response, error) {
 	var payload []byte
 	if body != nil {
@@ -144,7 +146,8 @@ func (p proxyLocal) do(ctx context.Context, method, path string, body any) (*htt
 		payload = b
 	}
 	resp, err := p.send(ctx, method, path, payload, body != nil)
-	if err != nil && method != http.MethodPost && isDroppedConn(err) {
+	idempotent := method == http.MethodPatch || method == http.MethodDelete || method == http.MethodGet
+	if err != nil && idempotent && isDroppedConn(err) {
 		resp, err = p.send(ctx, method, path, payload, body != nil)
 	}
 	return resp, err
