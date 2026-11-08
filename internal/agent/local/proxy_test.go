@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/windlass-dev/windlass/internal/agent"
@@ -49,6 +50,76 @@ func TestEnsureTLSMergesWithoutClobberingUserNames(t *testing.T) {
 	want := []string{"user.example.com", "app.example.com"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("automation names = %v, want %v", names, want)
+	}
+}
+
+// Caddy closes a keep-alive connection after /load restarts its admin server.
+// The next PATCH on that pooled connection must be retried, not surface as EOF.
+// Request 1 succeeds and leaves its connection idle in the pool; request 2 is
+// read off that connection and dropped without a response; request 3 is the
+// retry on a fresh connection.
+func TestDoRetriesDroppedConnection(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 2 {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("hijack: %v", err)
+				return
+			}
+			_ = conn.Close()
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	p := proxyLocal{l: &Local{cfg: Config{CaddyAdmin: srv.URL}}}
+	ctx := context.Background()
+	first, err := p.do(ctx, http.MethodPatch, "/id/windlass_routes", map[string]any{})
+	if err != nil {
+		t.Fatalf("first PATCH: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, first.Body)
+	first.Body.Close()
+
+	resp, err := p.do(ctx, http.MethodPatch, "/id/windlass_routes", map[string]any{})
+	if err != nil {
+		t.Fatalf("PATCH after dropped connection: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %s, want 200", resp.Status)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
+	}
+}
+
+// A POST is never retried, because a retry could apply the write twice.
+func TestDoDoesNotRetryPost(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts.Add(1)
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer srv.Close()
+
+	p := proxyLocal{l: &Local{cfg: Config{CaddyAdmin: srv.URL}}}
+	if _, err := p.do(context.Background(), http.MethodPost, "/config/apps/http/servers/x/routes", map[string]any{}); err == nil {
+		t.Fatal("POST on dropped connection: want error, got nil")
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("attempts = %d, want 1 (POST must not be retried)", got)
 	}
 }
 

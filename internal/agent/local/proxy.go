@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
+	"syscall"
 	"time"
 
 	"github.com/windlass-dev/windlass/internal/agent"
@@ -124,20 +126,46 @@ func buildRoutesObject(routes []agent.Route) caddyRoute {
 	}
 }
 
+// do sends one admin API call. A keep-alive connection can be closed by the
+// server while it sits in the pool (Caddy's /load restarts its admin server),
+// and Go's transport does not replay a PATCH with a body, so the call fails with
+// EOF even though Caddy is healthy. PUT, PATCH, DELETE and GET are idempotent
+// here, so one retry is safe, and it is limited to the errors that signal a
+// dropped connection. Refused, timed-out, TLS and malformed-request errors
+// return at once. POST is never retried: a repeated append to the routes array
+// could insert the route twice.
 func (p proxyLocal) do(ctx context.Context, method, path string, body any) (*http.Response, error) {
-	var reader io.Reader
+	var payload []byte
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
-		reader = bytes.NewReader(b)
+		payload = b
+	}
+	resp, err := p.send(ctx, method, path, payload, body != nil)
+	if err != nil && method != http.MethodPost && isDroppedConn(err) {
+		resp, err = p.send(ctx, method, path, payload, body != nil)
+	}
+	return resp, err
+}
+
+// isDroppedConn reports whether err is the signature of a peer closing a
+// connection mid-request.
+func isDroppedConn(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE)
+}
+
+func (p proxyLocal) send(ctx context.Context, method, path string, payload []byte, hasBody bool) (*http.Response, error) {
+	var reader io.Reader
+	if hasBody {
+		reader = bytes.NewReader(payload)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, p.l.cfg.CaddyAdmin+path, reader)
 	if err != nil {
 		return nil, err
 	}
-	if body != nil {
+	if hasBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	return p.client().Do(req)
