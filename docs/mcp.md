@@ -9,7 +9,7 @@ back, promote staging and take a backup.
 It cannot edit Compose files or `.env`. Agents change code in Git and deploy it; the compose
 file stays the authority, as it is everywhere else in Windlass.
 
-The quickest way in is the panel: open **AI agents** in the sidebar. It shows your endpoint,
+From v0.61, the quickest way in is the panel: open **AI agents** in the sidebar. It shows your endpoint,
 creates a Read only or Deploy only token, and gives the setup for each client below with your
 panel's address filled in. This page is the same thing in long form.
 
