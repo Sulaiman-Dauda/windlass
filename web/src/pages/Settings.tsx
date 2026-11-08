@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useMe, useCan } from "../api/auth";
 import { useUpdateCheck } from "../api/system";
+import { SCOPE_LABEL, useTokens, type APIToken, type CreatedToken } from "../api/tokens";
 import { Page, Callout, FormError } from "../ui/Page";
 import { Card, CardHeader, CardFooter } from "../ui/Card";
 import { Button, IconButton, btn } from "../ui/Button";
@@ -955,27 +956,6 @@ function S3DestinationSection() {
 
 // ---------- API tokens ----------
 
-interface APIToken {
-  id: number;
-  name: string;
-  prefix: string;
-  scope: "read" | "deploy" | "write" | "admin";
-  can_read_secrets: boolean;
-  expires_at: string;
-  expired: boolean;
-  last_used_at: string | null;
-  last_used_ip: string | null;
-  created_at: string;
-  revoked_at: string | null;
-}
-
-const SCOPE_LABEL: Record<APIToken["scope"], string> = {
-  read: "Read only",
-  deploy: "Deploy only",
-  write: "Deploy and edit",
-  admin: "Admin",
-};
-
 // Read and deploy tokens act as a viewer, which never sees env values.
 const scopeCanReadSecrets = (scope: APIToken["scope"]) => scope === "write" || scope === "admin";
 
@@ -986,22 +966,22 @@ function APITokensSection() {
   const toast = useToast();
   const confirm = useConfirm();
   const can = useCan();
-  const tokens = useQuery<APIToken[]>({ queryKey: ["tokens"], queryFn: () => api("/auth/tokens") });
+  const tokens = useTokens();
 
   const [name, setName] = useState("");
   const [scope, setScope] = useState<APIToken["scope"]>("write");
   const [days, setDays] = useState(90);
   const [secrets, setSecrets] = useState(false);
-  const [created, setCreated] = useState<{ name: string; token: string } | null>(null);
+  const [created, setCreated] = useState<CreatedToken | null>(null);
 
   const create = useMutation({
     mutationFn: () =>
-      api<APIToken & { token: string }>("/auth/tokens", {
+      api<CreatedToken>("/auth/tokens", {
         method: "POST",
         body: JSON.stringify({ name, scope, expires_in_days: days, can_read_secrets: secrets && scopeCanReadSecrets(scope) }),
       }),
     onSuccess: (res) => {
-      setCreated({ name: res.name, token: res.token });
+      setCreated(res);
       setName("");
       setSecrets(false);
       qc.invalidateQueries({ queryKey: ["tokens"] });
@@ -1027,6 +1007,17 @@ function APITokensSection() {
             <p className="mt-2 text-xs text-fg3">
               Send it as <span className="font-mono">Authorization: Bearer &lt;token&gt;</span>.
             </p>
+            {(created.scope === "read" || created.scope === "deploy") && (
+              // A new tab, so this callout and the token it shows once stay put.
+              <Link
+                to="/agents"
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-accent hover:underline"
+              >
+                Connect an agent with it <Icon name="external" size={13} />
+              </Link>
+            )}
           </Callout>
         )}
 

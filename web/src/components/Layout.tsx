@@ -19,6 +19,7 @@ const nav: { to: string; label: string; icon: IconName }[] = [
   { to: "/", label: "Overview", icon: "overview" },
   { to: "/projects", label: "Projects", icon: "projects" },
   { to: "/templates", label: "Templates", icon: "templates" },
+  { to: "/agents", label: "AI agents", icon: "agent" },
   { to: "/settings", label: "Settings", icon: "settings" },
 ];
 

@@ -170,23 +170,32 @@ export default function Dashboard() {
             }
           />
           {projects.data && list.length === 0 ? (
-            <EmptyState
-              icon="projects"
-              title="No projects yet"
-              desc="A project is a directory with a compose.yaml. Create one, start from a template, or scan the stacks directory to adopt what is already there."
-              actions={
-                can("member") && (
-                  <>
-                    <Link to="/templates" className={btn("secondary", "md")}>
-                      Browse templates
-                    </Link>
-                    <Link to="/projects?new=1" className={btn("primary", "md")}>
-                      <Icon name="plus" size={16} /> New project
-                    </Link>
-                  </>
-                )
-              }
-            />
+            <>
+              <EmptyState
+                icon="projects"
+                title="No projects yet"
+                desc="A project is a directory with a compose.yaml. Create one, start from a template, or scan the stacks directory to adopt what is already there."
+                actions={
+                  can("member") && (
+                    <>
+                      <Link to="/templates" className={btn("secondary", "md")}>
+                        Browse templates
+                      </Link>
+                      <Link to="/projects?new=1" className={btn("primary", "md")}>
+                        <Icon name="plus" size={16} /> New project
+                      </Link>
+                    </>
+                  )
+                }
+              />
+              <p className="mt-3 text-sm text-fg3">
+                Using an AI coding agent?{" "}
+                <Link to="/agents" className="font-medium text-accent hover:underline">
+                  Connect it to this server
+                </Link>{" "}
+                to check status, read logs and deploy.
+              </p>
+            </>
           ) : (
             <ProjectsTable projects={list} loading={projects.isLoading} />
           )}
