@@ -20,12 +20,7 @@ jobs:
         with:
           go-version: stable
       - run: go vet ./...
-      # The linter runs on every PR but does not gate merges until the 135
-      # findings it reports (133 of them errcheck, mostly on Close calls) are
-      # cleared, see #8. Each needs a decision about whether the error matters,
-      # so no mass edit. Remove continue-on-error then.
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        continue-on-error: true
         with:
           version: v2.14.0
       # golangci-lint can only type-check code up to the Go release it was
