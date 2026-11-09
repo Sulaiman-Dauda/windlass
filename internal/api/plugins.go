@@ -85,6 +85,16 @@ func (a *API) handlePluginProxy(w http.ResponseWriter, r *http.Request) {
 	// it call the whole API as whoever opened its page.
 	r.Header.Del("Authorization")
 	stripCookie(r, auth.SessionCookie)
+	if !read {
+		// One entry per write, or per WebSocket when it upgrades. The query
+		// string stays out: it can carry secrets.
+		user, _ := auth.UserFrom(r.Context())
+		detail := map[string]any{"method": r.Method, "path": r.URL.Path}
+		if r.Header.Get("Upgrade") != "" {
+			detail["websocket"] = true
+		}
+		a.Audit.Write(r.Context(), user.ID, "plugin.request", "plugin", name, remoteIP(r), detail)
+	}
 	a.Plugins.Proxy(name, w, r)
 }
 

@@ -179,7 +179,7 @@ func (s *Server) dispatch(c *call) (map[string]any, *protoErr) {
 		}
 		switch c.method {
 		case "server/discover":
-			return s.discover(), nil
+			return s.discover(c), nil
 		case "tools/list":
 			return s.toolsList(c)
 		case "tools/call":
@@ -290,12 +290,33 @@ func capabilities() map[string]any {
 	return map[string]any{"tools": map[string]any{"listChanged": false}}
 }
 
+// instructionsFor is the instructions plus a sentence on what the caller's
+// token may do. Without it, a model with a read token sees only that the
+// write tools are missing, and some take that as tools still to load and
+// offer to deploy. If the token cannot be looked up, the sentence is left out.
+func (s *Server) instructionsFor(r *http.Request) string {
+	info, err := s.currentToken(r)
+	if err != nil {
+		return instructions
+	}
+	if info.CanDeploy {
+		return instructions + " This token's scope is " + info.Scope + ": it can deploy, restart, roll back, promote and create backups."
+	}
+	owner := ""
+	if info.Scope != "read" && info.User.Role == "viewer" {
+		owner = ", but its owner is a viewer"
+	}
+	return instructions + " This token's scope is " + info.Scope + owner +
+		": it cannot deploy, restart, roll back, promote or create backups, so those tools are not listed. " +
+		"If the user asks for one of them, say this token cannot do it and suggest a token with deploy scope (Settings, API tokens) or the panel."
+}
+
 // discover answers server/discover.
-func (s *Server) discover() map[string]any {
+func (s *Server) discover(c *call) map[string]any {
 	return map[string]any{
 		"supportedVersions": supportedVersions,
 		"capabilities":      capabilities(),
-		"instructions":      instructions,
+		"instructions":      s.instructionsFor(c.r),
 		"ttlMs":             cacheTTLMs,
 		"cacheScope":        cacheScope,
 	}
@@ -314,7 +335,7 @@ func (s *Server) initialize(c *call) map[string]any {
 		"protocolVersion": version,
 		"capabilities":    capabilities(),
 		"serverInfo":      s.serverInfo(),
-		"instructions":    instructions,
+		"instructions":    s.instructionsFor(c.r),
 	}
 }
 
