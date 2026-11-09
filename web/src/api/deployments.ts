@@ -92,6 +92,24 @@ export interface DeployEvent {
   ts: string;
 }
 
+/** Most events kept in a deployment's log view; older ones are dropped. */
+export const EVENT_CAP = 2000;
+
+/** Appends one event, keeping the newest EVENT_CAP. */
+export function appendEvent(log: DeployEvent[], ev: DeployEvent): DeployEvent[] {
+  const next = [...log, ev];
+  return next.length > EVENT_CAP ? next.slice(-EVENT_CAP) : next;
+}
+
+/**
+ * The TermPane tick for a deployment log: the newest event's seq. The log's
+ * length stops changing once it reaches EVENT_CAP, so the pane would stop
+ * following; seq keeps rising with every event.
+ */
+export function paneTick(log: DeployEvent[]): number {
+  return log.length === 0 ? 0 : log[log.length - 1].seq;
+}
+
 // useDeploymentEvents streams a deployment's event log over SSE into a
 // bounded buffer. Logs are not cache-shaped data, so this bypasses
 // TanStack Query entirely.
@@ -113,10 +131,7 @@ export function useDeploymentEvents(project: string, number: number | null) {
     const push = (raw: MessageEvent) => {
       try {
         const ev = JSON.parse(raw.data) as DeployEvent;
-        setEventLog((log) => {
-          const next = [...log, ev];
-          return next.length > 2000 ? next.slice(-2000) : next;
-        });
+        setEventLog((log) => appendEvent(log, ev));
         if (ev.type === "done") {
           setFinished(true);
           es.close();
