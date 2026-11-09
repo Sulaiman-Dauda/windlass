@@ -1,28 +1,19 @@
 package server
 
 import (
-	"context"
 	"net"
 	"net/http"
 	"strings"
-)
 
-// forwardedProtoKey carries whether the peer is a trusted proxy that sent
-// X-Forwarded-Proto: https. trustedRealIP sets it; the security-headers
-// middleware reads it instead of the raw header, so a direct client cannot
-// claim TLS it does not have. internal/api mirrors this key type to read
-// the same value (importing internal/server from internal/api would be an
-// import cycle).
-type forwardedProtoKey struct{}
+	"github.com/windlass-dev/windlass/internal/api"
+)
 
 // ForwardedProto reports whether the request is HTTPS: either a direct TLS
 // connection (r.TLS != nil) or a trusted proxy's X-Forwarded-Proto: https.
+// The decision is read through internal/api's context key so the api
+// package's cookies and URLs see the same value as the security headers.
 func ForwardedProto(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	trusted, ok := r.Context().Value(forwardedProtoKey{}).(bool)
-	return ok && trusted
+	return api.ForwardedProto(r)
 }
 
 // trustedProxy reports whether the request's peer address is in trusted.
@@ -49,6 +40,5 @@ func trustedProxy(r *http.Request, trusted []*net.IPNet) bool {
 // before RemoteAddr is rewritten.
 func withForwardedProto(r *http.Request, trusted []*net.IPNet) *http.Request {
 	proto := strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
-	ctx := context.WithValue(r.Context(), forwardedProtoKey{}, trustedProxy(r, trusted) && proto)
-	return r.WithContext(ctx)
+	return api.SetForwardedProto(r, trustedProxy(r, trusted) && proto)
 }

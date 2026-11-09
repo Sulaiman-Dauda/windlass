@@ -196,6 +196,66 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+// A login through the full router from a trusted proxy (loopback, the
+// default WINDLASS_TRUSTED_PROXIES) that forwards X-Forwarded-Proto: https
+// must get a Secure session cookie, because the api package reads the same
+// context value the security-headers middleware uses for HSTS. The same
+// request from an outside address must not: a direct client cannot claim
+// TLS it does not have.
+func TestLoginSecureCookieOnlyFromTrustedProxy(t *testing.T) {
+	e := newTestEnv(t)
+	if e.setupToken != "" {
+		rec := e.do(t, http.MethodPost, "/api/v1/auth/setup", map[string]string{
+			"token": e.setupToken, "email": "admin@example.com", "password": "supersecret123",
+		})
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("setup failed: %d", rec.Code)
+		}
+		e.setupToken = ""
+	}
+
+	login := func(remoteAddr, proto string) *httptest.ResponseRecorder {
+		body, err := json.Marshal(map[string]string{
+			"email": "admin@example.com", "password": "supersecret123",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+		req.RemoteAddr = remoteAddr
+		if proto != "" {
+			req.Header.Set("X-Forwarded-Proto", proto)
+		}
+		rec := httptest.NewRecorder()
+		e.handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Trusted proxy on loopback forwarding https: Secure cookie and HSTS.
+	rec := login("127.0.0.1:4321", "https")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("login from trusted proxy = %d, want 204", rec.Code)
+	}
+	if c := sessionCookie(t, rec); !c.Secure {
+		t.Error("login via trusted proxy with X-Forwarded-Proto: https got a non-Secure session cookie")
+	}
+	if rec.Header().Get("Strict-Transport-Security") == "" {
+		t.Error("login via trusted proxy with X-Forwarded-Proto: https got no HSTS")
+	}
+
+	// Outside (public) address sending the same header: no Secure, no HSTS.
+	rec = login("203.0.113.9:4321", "https")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("login from outside address = %d, want 204", rec.Code)
+	}
+	if c := sessionCookie(t, rec); c.Secure {
+		t.Error("login from untrusted address with X-Forwarded-Proto: https got a Secure session cookie")
+	}
+	if rec.Header().Get("Strict-Transport-Security") != "" {
+		t.Error("login from untrusted address with X-Forwarded-Proto: https got HSTS")
+	}
+}
+
 func TestSPAFallback(t *testing.T) {
 	e := newTestEnv(t)
 	for _, path := range []string{"/", "/projects/foo", "/settings"} {
