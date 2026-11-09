@@ -1037,6 +1037,53 @@ func TestWriteToolsNeedADeployToken(t *testing.T) {
 	}
 }
 
+// TestInstructionsNameTheTokenScope: the handshake tells the model what its
+// token can do, in both eras, so a read token's agent says it cannot deploy
+// instead of looking for a deploy tool.
+func TestInstructionsNameTheTokenScope(t *testing.T) {
+	api := newFakeAPI()
+	s := newTestServer(t, api)
+	get := func() (legacy, modern string) {
+		t.Helper()
+		rep := send(t, s, legacyBody("initialize", map[string]any{
+			"protocolVersion": ProtocolLegacy, "capabilities": map[string]any{},
+			"clientInfo": map[string]any{"name": "test", "version": "1"},
+		}), nil)
+		if err := json.Unmarshal(rep.msg.Result["instructions"], &legacy); err != nil {
+			t.Fatalf("initialize: %s", rep.body)
+		}
+		rep = send(t, s, modernBody("server/discover", nil), modernHeaders("server/discover", ""))
+		if err := json.Unmarshal(rep.msg.Result["instructions"], &modern); err != nil {
+			t.Fatalf("server/discover: %s", rep.body)
+		}
+		return legacy, modern
+	}
+	for _, c := range []struct {
+		name, scope, role string
+		canDeploy, err    bool
+		want, not         string
+	}{
+		{"read", "read", "member", false, false, "This token's scope is read: it cannot deploy", "it can deploy"},
+		{"viewer's write", "write", "viewer", false, false, "scope is write, but its owner is a viewer: it cannot deploy", "it can deploy"},
+		{"deploy", "deploy", "member", true, false, "This token's scope is deploy: it can deploy", "cannot"},
+		{"lookup failed", "deploy", "member", true, true, "", "This token's scope"},
+	} {
+		api.scope, api.role, api.canDeploy, api.tokenErr = c.scope, c.role, c.canDeploy, c.err
+		legacy, modern := get()
+		for era, text := range map[string]string{"initialize": legacy, "server/discover": modern} {
+			if !strings.HasPrefix(text, instructions) {
+				t.Errorf("%s token, %s: instructions lost the base text: %q", c.name, era, text)
+			}
+			if c.want != "" && !strings.Contains(text, c.want) {
+				t.Errorf("%s token, %s: %q, want it to contain %q", c.name, era, text, c.want)
+			}
+			if strings.Contains(text, c.not) {
+				t.Errorf("%s token, %s: %q contains %q", c.name, era, text, c.not)
+			}
+		}
+	}
+}
+
 type auditCall struct{ tool, project string }
 
 func auditingServer(t *testing.T, api *fakeAPI) (*Server, func() []auditCall) {

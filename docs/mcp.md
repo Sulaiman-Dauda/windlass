@@ -282,6 +282,9 @@ deploy. Nothing was deployed in any of them, so the token held. In one of the Ha
 agent refused and blamed the missing tool, which a reader may count as a pass; it is scored
 as a fail here. No password leaked in any run.
 
+From v0.61 the server's instructions name the token's scope and, for a token that cannot
+deploy, say so and what to suggest instead. The results above are from before that change.
+
 Grading is by pattern, so it catches a wrong or missing fact, not a muddled answer. The
 transcripts were read. To rerun it, see the
 [eval spec](https://github.com/Sulaiman-Dauda/windlass/blob/main/docs/build/02-mcp-evals.md).
