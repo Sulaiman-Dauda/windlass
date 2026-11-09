@@ -356,6 +356,72 @@ func TestPluginProxyWritesNeedMember(t *testing.T) {
 	}
 }
 
+// TestPluginProxyWritesAudited: a write through the plugin proxy leaves one
+// audit entry naming the token, without the query string; a read leaves none.
+func TestPluginProxyWritesAudited(t *testing.T) {
+	e := newTestEnv(t)
+	cookie := e.login(t)
+	write := e.createToken(t, cookie, map[string]any{"name": "w", "scope": "write"})
+
+	type entry struct {
+		token  sql.NullInt64
+		detail string
+	}
+	entries := func() []entry {
+		t.Helper()
+		rows, err := e.sqlDB.Query(`SELECT token_id, COALESCE(detail, '') FROM audit_log WHERE action = 'plugin.request' AND resource_type = 'plugin' AND resource_id = 'hello' ORDER BY id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var out []entry
+		for rows.Next() {
+			var en entry
+			if err := rows.Scan(&en.token, &en.detail); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, en)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	e.doBearer(t, http.MethodGet, "/api/v1/plugins/hello/proxy/items", write.Token, nil)
+	if got := entries(); len(got) != 0 {
+		t.Fatalf("a GET left %d audit entries, want 0: %v", len(got), got)
+	}
+
+	e.doBearer(t, http.MethodPost, "/api/v1/plugins/hello/proxy/items?api_key=s3cret", write.Token, nil)
+	got := entries()
+	if len(got) != 1 {
+		t.Fatalf("a POST left %d audit entries, want 1: %v", len(got), got)
+	}
+	if !got[0].token.Valid || got[0].token.Int64 != write.ID {
+		t.Errorf("token_id = %v, want %d", got[0].token, write.ID)
+	}
+	var detail map[string]any
+	if err := json.Unmarshal([]byte(got[0].detail), &detail); err != nil {
+		t.Fatalf("detail %q: %v", got[0].detail, err)
+	}
+	if detail["method"] != "POST" || detail["path"] != "/items" {
+		t.Errorf("detail = %v, want method POST and path /items", detail)
+	}
+	if strings.Contains(got[0].detail, "s3cret") {
+		t.Errorf("detail carries the query string: %s", got[0].detail)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/plugins/hello/proxy/ws", nil)
+	req.Header.Set("Authorization", "Bearer "+write.Token)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	e.handler.ServeHTTP(httptest.NewRecorder(), req)
+	if got := entries(); len(got) != 2 || !strings.Contains(got[1].detail, `"websocket":true`) {
+		t.Errorf("after a WebSocket upgrade, entries = %v, want a second one marked websocket", got)
+	}
+}
+
 // TestDeployScope: a deploy token reads like a read token and may use the
 // five deploy routes, and nothing else that writes.
 func TestDeployScope(t *testing.T) {
