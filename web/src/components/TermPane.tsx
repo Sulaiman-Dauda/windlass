@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode } from "react";
+import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, type ReactNode } from "react";
 import { cn } from "../ui/cn";
 
 /**
@@ -41,7 +41,12 @@ export const TermPane = forwardRef<
   const scroll = useRef<ScrollState>({ atBottom: true, lastScrollTop: 0 });
   useImperativeHandle(outer, () => pane.current!);
 
-  useEffect(() => {
+  // A layout effect, so the pin lands before paint. Once the log is capped,
+  // each update also drops rows from the top, and the browser's scroll
+  // anchoring moves scrollTop up to keep the visible rows still. Pinned only
+  // after paint, the scroll event could report that move first, and
+  // onPaneScroll would read it as the reader scrolling up and stop following.
+  useLayoutEffect(() => {
     const el = pane.current;
     if (el && follow && scroll.current.atBottom) el.scrollTop = el.scrollHeight;
   }, [tick, follow]);
