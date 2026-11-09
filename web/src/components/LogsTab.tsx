@@ -17,6 +17,28 @@ interface LogLine {
 
 type Conn = "connecting" | "live" | "reconnecting" | "closed";
 
+/** Most lines kept in the view; older ones are dropped. */
+export const LOG_CAP = 2000;
+
+/**
+ * The kept lines plus a count of every line received since the stream began.
+ * The count keeps rising past the cap, so the pane can pin to the bottom on
+ * each new line. `lines.length` stops changing at the cap and cannot serve as
+ * that signal.
+ */
+export interface LogBuffer {
+  lines: LogLine[];
+  received: number;
+}
+
+export function appendLogLine(buf: LogBuffer, line: LogLine): LogBuffer {
+  const next = [...buf.lines, line];
+  return {
+    lines: next.length > LOG_CAP ? next.slice(-LOG_CAP) : next,
+    received: buf.received + 1,
+  };
+}
+
 export default function LogsTab({ project }: { project: string }) {
   const services = useServices(project);
   const [service, setService] = useState<string | null>(null);
@@ -55,24 +77,22 @@ function LogStream({
   services: string[];
   onService: (s: string) => void;
 }) {
-  const [lines, setLines] = useState<LogLine[]>([]);
+  const [buf, setBuf] = useState<LogBuffer>({ lines: [], received: 0 });
+  const lines = buf.lines;
   const [conn, setConn] = useState<Conn>("connecting");
   const [filter, setFilter] = useState("");
   const [wrap, setWrap] = useState(true);
   const [follow, setFollow] = useState(true);
 
   useEffect(() => {
-    setLines([]);
+    setBuf({ lines: [], received: 0 });
     const es = new EventSource(`/api/v1/projects/${project}/logs?service=${encodeURIComponent(service)}&tail=200`);
     es.onopen = () => setConn("live");
     es.onerror = () => setConn(es.readyState === EventSource.CLOSED ? "closed" : "reconnecting");
     const push = (ev: MessageEvent) => {
       try {
         const line = JSON.parse(ev.data) as LogLine;
-        setLines((ls) => {
-          const next = [...ls, line];
-          return next.length > 2000 ? next.slice(-2000) : next;
-        });
+        setBuf((b) => appendLogLine(b, line));
       } catch {
         // ignore frames that are not log lines
       }
@@ -147,10 +167,10 @@ function LogStream({
             onClick={() => setWrap((w) => !w)}
           />
           <IconButton icon="download" label="Download these lines" onClick={download} disabled={lines.length === 0} />
-          <IconButton icon="x" label="Clear the view" onClick={() => setLines([])} disabled={lines.length === 0} />
+          <IconButton icon="x" label="Clear the view" onClick={() => setBuf((b) => ({ ...b, lines: [] }))} disabled={lines.length === 0} />
         </div>
       </div>
-      <TermPane tick={lines.length} follow={follow} wrap={wrap} className="h-[max(360px,calc(100dvh-360px))]">
+      <TermPane tick={buf.received} follow={follow} wrap={wrap} className="h-[max(360px,calc(100dvh-360px))]">
         {shown.map((l, i) => (
           <div key={i} className={l.stream === "stderr" ? "text-term-warn" : undefined}>
             {l.text || " "}
