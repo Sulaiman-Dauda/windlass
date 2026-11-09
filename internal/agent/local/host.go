@@ -159,6 +159,30 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 		if ref == "" {
 			ref = "origin/" + req.Branch
 		}
+		// reportReplaced logs the existing files the checkout is about to
+		// overwrite, since neither the Git tab nor the deployment log would
+		// otherwise say that a project's own file was replaced.
+		reportReplaced := func(ref string) {
+			ls := exec.CommandContext(ctx, "git", "ls-tree", "-r", "-z", "--name-only", ref) //nolint:gosec // G204: ref is built in this function
+			ls.Dir = target
+			ls.Env = env
+			listed, err := ls.Output()
+			if err != nil {
+				// Listing is advisory; the checkout itself reports real failures.
+				logLine(out, "could not list files the checkout replaces: "+err.Error())
+				return
+			}
+			for _, p := range strings.Split(string(listed), "\x00") {
+				if p == "" {
+					continue
+				}
+				info, err := os.Lstat(filepath.Join(target, filepath.FromSlash(p)))
+				if err != nil || info.IsDir() {
+					continue
+				}
+				logLine(out, "checkout replaces existing file: "+p)
+			}
+		}
 		steps := []struct {
 			name string
 			args []string
@@ -173,6 +197,9 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 			var err error
 			if step.args == nil {
 				err = requireOnBranch()
+				if err == nil {
+					reportReplaced(ref)
+				}
 			} else if err = run(step.args...); err != nil {
 				err = fmt.Errorf("%s: %w", step.name, err)
 			}
@@ -209,6 +236,13 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 		return agent.GitSyncResult{}, fmt.Errorf("git rev-parse: %w", err)
 	}
 	return agent.GitSyncResult{Commit: strings.TrimSpace(string(outBytes))}, nil
+}
+
+// logLine sends one line to out, if there is a sink.
+func logLine(out agent.LogSink, text string) {
+	if out != nil {
+		out(agent.LogLine{Stream: "stdout", Text: text, Time: time.Now().UTC()})
+	}
 }
 
 // gitConfigEnv adds key=value to env as if passed with git -c. It uses
