@@ -28,6 +28,9 @@ A plugin is an optional external process installed under
   access, and so does opening a WebSocket, because once open it carries writes too.
   Anything less gets `403` from Windlass before the plugin sees it. This changed in v0.57:
   before it, a viewer could send any method and open a WebSocket.
+- From v0.61, each of those writes, and each WebSocket when it opens, leaves one
+  `plugin.request` entry in the audit log with the method and path. The query string is
+  left out, and reads are not recorded.
 - Windlass does not tell the plugin who the caller is. A plugin that needs to tell users
   apart, or to allow some writes to members and not others, has to run its own sign-in.
 - Windlass starts enabled plugins when it starts, and starts a plugin when it is enabled.
