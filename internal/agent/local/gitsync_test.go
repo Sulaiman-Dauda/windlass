@@ -208,3 +208,98 @@ func TestGitSyncAfterRestore(t *testing.T) {
 		t.Fatalf("next sync = %+v, %v", again, err)
 	}
 }
+
+// TestGitSyncFollowsRepoAndBranchChange: after the first deploy, a repository
+// or branch changed in the Git tab must be what the next sync checks out, not
+// the one the first clone recorded.
+func TestGitSyncFollowsRepoAndBranchChange(t *testing.T) {
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not installed")
+	}
+	root := t.TempDir()
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command(gitBin, args...) //nolint:gosec // G204: the test drives git directly
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	// repo makes a bare repository whose main holds compose.yaml = body and
+	// returns its path and the work tree it was pushed from.
+	repo := func(name, body string) (bare, work string) {
+		t.Helper()
+		work = filepath.Join(root, name+"-work")
+		if err := os.MkdirAll(work, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		git(work, "init", "-q", "-b", "main")
+		if err := os.WriteFile(filepath.Join(work, "compose.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		git(work, "add", ".")
+		git(work, "commit", "-q", "-m", name)
+		bare = filepath.Join(root, name+".git")
+		git(root, "clone", "-q", "--bare", work, bare)
+		return bare, work
+	}
+	bareA, _ := repo("a", "services: {a: {image: nginx}}\n")
+	bareB, workB := repo("b", "services: {b: {image: nginx}}\n")
+	headB := git(workB, "rev-parse", "HEAD")
+
+	projects := t.TempDir()
+	l, err := New(Config{ProjectsDir: projects})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	src := filepath.Join(projects, "app", "src")
+	compose := func() string {
+		b, _ := os.ReadFile(filepath.Join(src, "compose.yaml")) //nolint:gosec // G304: a file under t.TempDir()
+		return string(b)
+	}
+
+	if _, err := (hostLocal{l}).GitSync(ctx, agent.GitSyncReq{Project: "app", URL: bareA, Branch: "main"}, nil); err != nil {
+		t.Fatalf("sync A: %v", err)
+	}
+
+	// Repository changed from A to B.
+	got, err := (hostLocal{l}).GitSync(ctx, agent.GitSyncReq{Project: "app", URL: bareB, Branch: "main"}, nil)
+	if err != nil {
+		t.Fatalf("sync B: %v", err)
+	}
+	if got.Commit != headB {
+		t.Fatalf("after changing the repository, commit = %s, want B's %s", got.Commit, headB)
+	}
+	if c := compose(); c != "services: {b: {image: nginx}}\n" {
+		t.Fatalf("after changing the repository, compose.yaml = %q, want B's", c)
+	}
+
+	// Branch changed from main to dev, in B.
+	git(workB, "checkout", "-q", "-b", "dev")
+	if err := os.WriteFile(filepath.Join(workB, "compose.yaml"), []byte("services: {dev: {image: nginx}}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(workB, "commit", "-q", "-am", "dev")
+	git(workB, "push", "-q", bareB, "dev")
+	headDev := git(workB, "rev-parse", "HEAD")
+
+	got, err = (hostLocal{l}).GitSync(ctx, agent.GitSyncReq{Project: "app", URL: bareB, Branch: "dev"}, nil)
+	if err != nil {
+		t.Fatalf("sync dev: %v", err)
+	}
+	if got.Commit != headDev {
+		t.Fatalf("after changing the branch, commit = %s, want dev's %s", got.Commit, headDev)
+	}
+	if c := compose(); c != "services: {dev: {image: nginx}}\n" {
+		t.Fatalf("after changing the branch, compose.yaml = %q, want dev's", c)
+	}
+	if fetch := git(src, "config", "--get-all", "remote.origin.fetch"); fetch != "+refs/heads/dev:refs/remotes/origin/dev" {
+		t.Errorf("remote.origin.fetch = %q, want dev only", fetch)
+	}
+}
