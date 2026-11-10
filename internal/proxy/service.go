@@ -107,25 +107,28 @@ func (s *Service) CheckHostnameForProject(ctx context.Context, hostname string, 
 	return nil
 }
 
-func (s *Service) Add(ctx context.Context, projectID int64, hostname, service string, port int64) (db.Domain, error) {
+// Add stores a domain and returns it in the same shape List serves, so a
+// create response and a list item decode into one type. The route sync is
+// asynchronous, so a fresh domain normally reports "pending" here.
+func (s *Service) Add(ctx context.Context, projectID int64, hostname, service string, port int64) (Domain, error) {
 	hostname = strings.ToLower(strings.TrimSpace(hostname))
 	if !validHostname(hostname) {
-		return db.Domain{}, fmt.Errorf("invalid hostname %q", hostname)
+		return Domain{}, fmt.Errorf("invalid hostname %q", hostname)
 	}
 	if service == "" || port <= 0 || port > 65535 {
-		return db.Domain{}, errors.New("service and a valid container port are required")
+		return Domain{}, errors.New("service and a valid container port are required")
 	}
 	project, err := s.q.ProjectByID(ctx, projectID)
 	if err != nil {
-		return db.Domain{}, err
+		return Domain{}, err
 	}
 	config, err := s.agent.Compose().Config(ctx, project.Name)
 	if err != nil {
-		return db.Domain{}, err
+		return Domain{}, err
 	}
 	resolved, ok := config.Services[service]
 	if !ok {
-		return db.Domain{}, fmt.Errorf("service %q is not defined in compose.yaml", service)
+		return Domain{}, fmt.Errorf("service %q is not defined in compose.yaml", service)
 	}
 	if len(resolved.ContainerPorts) > 0 {
 		declared := false
@@ -136,7 +139,7 @@ func (s *Service) Add(ctx context.Context, projectID int64, hostname, service st
 			}
 		}
 		if !declared {
-			return db.Domain{}, fmt.Errorf("port %d is not exposed by service %q", port, service)
+			return Domain{}, fmt.Errorf("port %d is not exposed by service %q", port, service)
 		}
 	}
 
@@ -145,18 +148,21 @@ func (s *Service) Add(ctx context.Context, projectID int64, hostname, service st
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
-			return db.Domain{}, ErrConflict
+			return Domain{}, ErrConflict
 		}
-		return db.Domain{}, err
+		return Domain{}, err
 	}
 	if err := s.persistDomains(ctx, project.Name, project.ID); err != nil {
 		_ = s.q.DeleteDomain(ctx, d.ID)
-		return db.Domain{}, err
+		return Domain{}, err
 	}
 
 	s.RequestSync()
 	s.bus.Publish(events.Event{Topic: "domain", Type: "domain.created", Resource: hostname})
-	return d, nil
+
+	available, routed := s.routingStatus(ctx)
+	return Domain{Hostname: d.Hostname, Service: d.Service, ContainerPort: d.ContainerPort}.
+		withStatus(available, routed), nil
 }
 
 func (s *Service) Delete(ctx context.Context, projectName, hostname string) error {
@@ -209,8 +215,21 @@ func (s *Service) List(ctx context.Context, projectID int64) ([]Domain, error) {
 		return nil, err
 	}
 
+	available, routed := s.routingStatus(ctx)
+	out := make([]Domain, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, Domain{
+			Hostname: row.Hostname, Service: row.Service, ContainerPort: row.ContainerPort,
+		}.withStatus(available, routed))
+	}
+	return out, nil
+}
+
+// routingStatus reads the proxy once for a whole list. A failed route lookup
+// leaves routed empty, so domains read as pending rather than vanishing.
+func (s *Service) routingStatus(ctx context.Context) (available bool, routed map[string]bool) {
 	info, _ := s.agent.Proxy().Available(ctx)
-	routed := map[string]bool{}
+	routed = map[string]bool{}
 	if info.Available {
 		if current, err := s.agent.Proxy().CurrentRoutes(ctx); err == nil {
 			for _, r := range current {
@@ -218,23 +237,19 @@ func (s *Service) List(ctx context.Context, projectID int64) ([]Domain, error) {
 			}
 		}
 	}
+	return info.Available, routed
+}
 
-	out := make([]Domain, 0, len(rows))
-	for _, row := range rows {
-		d := Domain{
-			Hostname: row.Hostname, Service: row.Service, ContainerPort: row.ContainerPort,
-		}
-		switch {
-		case !info.Available:
-			d.Status = "proxy_unavailable"
-		case routed[row.Hostname]:
-			d.Status = "active"
-		default:
-			d.Status = "pending"
-		}
-		out = append(out, d)
+func (d Domain) withStatus(available bool, routed map[string]bool) Domain {
+	switch {
+	case !available:
+		d.Status = "proxy_unavailable"
+	case routed[d.Hostname]:
+		d.Status = "active"
+	default:
+		d.Status = "pending"
 	}
-	return out, nil
+	return d
 }
 
 func (s *Service) ProxyStatus(ctx context.Context) (agent.ProxyInfo, error) {
