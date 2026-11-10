@@ -74,9 +74,9 @@ export const TermPane = forwardRef<
   // Runs after every render. When the pane is not pinned to the bottom, put
   // the row the reader was looking at back where it was. Rows dropped from the
   // top of a capped log would otherwise slide the text up under them. The
-  // browser's own scroll anchoring is switched off on the pane (it is missing
-  // in Safari, and its timing is what stopped the pane following in #109), so
-  // this is the only thing that moves scrollTop besides the pin and the reader.
+  // browser's own scroll anchoring is switched off on the pane (its timing is
+  // what stopped the pane following in #109, and support varies by browser),
+  // so this is the only thing that moves scrollTop besides the pin and the reader.
   useLayoutEffect(() => {
     const el = pane.current;
     if (!el || (follow && scroll.current.atBottom)) return;
