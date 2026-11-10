@@ -95,7 +95,31 @@ func (a *API) handlePluginProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		a.Audit.Write(r.Context(), user.ID, "plugin.request", "plugin", name, remoteIP(r), detail)
 	}
+	setForwardedHeaders(r)
 	a.Plugins.Proxy(name, w, r)
+}
+
+// setForwardedHeaders replaces every forwarding header on the request with
+// Windlass's own view of the client before a plugin sees it. The headers
+// that arrived are the client's unless a trusted proxy sent them, and a
+// plugin cannot tell which, so it gets the address and scheme the server
+// middleware settled on and nothing else.
+func setForwardedHeaders(r *http.Request) {
+	for name := range r.Header {
+		if name == "Forwarded" || name == "X-Real-Ip" || strings.HasPrefix(name, "X-Forwarded-") {
+			delete(r.Header, name)
+		}
+	}
+	ip := remoteIP(r)
+	proto := "http"
+	if isTLS(r) {
+		proto = "https"
+	}
+	r.Header.Set("X-Forwarded-For", ip)
+	r.Header.Set("X-Forwarded-Proto", proto)
+	// The reverse proxy appends RemoteAddr's host to X-Forwarded-For when it
+	// can split off a port. A bare address stops it adding the client twice.
+	r.RemoteAddr = ip
 }
 
 // stripCookie removes one cookie from the request and passes the rest on

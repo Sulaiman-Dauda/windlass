@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 
@@ -283,11 +284,13 @@ func isTLS(r *http.Request) bool {
 	return ForwardedProto(r)
 }
 
+// remoteIP is the client's address without a port. The server's
+// trustedRealIP middleware may already have replaced RemoteAddr with a bare
+// address taken from a trusted proxy's headers, and a bare IPv6 address is
+// all colons, so the port is only cut when there is one.
 func remoteIP(r *http.Request) string {
-	// chi middleware.RealIP has already normalized RemoteAddr.
-	host := r.RemoteAddr
-	if i := strings.LastIndex(host, ":"); i > 0 && !strings.HasSuffix(host, "]") {
-		host = host[:i]
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
 	}
-	return host
+	return strings.Trim(r.RemoteAddr, "[]")
 }

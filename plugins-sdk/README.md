@@ -31,6 +31,10 @@ A plugin is an optional external process installed under
 - From v0.61, each of those writes, and each WebSocket when it opens, leaves one
   `plugin.request` entry in the audit log with the method and path. The query string is
   left out, and reads are not recorded.
+- From v0.61, Windlass sets `X-Forwarded-For` to the one client address it settled on and
+  `X-Forwarded-Proto` to `http` or `https`, and removes every other `X-Forwarded-*` header,
+  `X-Real-IP` and `Forwarded`. Before it, whatever the client sent in those headers reached
+  the plugin unchanged.
 - Windlass does not tell the plugin who the caller is. A plugin that needs to tell users
   apart, or to allow some writes to members and not others, has to run its own sign-in.
 - Windlass starts enabled plugins when it starts, and starts a plugin when it is enabled.
