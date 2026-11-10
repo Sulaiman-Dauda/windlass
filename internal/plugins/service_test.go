@@ -147,19 +147,54 @@ func TestProxySendsOnlyWindlassForwardedHeaders(t *testing.T) {
 
 	// Everything a client might send to pass itself off as someone else.
 	spoofed := map[string]string{
-		"X-Forwarded-For":          "10.0.0.1",
-		"X-Forwarded-Proto":        "https",
-		"X-Forwarded-Host":         "admin.internal",
-		"X-Forwarded-Port":         "443",
-		"X-Forwarded":              "for=10.0.0.1",
-		"X-Real-IP":                "10.0.0.1",
-		"Forwarded":                "for=10.0.0.1;proto=https",
-		"X_Forwarded_For":          "10.0.0.1",
-		"X_Real_IP":                "10.0.0.1",
-		"True-Client-IP":           "10.0.0.1",
-		"CF-Connecting-IP":         "10.0.0.1",
-		"X-Client-IP":              "10.0.0.1",
-		"X-Original-Forwarded-For": "10.0.0.1",
+		"X-Forwarded-For":            "10.0.0.1",
+		"X-Forwarded-Proto":          "https",
+		"X-Forwarded-Host":           "admin.internal",
+		"X-Forwarded-Port":           "443",
+		"X-Forwarded":                "for=10.0.0.1",
+		"X-Real-IP":                  "10.0.0.1",
+		"Forwarded":                  "for=10.0.0.1;proto=https",
+		"X_Forwarded_For":            "10.0.0.1",
+		"X_Real_IP":                  "10.0.0.1",
+		"True-Client-IP":             "10.0.0.1",
+		"CF-Connecting-IP":           "10.0.0.1",
+		"X-Client-IP":                "10.0.0.1",
+		"X-Original-Forwarded-For":   "10.0.0.1",
+		"X-Scheme":                   "https",
+		"X-Url-Scheme":               "https",
+		"Front-End-Https":            "on",
+		"X-Forwarded-Ssl":            "on",
+		"Fastly-Client-IP":           "10.0.0.1",
+		"X-Envoy-External-Address":   "10.0.0.1",
+		"X-Remote-Addr":              "10.0.0.1",
+		"X-Remote-IP":                "10.0.0.1",
+		"X-ProxyUser-IP":             "10.0.0.1",
+		"X-Original-Host":            "admin.internal",
+		"X-Host":                     "admin.internal",
+		"Forwarded-For":              "10.0.0.1",
+		"X-Originating-IP":           "10.0.0.1",
+		"Proxy-Client-IP":            "10.0.0.1",
+		"WL-Proxy-Client-IP":         "10.0.0.1",
+		"X-Appengine-User-Ip":        "10.0.0.1",
+		"X-Azure-ClientIP":           "10.0.0.1",
+		"X-Azure-SocketIP":           "10.0.0.1",
+		"X-ARR-ClientIP":             "10.0.0.1",
+		"X-Original-For":             "10.0.0.1",
+		"CloudFront-Viewer-Address":  "10.0.0.1:443",
+		"HTTP_X_FORWARDED_FOR":       "10.0.0.1",
+		"HTTP_CLIENT_IP":             "10.0.0.1",
+		"X-Https":                    "on",
+		"X-Proto":                    "https",
+		"X-Original-Proto":           "https",
+		"X-Client-Proto":             "https",
+		"X-Real-Proto":               "https",
+		"X-Real-Scheme":              "https",
+		"X-ARR-SSL":                  "1",
+		"CloudFront-Forwarded-Proto": "https",
+		"CF-Visitor":                 `{"scheme":"https"}`,
+		"X-Real-Host":                "admin.internal",
+		"X-Original-URL":             "/admin",
+		"X-Rewrite-URL":              "/admin",
 	}
 
 	for _, c := range []struct {
@@ -222,5 +257,81 @@ func TestProxySendsOnlyWindlassForwardedHeaders(t *testing.T) {
 		if got.URL.Path != "/items" {
 			t.Errorf("%s: path = %q, want /items", c.name, got.URL.Path)
 		}
+	}
+}
+
+// The plugin gets the query string exactly as the caller sent it. Go's
+// reverse proxy re-encodes a query it cannot parse cleanly and drops the
+// pairs it dislikes; Windlass does not read plugin queries, so it has no
+// reason to change them.
+func TestProxyLeavesTheQueryStringAlone(t *testing.T) {
+	arrived := make(chan string, 1)
+	plugin := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		arrived <- r.URL.RawQuery
+	}))
+	defer plugin.Close()
+	addr := strings.TrimPrefix(plugin.URL, "http://")
+	s, _ := newService(t)
+	s.running["good"] = &instance{addr: addr, proxy: newPluginProxy(addr, s.logger)}
+
+	for _, query := range []string{"", "b=2&a=1", "a=1;b=2", "q=50%", "q=a+b&q=%2f", "flag"} {
+		r := httptest.NewRequest(http.MethodGet, "http://panel.example.com/items", nil)
+		r.URL.RawQuery = query
+		rec := httptest.NewRecorder()
+		s.Proxy("good", Client{IP: "203.0.113.9"}, rec, r)
+		select {
+		case got := <-arrived:
+			if got != query {
+				t.Errorf("query %q reached the plugin as %q", query, got)
+			}
+		default:
+			t.Fatalf("query %q: the plugin got no request (status %d)", query, rec.Code)
+		}
+	}
+}
+
+// A client can declare a forwarding header as a trailer, after a chunked
+// body. It must not reach the plugin that way either.
+func TestProxyDropsForwardingTrailers(t *testing.T) {
+	arrived := make(chan http.Header, 1)
+	plugin := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		arrived <- r.Trailer.Clone()
+	}))
+	defer plugin.Close()
+	addr := strings.TrimPrefix(plugin.URL, "http://")
+	s, _ := newService(t)
+	s.running["good"] = &instance{addr: addr, proxy: newPluginProxy(addr, s.logger)}
+
+	// A real server in front, so the trailer goes through Go's own parsing.
+	panel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.Proxy("good", Client{IP: "203.0.113.9"}, w, r)
+	}))
+	defer panel.Close()
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(panel.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_, _ = io.WriteString(conn, "POST /items HTTP/1.1\r\nHost: panel.example.com\r\n"+
+		"Transfer-Encoding: chunked\r\nTrailer: X-Forwarded-For, X-Real-IP, X_Client_IP, X-Scheme, X-Plugin-Sum\r\nConnection: close\r\n\r\n"+
+		"5\r\nhello\r\n0\r\nX-Forwarded-For: 10.0.0.1\r\nX-Real-IP: 10.0.0.1\r\nX_Client_IP: 10.0.0.1\r\nX-Scheme: https\r\nX-Plugin-Sum: abc\r\n\r\n")
+	_, _ = io.ReadAll(conn)
+
+	select {
+	case got := <-arrived:
+		for name := range got {
+			if isForwardingHeader(name) {
+				t.Errorf("trailer %s reached the plugin: %q", name, got[name])
+			}
+		}
+		// The control: an ordinary trailer name is still declared, so the
+		// check above is not passing on an empty set.
+		if _, ok := got["X-Plugin-Sum"]; !ok {
+			t.Errorf("the plugin's own trailer name was dropped; it saw %v", got)
+		}
+	default:
+		t.Fatal("the plugin got no request")
 	}
 }

@@ -108,22 +108,58 @@ func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
 			}
 
 			// Walk right-to-left: a trusted proxy appends the address it saw,
-			// while any client-supplied spoof is farther left.
-			forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-			for i := len(forwarded) - 1; i >= 0; i-- {
-				ip := net.ParseIP(strings.TrimSpace(forwarded[i]))
-				if ip != nil && !contains(ip) {
+			// while any client-supplied spoof is farther left. Every header
+			// line counts, in order: a proxy may add a line of its own rather
+			// than extend the client's, which then stays first.
+			//
+			// The walk ends at the first address that is not a trusted proxy:
+			// that is the client. It also ends at an entry that is not an
+			// address at all, because everything left of it is unverified;
+			// stepping over it would land on what the client wrote. If every
+			// entry is a trusted proxy, the farthest one is the client.
+			if lines := r.Header.Values("X-Forwarded-For"); len(lines) > 0 {
+				forwarded := strings.Split(strings.Join(lines, ","), ",")
+				for i := len(forwarded) - 1; i >= 0; i-- {
+					ip := forwardedAddress(forwarded[i])
+					if ip == nil {
+						break
+					}
 					r.RemoteAddr = ip.String()
-					next.ServeHTTP(w, r)
-					return
+					if !contains(ip) {
+						break
+					}
 				}
+				next.ServeHTTP(w, r)
+				return
 			}
-			if ip := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); ip != nil {
-				r.RemoteAddr = ip.String()
+			// X-Real-IP is for a proxy that sends no X-Forwarded-For. Beside
+			// one it is ignored: Caddy passes a client's X-Real-IP through
+			// untouched. The last line counts, for the reason above.
+			if lines := r.Header.Values("X-Real-IP"); len(lines) > 0 {
+				if ip := forwardedAddress(lines[len(lines)-1]); ip != nil {
+					r.RemoteAddr = ip.String()
+				}
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// forwardedAddress reads one X-Forwarded-For entry. Some proxies write the
+// address with a port or in brackets. Anything else, "unknown" or an IPv6
+// zone included, is nil.
+func forwardedAddress(entry string) net.IP {
+	entry = strings.TrimSpace(entry)
+	if ip := net.ParseIP(entry); ip != nil {
+		return ip
+	}
+	if host, _, err := net.SplitHostPort(entry); err == nil {
+		return net.ParseIP(host)
+	}
+	if strings.HasPrefix(entry, "[") && strings.HasSuffix(entry, "]") {
+		return net.ParseIP(entry[1 : len(entry)-1])
+	}
+	return nil
 }
 
 // forwardedHTTPS reports whether the nearest proxy said the request reached

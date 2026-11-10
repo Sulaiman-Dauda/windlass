@@ -264,10 +264,22 @@ func newPluginProxy(addr string, logger *slog.Logger) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
+			// The query goes through as the caller wrote it. Before calling
+			// Rewrite the reverse proxy re-encodes a query with a ";" or a
+			// bad escape and drops the pairs it cannot parse. That guards a
+			// proxy that reads the query itself; Windlass never does.
+			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 			// The plugin keeps seeing the host the caller asked for.
 			pr.Out.Host = pr.In.Host
 			client, _ := pr.In.Context().Value(clientKey{}).(Client)
 			setForwardedHeaders(pr.Out.Header, client)
+			// A trailer the client declared is forwarded by name, so the
+			// same names are dropped there.
+			for name := range pr.Out.Trailer {
+				if isForwardingHeader(name) {
+					delete(pr.Out.Trailer, name)
+				}
+			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			logger.Warn("plugin proxy", "addr", addr, "error", err)
@@ -296,14 +308,31 @@ func setForwardedHeaders(h http.Header, client Client) {
 }
 
 // isForwardingHeader reports whether a header claims the client's address,
-// scheme or host. Underscores count as hyphens: CGI-style servers fold both
-// spellings into one variable.
+// scheme or host, or the URL the client asked for. Underscores count as
+// hyphens, and a leading "http-" is dropped: CGI-style servers fold these
+// spellings into one variable. A list of known names, so a header not on it
+// still passes.
 func isForwardingHeader(name string) bool {
 	name = strings.ReplaceAll(strings.ToLower(name), "_", "-")
+	name = strings.TrimPrefix(name, "http-")
 	switch name {
-	case "forwarded", "x-forwarded", "x-real-ip", "x-client-ip", "client-ip",
-		"true-client-ip", "cf-connecting-ip", "x-cluster-client-ip",
-		"x-original-forwarded-for":
+	case "forwarded", "x-forwarded",
+		// The client's address.
+		"x-real-ip", "x-client-ip", "client-ip", "true-client-ip",
+		"cf-connecting-ip", "x-cluster-client-ip", "x-original-forwarded-for",
+		"fastly-client-ip", "x-envoy-external-address", "x-remote-addr",
+		"x-remote-ip", "x-proxyuser-ip", "forwarded-for", "x-originating-ip",
+		"proxy-client-ip", "wl-proxy-client-ip", "x-appengine-user-ip",
+		"x-azure-clientip", "x-azure-socketip", "x-arr-clientip",
+		"x-original-for", "cloudfront-viewer-address",
+		// The scheme.
+		"x-scheme", "x-url-scheme", "front-end-https", "x-https", "x-proto",
+		"x-original-proto", "x-client-proto", "x-real-proto", "x-real-scheme",
+		"x-arr-ssl", "cloudfront-forwarded-proto", "cf-visitor",
+		// The host, and the URL some frameworks route on instead of the
+		// request line.
+		"x-original-host", "x-host", "x-real-host", "x-original-url",
+		"x-rewrite-url":
 		return true
 	}
 	return strings.HasPrefix(name, "x-forwarded-")
