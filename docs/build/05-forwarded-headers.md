@@ -111,3 +111,22 @@ Go's reverse proxy copies the trailer map before the body is read. That is older
   HTTPS, neither over HTTP, a client's own `X-Forwarded-Proto` ignored both ways, and neither
   once Caddy's address is not in `WINDLASS_TRUSTED_PROXIES`
 - [x] Review follow-up: the four new tests fail on main and pass on the branch
+
+## Warning for a proxy nobody named
+
+Built 10/11/2026 on Pablo's go, for the installs v0.61 changes without telling them.
+`trustedRealIP` logs one warning for each private address outside `WINDLASS_TRUSTED_PROXIES`
+that sends `X-Forwarded-Proto` or `X-Forwarded-For`, at most 16 between restarts. Public
+addresses are left out so a scanner cannot use the warnings up or fill the log.
+`docs/upgrading.md` is new and carries the v0.61 notes.
+
+Checked with Windlass and Caddy 2.11.8 as two containers on one Podman network, scratch data:
+
+| | default | Caddy's address trusted |
+|---|---|---|
+| Session cookie `Secure` | no | yes |
+| HSTS | no | yes |
+| OAuth `redirect_uri` | `http://` | `https://` |
+| Warnings over 8 requests | 1, naming Caddy | 0 |
+
+Not checked: whether GitHub refuses the `http://` callback. That needs a real OAuth app.
