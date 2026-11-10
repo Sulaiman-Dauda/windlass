@@ -66,8 +66,26 @@ checked against the code with a test that failed on main, then fixed on
 - **Forwarding names are dropped from request trailers.** Go passed the name on with no
   value, so nothing could be claimed that way; it is removed all the same.
 
-Not changed: `X-Real-IP` is still read from its first line, and only when every
-`X-Forwarded-For` entry is a trusted proxy.
+A second fresh pass, on this follow-up, found three more. Each was confirmed with a failing
+test first:
+
+- **An `X-Forwarded-For` entry that is not an address ended the trust, not the walk.** The
+  walk skipped it and took the entry to its left, which the client wrote. A proxy that
+  appends `203.0.113.5:4411`, a bracketed IPv6 address or `unknown` gave the client its pick
+  of address. Caddy writes a bare address, so the recommended install was not exposed. An
+  address with a port or brackets is now read; anything else stops the walk and the address
+  that connected stands.
+- **`X-Real-IP` was believed beside `X-Forwarded-For`.** When every `X-Forwarded-For` entry
+  was a trusted proxy, or none parsed, the client's own `X-Real-IP` was used, and Caddy does
+  not remove one. It is now read only when there is no `X-Forwarded-For` at all, from its
+  last line. With only trusted entries the farthest one is the client. This changes one
+  setup: a proxy that sends both headers and puts the real client only in `X-Real-IP`.
+- **22 more header names are removed**, among them `X-Original-URL` and `X-Rewrite-URL`,
+  which some frameworks route on in place of the request line, and the `HTTP_` spelling.
+  Still a denylist.
+
+Known and left: a request trailer's value never reaches a plugin, only its name, because
+Go's reverse proxy copies the trailer map before the body is read. That is older than #111.
 
 ## Touches
 

@@ -308,17 +308,31 @@ func setForwardedHeaders(h http.Header, client Client) {
 }
 
 // isForwardingHeader reports whether a header claims the client's address,
-// scheme or host. Underscores count as hyphens: CGI-style servers fold both
-// spellings into one variable.
+// scheme or host, or the URL the client asked for. Underscores count as
+// hyphens, and a leading "http-" is dropped: CGI-style servers fold these
+// spellings into one variable. A list of known names, so a header not on it
+// still passes.
 func isForwardingHeader(name string) bool {
 	name = strings.ReplaceAll(strings.ToLower(name), "_", "-")
+	name = strings.TrimPrefix(name, "http-")
 	switch name {
-	case "forwarded", "x-forwarded", "x-real-ip", "x-client-ip", "client-ip",
-		"true-client-ip", "cf-connecting-ip", "x-cluster-client-ip",
-		"x-original-forwarded-for", "fastly-client-ip", "x-envoy-external-address",
-		"x-remote-addr", "x-remote-ip", "x-proxyuser-ip",
-		"x-scheme", "x-url-scheme", "front-end-https",
-		"x-original-host", "x-host":
+	case "forwarded", "x-forwarded",
+		// The client's address.
+		"x-real-ip", "x-client-ip", "client-ip", "true-client-ip",
+		"cf-connecting-ip", "x-cluster-client-ip", "x-original-forwarded-for",
+		"fastly-client-ip", "x-envoy-external-address", "x-remote-addr",
+		"x-remote-ip", "x-proxyuser-ip", "forwarded-for", "x-originating-ip",
+		"proxy-client-ip", "wl-proxy-client-ip", "x-appengine-user-ip",
+		"x-azure-clientip", "x-azure-socketip", "x-arr-clientip",
+		"x-original-for", "cloudfront-viewer-address",
+		// The scheme.
+		"x-scheme", "x-url-scheme", "front-end-https", "x-https", "x-proto",
+		"x-original-proto", "x-client-proto", "x-real-proto", "x-real-scheme",
+		"x-arr-ssl", "cloudfront-forwarded-proto", "cf-visitor",
+		// The host, and the URL some frameworks route on instead of the
+		// request line.
+		"x-original-host", "x-host", "x-real-host", "x-original-url",
+		"x-rewrite-url":
 		return true
 	}
 	return strings.HasPrefix(name, "x-forwarded-")
