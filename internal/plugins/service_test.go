@@ -6,9 +6,11 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -82,7 +84,7 @@ func TestProxyUnavailableWhenNotRunning(t *testing.T) {
 	writePlugin(t, root, "good", `{"name":"good","version":"1.0","command":"good"}`)
 
 	rec := httptest.NewRecorder()
-	s.Proxy("good", rec, httptest.NewRequest("GET", "/", nil))
+	s.Proxy("good", Client{}, rec, httptest.NewRequest("GET", "/", nil))
 	if rec.Code != 503 {
 		t.Errorf("proxy to stopped plugin = %d, want 503", rec.Code)
 	}
@@ -104,7 +106,7 @@ func TestProxyUnreachablePluginAnswersJSON(t *testing.T) {
 	s.running["good"] = &instance{addr: addr, proxy: newPluginProxy(addr, s.logger)}
 
 	rec := httptest.NewRecorder()
-	s.Proxy("good", rec, httptest.NewRequest("GET", "/", nil))
+	s.Proxy("good", Client{}, rec, httptest.NewRequest("GET", "/", nil))
 	if rec.Code != 502 {
 		t.Fatalf("proxy to unreachable plugin = %d, want 502", rec.Code)
 	}
@@ -127,5 +129,98 @@ func TestDisableIsIdempotent(t *testing.T) {
 	list, _ := s.List(ctx)
 	if len(list) != 1 || list[0].Enabled {
 		t.Errorf("list = %+v", list)
+	}
+}
+
+// A plugin must see Windlass's view of the client and nothing the client
+// wrote about itself. The requests go through the service's own proxy to a
+// listening plugin, so this checks what arrives.
+func TestProxySendsOnlyWindlassForwardedHeaders(t *testing.T) {
+	arrived := make(chan *http.Request, 1)
+	plugin := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		arrived <- r.Clone(context.Background())
+	}))
+	defer plugin.Close()
+	addr := strings.TrimPrefix(plugin.URL, "http://")
+	s, _ := newService(t)
+	s.running["good"] = &instance{addr: addr, proxy: newPluginProxy(addr, s.logger)}
+
+	// Everything a client might send to pass itself off as someone else.
+	spoofed := map[string]string{
+		"X-Forwarded-For":          "10.0.0.1",
+		"X-Forwarded-Proto":        "https",
+		"X-Forwarded-Host":         "admin.internal",
+		"X-Forwarded-Port":         "443",
+		"X-Forwarded":              "for=10.0.0.1",
+		"X-Real-IP":                "10.0.0.1",
+		"Forwarded":                "for=10.0.0.1;proto=https",
+		"X_Forwarded_For":          "10.0.0.1",
+		"X_Real_IP":                "10.0.0.1",
+		"True-Client-IP":           "10.0.0.1",
+		"CF-Connecting-IP":         "10.0.0.1",
+		"X-Client-IP":              "10.0.0.1",
+		"X-Original-Forwarded-For": "10.0.0.1",
+	}
+
+	for _, c := range []struct {
+		name       string
+		client     Client
+		remoteAddr string
+		connection string
+		wantFor    []string
+		wantProto  string
+	}{
+		{"direct client", Client{IP: "203.0.113.9"}, "203.0.113.9:4321", "", []string{"203.0.113.9"}, "http"},
+		{"behind a trusted proxy", Client{IP: "198.51.100.7", HTTPS: true}, "198.51.100.7", "", []string{"198.51.100.7"}, "https"},
+		{"IPv6", Client{IP: "2001:db8::1", HTTPS: true}, "[2001:db8::1]:4321", "", []string{"2001:db8::1"}, "https"},
+		// Naming the headers in Connection must not get them dropped as
+		// hop-by-hop after Windlass has set them.
+		{"Connection names the headers", Client{IP: "203.0.113.9", HTTPS: true}, "203.0.113.9:4321",
+			"X-Forwarded-For, X-Forwarded-Proto", []string{"203.0.113.9"}, "https"},
+		// No recorded client: nothing is claimed, and never HTTPS.
+		{"no client", Client{}, "203.0.113.9:4321", "", nil, "http"},
+	} {
+		r := httptest.NewRequest(http.MethodGet, "http://panel.example.com/items", nil)
+		r.RemoteAddr = c.remoteAddr
+		for name, value := range spoofed {
+			r.Header.Set(name, value)
+		}
+		r.Header.Set("X-Plugin-State", "kept")
+		if c.connection != "" {
+			r.Header.Set("Connection", c.connection)
+		}
+
+		rec := httptest.NewRecorder()
+		s.Proxy("good", c.client, rec, r)
+
+		var got *http.Request
+		select {
+		case got = <-arrived:
+		default:
+			t.Fatalf("%s: the plugin got no request (status %d)", c.name, rec.Code)
+		}
+		if v := got.Header.Values("X-Forwarded-For"); !slices.Equal(v, c.wantFor) {
+			t.Errorf("%s: X-Forwarded-For = %q, want %q", c.name, v, c.wantFor)
+		}
+		if v := got.Header.Values("X-Forwarded-Proto"); len(v) != 1 || v[0] != c.wantProto {
+			t.Errorf("%s: X-Forwarded-Proto = %q, want %q", c.name, v, c.wantProto)
+		}
+		for name := range spoofed {
+			if name == "X-Forwarded-For" || name == "X-Forwarded-Proto" {
+				continue
+			}
+			if v := got.Header.Values(name); len(v) != 0 {
+				t.Errorf("%s: client-sent %s reached the plugin: %q", c.name, name, v)
+			}
+		}
+		if got.Header.Get("X-Plugin-State") != "kept" {
+			t.Errorf("%s: an unrelated header was dropped", c.name)
+		}
+		if got.Host != "panel.example.com" {
+			t.Errorf("%s: Host = %q, want the host the caller asked for", c.name, got.Host)
+		}
+		if got.URL.Path != "/items" {
+			t.Errorf("%s: path = %q, want /items", c.name, got.URL.Path)
+		}
 	}
 }

@@ -95,7 +95,9 @@ func (a *API) handlePluginProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		a.Audit.Write(r.Context(), user.ID, "plugin.request", "plugin", name, remoteIP(r), detail)
 	}
-	a.Plugins.Proxy(name, w, r)
+	// The plugin is told the address and scheme the server middleware
+	// settled on, never the forwarding headers the client sent.
+	a.Plugins.Proxy(name, plugins.Client{IP: remoteIP(r), HTTPS: isTLS(r)}, w, r)
 }
 
 // stripCookie removes one cookie from the request and passes the rest on

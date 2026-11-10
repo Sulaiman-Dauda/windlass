@@ -3,32 +3,30 @@ package api
 import (
 	"context"
 	"net/http"
-	"strings"
 )
 
-// ForwardedProtoKey is the context key under which the server middleware
-// records whether the peer is a trusted proxy that sent
-// X-Forwarded-Proto: https. It lives here, exported, so internal/server
-// (which already imports internal/api) can set it and both packages read
-// the same value; internal/api cannot import internal/server, that would
-// be an import cycle.
-type ForwardedProtoKey struct{}
+// forwardedHTTPSKey is the context key for the server middleware's decision
+// that a trusted proxy forwarded this request from an HTTPS client.
+type forwardedHTTPSKey struct{}
 
-// SetForwardedProto records in the request context whether the peer is a
-// trusted proxy whose X-Forwarded-Proto header may be believed. The
-// server's trustedRealIP middleware calls it once, on the original peer,
-// before RemoteAddr is rewritten.
-func SetForwardedProto(r *http.Request, trusted bool) *http.Request {
-	return r.WithContext(context.WithValue(r.Context(), ForwardedProtoKey{}, trusted))
+// SetForwardedProto records whether a trusted proxy sent
+// X-Forwarded-Proto: https with this request. The server's trustedRealIP
+// middleware is the only caller: it decides on the original peer address,
+// before RemoteAddr is rewritten, so nothing downstream reads the raw
+// header. It lives here because internal/server imports internal/api and
+// both must read the same key.
+func SetForwardedProto(r *http.Request, https bool) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), forwardedHTTPSKey{}, https))
 }
 
-// ForwardedProto reports whether the request is HTTPS: either a direct TLS
-// connection (r.TLS != nil) or a trusted proxy's X-Forwarded-Proto: https.
-// A direct client's header is not believed.
+// ForwardedProto reports whether the client reached Windlass over HTTPS:
+// a direct TLS connection, or a trusted proxy that said so. A request that
+// never passed through trustedRealIP has no recorded decision and counts
+// as plain HTTP unless it is TLS itself.
 func ForwardedProto(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	trusted, ok := r.Context().Value(ForwardedProtoKey{}).(bool)
-	return ok && trusted && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	https, _ := r.Context().Value(forwardedHTTPSKey{}).(bool)
+	return https
 }
