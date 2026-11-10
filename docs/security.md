@@ -167,10 +167,33 @@ place of `amd64` on ARM servers.
 
 ### Updates from the panel
 
-**Software updates** under **Settings, System** downloads the new binary and checks it
-against the release's `checksums.txt`, and refuses a release that has none. It does not check the attestation, so
-it is protected against a corrupted download, not a rewritten release. Where that matters,
-verify the new version by hand first, as above.
+**Software updates** under **Settings, System** downloads the new binary and makes two checks
+before anything is swapped in. From v0.61 a binary that fails either is deleted and the running
+version stays.
+
+1. The SHA-256 matches the release's `checksums.txt`. This catches a broken download.
+2. GitHub holds build provenance for those exact bytes, and it verifies: signed through
+   Sigstore, recorded in its public transparency log, and issued to
+   `.github/workflows/release.yaml` in the update repository, running on a GitHub-hosted
+   runner at the tag being installed. This catches a rewritten release, and an older genuine
+   binary put up under a newer version.
+
+It is the check `gh attestation verify` makes, built into the panel. What it needs and where
+it stops:
+
+- The server must reach `api.github.com` and `tuf-repo-cdn.sigstore.dev`, where Sigstore
+  publishes its current signing keys. If either is unreachable the update is refused, not
+  waved through.
+- A private update repository (`WINDLASS_UPDATE_TOKEN`) is refused. GitHub signs private
+  repositories with its own Sigstore instance, which the panel does not trust yet.
+- A fork that releases from another workflow file is refused: the workflow path is fixed.
+- It trusts GitHub Actions, Sigstore and the release workflow at that tag. Someone who can
+  push a tag and have the real workflow build it gets a valid attestation.
+- The check runs in the version you are updating from. Versions before v0.61 check the
+  checksum only, so verify by hand, as above, when updating from one.
+
+When the panel refuses, it says why. Set `WINDLASS_NO_SELF_UPDATE=1` to take updates out of
+the panel, and install with `install.sh --binary` after verifying by hand.
 
 ## Reporting a vulnerability
 
