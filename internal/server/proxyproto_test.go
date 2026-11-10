@@ -89,3 +89,41 @@ func TestForwardedProtoOnlyFromTrustedProxies(t *testing.T) {
 		t.Error("direct TLS connection got no HSTS")
 	}
 }
+
+// A proxy may add its own X-Forwarded-For line instead of appending to the
+// client's (HAProxy's "option forwardfor" does). The client's line then comes
+// first, and reading only the first line would take the client's word.
+func TestClientAddressReadsEveryForwardedForLine(t *testing.T) {
+	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
+	for _, c := range []struct {
+		name   string
+		remote string
+		lines  []string
+		realIP string
+		want   string
+	}{
+		{"proxy adds its own line after the client's", "127.0.0.1:4000", []string{"6.6.6.6", "203.0.113.5"}, "", "203.0.113.5"},
+		{"proxy appends to the client's line", "127.0.0.1:4000", []string{"6.6.6.6, 203.0.113.5"}, "", "203.0.113.5"},
+		{"client sends two lines, proxy adds a third", "127.0.0.1:4000", []string{"6.6.6.6", "7.7.7.7", "203.0.113.5"}, "", "203.0.113.5"},
+		{"a second trusted hop on its own line", "127.0.0.1:4000", []string{"6.6.6.6", "203.0.113.5", "127.0.0.2"}, "", "203.0.113.5"},
+		{"only trusted hops, X-Real-IP is used", "127.0.0.1:4000", []string{"127.0.0.2"}, "203.0.113.5", "203.0.113.5"},
+		{"untrusted peer is never rewritten", "198.51.100.20:4000", []string{"6.6.6.6", "203.0.113.5"}, "6.6.6.6", "198.51.100.20:4000"},
+	} {
+		var got string
+		h := trustedRealIP([]*net.IPNet{loopback})(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			got = r.RemoteAddr
+		}))
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = c.remote
+		for _, line := range c.lines {
+			r.Header.Add("X-Forwarded-For", line)
+		}
+		if c.realIP != "" {
+			r.Header.Set("X-Real-IP", c.realIP)
+		}
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		if got != c.want {
+			t.Errorf("%s: client address = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

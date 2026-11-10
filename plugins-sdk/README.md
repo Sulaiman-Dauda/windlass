@@ -34,10 +34,14 @@ A plugin is an optional external process installed under
 - From v0.61, Windlass sets `X-Forwarded-For` to the one client address it settled on and
   `X-Forwarded-Proto` to `http` or `https`. It removes what the client sent in `Forwarded`,
   `X-Forwarded`, every `X-Forwarded-*` header, `X-Real-IP`, `X-Client-IP`, `Client-IP`,
-  `True-Client-IP`, `CF-Connecting-IP`, `X-Cluster-Client-IP` and
-  `X-Original-Forwarded-For`, in hyphen or underscore spelling. Read the client's address
-  and scheme from the two headers Windlass sets and from nowhere else. Before v0.61,
-  whatever the client sent in these headers reached the plugin unchanged.
+  `True-Client-IP`, `CF-Connecting-IP`, `X-Cluster-Client-IP`, `X-Original-Forwarded-For`,
+  `Fastly-Client-IP`, `X-Envoy-External-Address`, `X-Remote-Addr`, `X-Remote-IP`,
+  `X-ProxyUser-IP`, `X-Scheme`, `X-Url-Scheme`, `Front-End-Https`, `X-Original-Host` and
+  `X-Host`, in hyphen or underscore spelling. That is a list of known names, not every name
+  a framework might read, so read the client's address and scheme from the two headers
+  Windlass sets and from nowhere else. Before v0.61, whatever the client sent in these
+  headers reached the plugin unchanged.
+- The query string reaches the plugin exactly as the caller sent it, as it always has.
 - Windlass does not tell the plugin who the caller is. A plugin that needs to tell users
   apart, or to allow some writes to members and not others, has to run its own sign-in.
 - Windlass starts enabled plugins when it starts, and starts a plugin when it is enabled.

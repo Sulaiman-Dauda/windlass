@@ -108,8 +108,10 @@ func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
 			}
 
 			// Walk right-to-left: a trusted proxy appends the address it saw,
-			// while any client-supplied spoof is farther left.
-			forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+			// while any client-supplied spoof is farther left. Every header
+			// line counts, in order: a proxy may add a line of its own rather
+			// than extend the client's, which then stays first.
+			forwarded := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
 			for i := len(forwarded) - 1; i >= 0; i-- {
 				ip := net.ParseIP(strings.TrimSpace(forwarded[i]))
 				if ip != nil && !contains(ip) {

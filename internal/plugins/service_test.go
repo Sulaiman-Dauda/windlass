@@ -160,6 +160,17 @@ func TestProxySendsOnlyWindlassForwardedHeaders(t *testing.T) {
 		"CF-Connecting-IP":         "10.0.0.1",
 		"X-Client-IP":              "10.0.0.1",
 		"X-Original-Forwarded-For": "10.0.0.1",
+		"X-Scheme":                 "https",
+		"X-Url-Scheme":             "https",
+		"Front-End-Https":          "on",
+		"X-Forwarded-Ssl":          "on",
+		"Fastly-Client-IP":         "10.0.0.1",
+		"X-Envoy-External-Address": "10.0.0.1",
+		"X-Remote-Addr":            "10.0.0.1",
+		"X-Remote-IP":              "10.0.0.1",
+		"X-ProxyUser-IP":           "10.0.0.1",
+		"X-Original-Host":          "admin.internal",
+		"X-Host":                   "admin.internal",
 	}
 
 	for _, c := range []struct {
@@ -222,5 +233,77 @@ func TestProxySendsOnlyWindlassForwardedHeaders(t *testing.T) {
 		if got.URL.Path != "/items" {
 			t.Errorf("%s: path = %q, want /items", c.name, got.URL.Path)
 		}
+	}
+}
+
+// The plugin gets the query string exactly as the caller sent it. Go's
+// reverse proxy re-encodes a query it cannot parse cleanly and drops the
+// pairs it dislikes; Windlass does not read plugin queries, so it has no
+// reason to change them.
+func TestProxyLeavesTheQueryStringAlone(t *testing.T) {
+	arrived := make(chan string, 1)
+	plugin := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		arrived <- r.URL.RawQuery
+	}))
+	defer plugin.Close()
+	addr := strings.TrimPrefix(plugin.URL, "http://")
+	s, _ := newService(t)
+	s.running["good"] = &instance{addr: addr, proxy: newPluginProxy(addr, s.logger)}
+
+	for _, query := range []string{"", "b=2&a=1", "a=1;b=2", "q=50%", "q=a+b&q=%2f", "flag"} {
+		r := httptest.NewRequest(http.MethodGet, "http://panel.example.com/items", nil)
+		r.URL.RawQuery = query
+		rec := httptest.NewRecorder()
+		s.Proxy("good", Client{IP: "203.0.113.9"}, rec, r)
+		select {
+		case got := <-arrived:
+			if got != query {
+				t.Errorf("query %q reached the plugin as %q", query, got)
+			}
+		default:
+			t.Fatalf("query %q: the plugin got no request (status %d)", query, rec.Code)
+		}
+	}
+}
+
+// A client can declare a forwarding header as a trailer, after a chunked
+// body. It must not reach the plugin that way either.
+func TestProxyDropsForwardingTrailers(t *testing.T) {
+	arrived := make(chan http.Header, 1)
+	plugin := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		arrived <- r.Trailer.Clone()
+	}))
+	defer plugin.Close()
+	addr := strings.TrimPrefix(plugin.URL, "http://")
+	s, _ := newService(t)
+	s.running["good"] = &instance{addr: addr, proxy: newPluginProxy(addr, s.logger)}
+
+	// A real server in front, so the trailer goes through Go's own parsing.
+	panel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.Proxy("good", Client{IP: "203.0.113.9"}, w, r)
+	}))
+	defer panel.Close()
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(panel.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_, _ = io.WriteString(conn, "POST /items HTTP/1.1\r\nHost: panel.example.com\r\n"+
+		"Transfer-Encoding: chunked\r\nTrailer: X-Forwarded-For, X-Real-IP, X-Plugin-Sum\r\nConnection: close\r\n\r\n"+
+		"5\r\nhello\r\n0\r\nX-Forwarded-For: 10.0.0.1\r\nX-Real-IP: 10.0.0.1\r\nX-Plugin-Sum: abc\r\n\r\n")
+	_, _ = io.ReadAll(conn)
+
+	select {
+	case got := <-arrived:
+		for _, name := range []string{"X-Forwarded-For", "X-Real-Ip"} {
+			if _, ok := got[name]; ok {
+				t.Errorf("trailer %s reached the plugin: %q", name, got[name])
+			}
+		}
+		t.Logf("trailers the plugin saw: %v", got)
+	default:
+		t.Fatal("the plugin got no request")
 	}
 }

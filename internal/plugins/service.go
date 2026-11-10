@@ -264,10 +264,22 @@ func newPluginProxy(addr string, logger *slog.Logger) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
+			// The query goes through as the caller wrote it. Before calling
+			// Rewrite the reverse proxy re-encodes a query with a ";" or a
+			// bad escape and drops the pairs it cannot parse. That guards a
+			// proxy that reads the query itself; Windlass never does.
+			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
 			// The plugin keeps seeing the host the caller asked for.
 			pr.Out.Host = pr.In.Host
 			client, _ := pr.In.Context().Value(clientKey{}).(Client)
 			setForwardedHeaders(pr.Out.Header, client)
+			// A trailer the client declared is forwarded by name, so the
+			// same names are dropped there.
+			for name := range pr.Out.Trailer {
+				if isForwardingHeader(name) {
+					delete(pr.Out.Trailer, name)
+				}
+			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			logger.Warn("plugin proxy", "addr", addr, "error", err)
@@ -303,7 +315,10 @@ func isForwardingHeader(name string) bool {
 	switch name {
 	case "forwarded", "x-forwarded", "x-real-ip", "x-client-ip", "client-ip",
 		"true-client-ip", "cf-connecting-ip", "x-cluster-client-ip",
-		"x-original-forwarded-for":
+		"x-original-forwarded-for", "fastly-client-ip", "x-envoy-external-address",
+		"x-remote-addr", "x-remote-ip", "x-proxyuser-ip",
+		"x-scheme", "x-url-scheme", "front-end-https",
+		"x-original-host", "x-host":
 		return true
 	}
 	return strings.HasPrefix(name, "x-forwarded-")
