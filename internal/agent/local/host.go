@@ -121,6 +121,19 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 		// Existing checkout: fetch and hard-reset to the requested ref. The
 		// first clone is single-branch, so a plain fetch brings only that
 		// branch; naming the branch also fetches one chosen since.
+		//
+		// Point origin at the repository and branch asked for first. Without
+		// this, a repository changed in the Git tab is ignored: the fetch goes
+		// to the URL of the first clone and the deployment builds the old
+		// code without any error.
+		if err := run("remote", "set-url", "--", "origin", req.URL); err != nil {
+			return agent.GitSyncResult{}, fmt.Errorf("git remote set-url: %w", err)
+		}
+		if req.Branch != "" {
+			if err := run("remote", "set-branches", "--", "origin", req.Branch); err != nil {
+				return agent.GitSyncResult{}, fmt.Errorf("git remote set-branches: %w", err)
+			}
+		}
 		fetch := []string{"fetch", "--prune", "origin"}
 		if req.Branch != "" {
 			fetch = append(fetch, "+refs/heads/"+req.Branch+":refs/remotes/origin/"+req.Branch)

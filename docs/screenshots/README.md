@@ -13,9 +13,12 @@ view is shot in both themes so pages can pair them to the reader's preference.
 | Logs | `logs-light.png` | `logs-dark.png` |
 | Templates | `templates-light.png` | `templates-dark.png` |
 | Settings | `settings-light.png` | `settings-dark.png` |
+| AI agents, cropped to the page | `agents-light.png` | `agents-dark.png` |
 
 These are real deployments, not mockups: five Compose projects running nginx, PostgreSQL,
 Uptime Kuma, linkding and n8n, with Caddy in front and three domains routed.
+The AI agents shot is the one exception: taken on an empty instance and cropped to the page,
+with the panel domain answer stubbed to `windlass.example.com` so it shows the HTTPS state.
 
 ## Recordings
 

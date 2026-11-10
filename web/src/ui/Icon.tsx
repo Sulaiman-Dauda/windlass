@@ -60,6 +60,7 @@ const P = {
   more: <><circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" /><circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none" /></>,
   wrap: <><path d="M3 6h18M3 12h15a3 3 0 0 1 0 6h-4" /><path d="m16 16-2 2 2 2M3 18h7" /></>,
   edit: <><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="m13.5 6.5 4 4" /></>,
+  agent: <><rect x="4" y="7" width="16" height="13" rx="3" /><path d="M12 7V3.5M9.5 3.5h5" /><path d="M9 13v1.5M15 13v1.5" /><path d="M1.5 12.5v3M22.5 12.5v3" /></>,
   command: <path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z" />,
   sun: <><circle cx="12" cy="12" r="4.2" /><path d="M12 1.5v2.5M12 20v2.5M4.2 4.2 6 6M18 18l1.8 1.8M1.5 12H4M20 12h2.5M4.2 19.8 6 18M18 6l1.8-1.8" /></>,
   monitor: <><rect x="2.5" y="4" width="19" height="12.5" rx="2" /><path d="M8.5 20.5h7M12 16.5v4" /></>,

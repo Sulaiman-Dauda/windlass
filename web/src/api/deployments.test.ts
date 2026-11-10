@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { stageStates, summariseServices, type DeployEvent, type ServiceStatus } from "./deployments";
+import {
+  appendEvent,
+  EVENT_CAP,
+  paneTick,
+  stageStates,
+  summariseServices,
+  type DeployEvent,
+  type ServiceStatus,
+} from "./deployments";
 
 const step = (message: string, seq: number): DeployEvent => ({ seq, type: "step", message, ts: "" });
 
@@ -74,5 +82,23 @@ describe("summariseServices", () => {
     });
     expect(summariseServices([svc("running"), svc("exited", "", 1)])).toMatchObject({ tone: "warn", label: "Partial", running: 1, total: 2 });
     expect(summariseServices([migrate, migrate])).toMatchObject({ tone: "idle", label: "Stopped", running: 0, total: 2 });
+  });
+});
+
+describe("paneTick", () => {
+  it("keeps rising after the log reaches its cap, so the pane keeps following", () => {
+    const logLine = (seq: number): DeployEvent => ({ seq, type: "log", message: `line ${seq}`, ts: "" });
+    let log: DeployEvent[] = [];
+    for (let seq = 1; seq <= EVENT_CAP; seq++) log = appendEvent(log, logLine(seq));
+    const atCap = paneTick(log);
+
+    log = appendEvent(log, logLine(EVENT_CAP + 1));
+    expect(log.length).toBe(EVENT_CAP);
+    expect(log[0].seq).toBe(2);
+    expect(paneTick(log)).toBeGreaterThan(atCap);
+  });
+
+  it("is 0 for an empty log", () => {
+    expect(paneTick([])).toBe(0);
   });
 });

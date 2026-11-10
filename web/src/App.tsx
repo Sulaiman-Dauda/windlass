@@ -8,6 +8,7 @@ import Projects from "./pages/Projects";
 import ProjectDetail from "./pages/ProjectDetail";
 import Settings from "./pages/Settings";
 import Templates from "./pages/Templates";
+import Agents from "./pages/Agents";
 import NotFound from "./pages/NotFound";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
 import { WindlassMark } from "./ui/Logo";
@@ -58,6 +59,7 @@ export default function App() {
           }
         />
         <Route path="templates" element={<Templates />} />
+        <Route path="agents" element={<Agents />} />
         <Route path="settings" element={<Settings />} />
         <Route path="settings/:tab" element={<Settings />} />
         <Route path="*" element={<NotFound />} />

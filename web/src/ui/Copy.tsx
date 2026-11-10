@@ -61,6 +61,20 @@ export function CopyButton({
   );
 }
 
+/** Read-only multi-line snippet with a copy button, for config files and commands. */
+export function CopyBlock({ value, label = "Copy", className }: { value: string; label?: string; className?: string }) {
+  return (
+    <div className={cn("relative min-w-0 rounded-control border border-hairline bg-sunken", className)}>
+      <pre className="overflow-x-auto py-3 pl-3 pr-11 font-mono text-xs leading-5 text-fg2">
+        <code>{value}</code>
+      </pre>
+      <div className="absolute right-1.5 top-1.5">
+        <CopyButton value={value} label={label} />
+      </div>
+    </div>
+  );
+}
+
 /** Read-only value with a copy button, for URLs and secrets shown once. */
 export function CopyField({ value, className }: { value: string; className?: string }) {
   return (

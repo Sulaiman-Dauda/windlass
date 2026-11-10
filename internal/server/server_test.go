@@ -117,6 +117,9 @@ func newTestEnv(t *testing.T) *testEnv {
 		Queries:    queries,
 		Box:        box,
 		Logger:     logger,
+		// A stand-in, so the route coverage test sees /mcp; withMCP
+		// mounts the real server.
+		MCP: http.NotFoundHandler(),
 	}
 	h, err := New(config.Config{Addr: ":0", DataDir: dir}, logger, a)
 	if err != nil {

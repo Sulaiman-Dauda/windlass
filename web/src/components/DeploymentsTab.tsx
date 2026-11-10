@@ -7,6 +7,7 @@ import { usePromoteAction } from "./StagingCard";
 import {
   PIPELINE,
   useDeploymentEvents,
+  paneTick,
   useDeployments,
   useRollback,
   deploymentTone,
@@ -222,7 +223,7 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
         </Callout>
       )}
 
-      <TermPane tick={eventLog.length} className={cn("max-h-[62vh] min-h-[320px]", d.status === "failed" && d.error && "mt-4")}>
+      <TermPane tick={paneTick(eventLog)} className={cn("max-h-[62vh] min-h-[320px]", d.status === "failed" && d.error && "mt-4")}>
         {eventLog.map((ev) => (
           <div key={ev.seq} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4">
             <span className="select-none text-term-dim">{formatClock(ev.ts)}</span>

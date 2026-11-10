@@ -65,6 +65,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
       { id: "go:overview", group: "Go to", label: "Overview", icon: "overview", keywords: "dashboard home metrics", run: go("/") },
       { id: "go:projects", group: "Go to", label: "Projects", icon: "projects", run: go("/projects") },
       { id: "go:templates", group: "Go to", label: "Templates", icon: "templates", keywords: "database postgres app", run: go("/templates") },
+      { id: "go:agents", group: "Go to", label: "AI agents", icon: "agent", keywords: "mcp claude cursor codex vscode gemini zed llm", run: go("/agents") },
       { id: "go:settings", group: "Go to", label: "Settings", icon: "settings", run: go("/settings/general") },
       { id: "go:users", group: "Go to", label: "Settings / Users and sign-in", icon: "users", keywords: "2fa totp oauth github app", searchOnly: true, run: go("/settings/auth") },
     );

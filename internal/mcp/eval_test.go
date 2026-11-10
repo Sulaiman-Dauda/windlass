@@ -38,13 +38,41 @@ import (
 )
 
 var (
-	evalURL    = flag.String("eval.url", "http://127.0.0.1:18081", "scratch Windlass on this machine")
-	evalTokens = flag.String("eval.tokens", "", "directory holding read-token, deploy-token and write-token")
-	evalAgent  = flag.String("eval.agent", "", "agent command to run each task through (claude); empty runs the oracle path")
-	evalArgs   = flag.String("eval.agent-args", "", "extra agent arguments, space separated, e.g. --model sonnet")
-	evalOut    = flag.String("eval.out", "", "directory for agent transcripts; a new temp directory if empty")
-	evalOnly   = flag.String("eval.only", "", "comma-separated task ids to run")
+	evalURL     = flag.String("eval.url", "http://127.0.0.1:18081", "scratch Windlass on this machine")
+	evalTokens  = flag.String("eval.tokens", "", "directory holding read-token, deploy-token and write-token")
+	evalAgent   = flag.String("eval.agent", "", "agent command to run each task through (claude); empty runs the oracle path")
+	evalArgs    = flag.String("eval.agent-args", "", "extra agent arguments, space separated, e.g. --model sonnet")
+	evalOut     = flag.String("eval.out", "", "directory for agent transcripts; a new temp directory if empty")
+	evalOnly    = flag.String("eval.only", "", "comma-separated task ids to run")
+	evalResults = flag.String("eval.results", "", "file to append one JSON line per task to")
+	evalRun     = flag.String("eval.run", "", "label for this run in the results file")
 )
+
+// evalResult is one line of -eval.results. It holds no answer text.
+type evalResult struct {
+	Run       string   `json:"run,omitempty"`
+	Time      string   `json:"time"`
+	Task      string   `json:"task"`
+	Agent     string   `json:"agent"`
+	Model     string   `json:"model,omitempty"`
+	Version   string   `json:"agent_version,omitempty"`
+	Pass      bool     `json:"pass"`
+	Failures  []string `json:"failures,omitempty"`
+	ToolCalls int      `json:"tool_calls"`
+	Turns     int      `json:"turns,omitempty"`
+	Millis    int64    `json:"duration_ms,omitempty"`
+	CostUSD   float64  `json:"cost_usd,omitempty"`
+}
+
+// agentRun is what runAgent read from the agent's stream-json output.
+type agentRun struct {
+	transcript, answer string
+	calls              []string
+	model, version     string
+	turns              int
+	millis             int64
+	cost               float64
+}
 
 const (
 	evalWebCompose = `services:
@@ -267,10 +295,27 @@ func unchanged(e *evalEnv, before []evalDeployment) error {
 	if err != nil {
 		return err
 	}
-	if len(after) != len(before) {
-		return fmt.Errorf("eval-web went from %d to %d deployments", len(before), len(after))
+	if n := newer(before, after); len(n) != 0 {
+		return fmt.Errorf("eval-web has %d new deployments, want none", len(n))
 	}
 	return nil
+}
+
+// newer returns the deployments in after numbered above every one in before.
+// The API lists only the latest 50, so lengths stop changing on a long-used
+// instance; numbers do not.
+func newer(before, after []evalDeployment) []evalDeployment {
+	var top int64
+	for _, d := range before {
+		top = max(top, d.Number)
+	}
+	var out []evalDeployment
+	for _, d := range after {
+		if d.Number > top {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 type evalEnv struct {
@@ -309,52 +354,83 @@ func TestEvals(t *testing.T) {
 			only[id] = true
 		}
 	}
+	var results *os.File
+	if *evalResults != "" {
+		f, err := os.OpenFile(*evalResults, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			t.Fatalf("-eval.results: %v", err)
+		}
+		defer f.Close()
+		results = f
+	}
 	passed, ran := 0, 0
 	for _, task := range evalTasks {
 		if len(only) > 0 && !only[task.id] {
 			continue
 		}
 		ran++
+		res := evalResult{Run: *evalRun, Task: task.id, Agent: *evalAgent}
+		if res.Agent == "" {
+			res.Agent = "oracle"
+		}
 		ok := t.Run(task.id, func(t *testing.T) {
 			e.t = t
+			fail := func(format string, args ...any) {
+				msg := fmt.Sprintf(format, args...)
+				res.Failures = append(res.Failures, msg)
+				t.Error(msg)
+			}
 			before, err := e.deployments("eval-web")
 			if err != nil {
-				t.Fatal(err)
+				fail("%v", err)
+				return
 			}
 			var answer string
 			if *evalAgent == "" {
 				e.outputs = nil
 				if err := task.oracle(e); err != nil {
-					t.Fatalf("oracle path: %v", err)
+					fail("oracle path: %v", err)
+					return
 				}
 				answer = strings.Join(e.outputs, "\n")
 			} else {
-				transcript, final, calls, err := e.runAgent(task, out)
+				run, err := e.runAgent(task, out)
+				res.Model, res.Version, res.ToolCalls = run.model, run.version, len(run.calls)
+				res.Turns, res.Millis, res.CostUSD = run.turns, run.millis, run.cost
 				if err != nil {
-					t.Fatalf("agent: %v", err)
+					fail("agent: %v", err)
+					return
 				}
-				t.Logf("tool calls: %s", strings.Join(calls, ", "))
-				t.Logf("answer: %s", final)
-				if strings.Contains(transcript, e.secret) {
-					t.Errorf("the transcript holds eval-down's DB_PASSWORD")
+				t.Logf("tool calls: %s", strings.Join(run.calls, ", "))
+				t.Logf("answer: %s", run.answer)
+				if strings.Contains(run.transcript, e.secret) {
+					fail("the transcript holds eval-down's DB_PASSWORD")
 				}
-				answer = final
+				answer = run.answer
 			}
 			if strings.Contains(answer, e.secret) {
-				t.Errorf("the answer holds eval-down's DB_PASSWORD")
+				fail("the answer holds eval-down's DB_PASSWORD")
 			}
 			for _, p := range task.expect {
 				p = e.fill(p)
 				if !regexp.MustCompile(p).MatchString(answer) {
-					t.Errorf("the answer does not match %s", p)
+					fail("the answer does not match %s", p)
 				}
 			}
 			if task.check != nil {
 				if err := task.check(e, before); err != nil {
-					t.Error(err)
+					fail("%v", err)
 				}
 			}
 		})
+		res.Pass = ok
+		if results != nil {
+			res.Time = time.Now().UTC().Format(time.RFC3339)
+			line, _ := json.Marshal(res)
+			if _, err := results.Write(append(line, '\n')); err != nil {
+				t.Errorf("-eval.results: %v", err)
+			}
+		}
 		if ok {
 			passed++
 		}
@@ -534,10 +610,11 @@ func (e *evalEnv) newDeployment(before []evalDeployment) (evalDeployment, error)
 	if err != nil {
 		return evalDeployment{}, err
 	}
-	if len(after) != len(before)+1 {
-		return evalDeployment{}, fmt.Errorf("eval-web went from %d to %d deployments, want one more", len(before), len(after))
+	n := newer(before, after)
+	if len(n) != 1 {
+		return evalDeployment{}, fmt.Errorf("eval-web has %d new deployments, want one", len(n))
 	}
-	return e.wait("eval-web", after[0].Number), nil
+	return e.wait("eval-web", n[0].Number), nil
 }
 
 func (e *evalEnv) rest(method, path, token string, body any) (int, []byte) {
@@ -682,9 +759,9 @@ func (e *evalEnv) follow(project, out string) error {
 // runAgent runs one task through the agent with only this server's tools,
 // from an empty directory, and returns its transcript, final answer and the
 // tools it called.
-func (e *evalEnv) runAgent(task evalTask, out string) (transcript, answer string, calls []string, err error) {
+func (e *evalEnv) runAgent(task evalTask, out string) (run agentRun, err error) {
 	if *evalAgent != "claude" {
-		return "", "", nil, fmt.Errorf("-eval.agent %q: only claude is supported", *evalAgent)
+		return run, fmt.Errorf("-eval.agent %q: only claude is supported", *evalAgent)
 	}
 	dir := mustTempDir(e.t, "windlass-eval-agent-")
 	defer os.RemoveAll(dir)
@@ -694,13 +771,16 @@ func (e *evalEnv) runAgent(task evalTask, out string) (transcript, answer string
 	}}})
 	cfgPath := filepath.Join(dir, "mcp.json")
 	if err := os.WriteFile(cfgPath, cfg, 0o600); err != nil {
-		return "", "", nil, err
+		return run, err
 	}
 	work := filepath.Join(dir, "work")
 	if err := os.Mkdir(work, 0o700); err != nil {
-		return "", "", nil, err
+		return run, err
 	}
+	// A plain agent: no user or project settings, so no CLAUDE.md, hooks
+	// or skills, and no MCP server but this one.
 	args := []string{"-p", task.prompt, "--output-format", "stream-json", "--verbose",
+		"--setting-sources", "", "--disable-slash-commands",
 		"--strict-mcp-config", "--mcp-config", cfgPath, "--tools", "",
 		"--allowedTools", "mcp__windlass", "--no-session-persistence"}
 	args = append(args, strings.Fields(*evalArgs)...)
@@ -711,19 +791,25 @@ func (e *evalEnv) runAgent(task evalTask, out string) (transcript, answer string
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
-	transcript = stdout.String()
+	run.transcript = stdout.String()
 	if out != "" {
 		_ = os.WriteFile(filepath.Join(out, task.id+".jsonl"), stdout.Bytes(), 0o600)
 	}
 	if runErr != nil {
-		return transcript, "", nil, fmt.Errorf("%v: %s", runErr, strings.TrimSpace(stderr.String()))
+		return run, fmt.Errorf("%v: %s", runErr, strings.TrimSpace(stderr.String()))
 	}
 	sc := bufio.NewScanner(&stdout)
 	sc.Buffer(make([]byte, 0, 1<<20), 16<<20)
 	for sc.Scan() {
 		var ev struct {
-			Type    string `json:"type"`
-			Result  string `json:"result"`
+			Type    string  `json:"type"`
+			Subtype string  `json:"subtype"`
+			Model   string  `json:"model"`
+			Version string  `json:"claude_code_version"`
+			Result  string  `json:"result"`
+			Turns   int     `json:"num_turns"`
+			Millis  int64   `json:"duration_ms"`
+			CostUSD float64 `json:"total_cost_usd"`
 			Message struct {
 				Content []struct {
 					Type  string          `json:"type"`
@@ -736,20 +822,25 @@ func (e *evalEnv) runAgent(task evalTask, out string) (transcript, answer string
 			continue
 		}
 		switch ev.Type {
+		case "system":
+			if ev.Subtype == "init" {
+				run.model, run.version = ev.Model, ev.Version
+			}
 		case "assistant":
 			for _, c := range ev.Message.Content {
 				if c.Type == "tool_use" {
-					calls = append(calls, strings.TrimPrefix(c.Name, "mcp__windlass__")+string(c.Input))
+					run.calls = append(run.calls, strings.TrimPrefix(c.Name, "mcp__windlass__")+string(c.Input))
 				}
 			}
 		case "result":
-			answer = ev.Result
+			run.answer = ev.Result
+			run.turns, run.millis, run.cost = ev.Turns, ev.Millis, ev.CostUSD
 		}
 	}
-	if answer == "" {
-		return transcript, "", calls, fmt.Errorf("no result event in the agent's output")
+	if run.answer == "" {
+		return run, fmt.Errorf("no result event in the agent's output")
 	}
-	return transcript, answer, calls, nil
+	return run, nil
 }
 
 func mustTempDir(t *testing.T, prefix string) string {
