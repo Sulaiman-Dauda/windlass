@@ -27,15 +27,25 @@ export const LOG_CAP = 2000;
  * that signal.
  */
 export interface LogBuffer {
-  lines: LogLine[];
+  lines: KeptLine[];
   received: number;
 }
 
+/**
+ * A kept line with its place in the stream. `seq` is the row's React key, so
+ * a row keeps its DOM node when older lines are dropped and TermPane can hold
+ * a reader's place. An index key would hand every row the next line's text.
+ */
+export interface KeptLine extends LogLine {
+  seq: number;
+}
+
 export function appendLogLine(buf: LogBuffer, line: LogLine): LogBuffer {
-  const next = [...buf.lines, line];
+  const received = buf.received + 1;
+  const next = [...buf.lines, { ...line, seq: received }];
   return {
     lines: next.length > LOG_CAP ? next.slice(-LOG_CAP) : next,
-    received: buf.received + 1,
+    received,
   };
 }
 
@@ -171,8 +181,8 @@ function LogStream({
         </div>
       </div>
       <TermPane tick={buf.received} follow={follow} wrap={wrap} className="h-[max(360px,calc(100dvh-360px))]">
-        {shown.map((l, i) => (
-          <div key={i} className={l.stream === "stderr" ? "text-term-warn" : undefined}>
+        {shown.map((l) => (
+          <div key={l.seq} className={l.stream === "stderr" ? "text-term-warn" : undefined}>
             {l.text || " "}
           </div>
         ))}
