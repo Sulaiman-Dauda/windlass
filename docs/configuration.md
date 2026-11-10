@@ -25,16 +25,17 @@ Environment=WINDLASS_LOG_LEVEL=debug
 | `WINDLASS_LOG_LEVEL` | Default `info`. One of `debug`, `info`, `warn`, `error`. An unrecognised value is a startup error rather than a silent fallback. |
 | `WINDLASS_CADDY_ADMIN` | Default `http://127.0.0.1:2019`. Caddy admin API. Set this when Caddy runs in a container: `http://caddy:2019`. |
 | `WINDLASS_PANEL_UPSTREAM` | Default `127.0.0.1:8080`. The address Caddy dials to reach the panel, used by the Settings-managed panel hostname. Change it when Caddy is not on the host network. |
-| `WINDLASS_TRUSTED_PROXIES` | Default `127.0.0.0/8,::1/128`. Sources whose `X-Forwarded-For` and `X-Real-IP` headers Windlass believes when it records a client's address. The default covers the recommended local Caddy. Widen it only for a proxy you control. |
+| `WINDLASS_TRUSTED_PROXIES` | Default `127.0.0.0/8,::1/128`. Sources whose `X-Forwarded-For`, `X-Real-IP` and `X-Forwarded-Proto` headers Windlass believes when it records a client's address and decides whether the request is HTTPS (HSTS, Secure cookies). The default covers the recommended local Caddy. Widen it only for a proxy you control. |
 | `WINDLASS_UPDATE_REPO` | Default `Sulaiman-Dauda/windlass`. Repository checked for releases. |
 | `WINDLASS_UPDATE_TOKEN` | Unset by default. Authenticates release checks and downloads. Required only for a private update repository. Windlass removes it from its environment once read, so Compose, Git and plugins never see it. |
 | `WINDLASS_NO_SELF_UPDATE` | Unset by default. Any non-empty value disables self-update. Useful when a package manager or image tag owns the version. The panel still shows when a new version exists, without the Update now button. |
 | `DOCKER_HOST` | Defaults to Docker's own socket. Where Windlass and the `docker compose` it runs reach Docker. The installer sets `tcp://127.0.0.1:2375`, the restricted socket proxy, and the container install points it at the proxy service. |
 
-`WINDLASS_TRUSTED_PROXIES` decides whether a client-supplied `X-Forwarded-For` is believed.
-Trusting an address you do not control lets a client claim any source IP, which matters
-wherever an IP is used for a decision or an audit entry. The default trusts loopback only,
-which is right for Caddy on the same host.
+`WINDLASS_TRUSTED_PROXIES` decides whether client-supplied `X-Forwarded-For` and
+`X-Forwarded-Proto` are believed. Trusting an address you do not control lets a client
+claim any source IP (which matters wherever an IP is used for a decision or an audit
+entry) or claim HTTPS it does not have (which would earn it HSTS and Secure cookies over
+plain HTTP). The default trusts loopback only, which is right for Caddy on the same host.
 
 ## Settings in the panel
 

@@ -94,6 +94,7 @@ func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r = withForwardedProto(r, trusted)
 			peer := r.RemoteAddr
 			if host, _, err := net.SplitHostPort(peer); err == nil {
 				peer = host
@@ -162,7 +163,7 @@ func securityHeaders(scriptHashes []string) func(http.Handler) http.Handler {
 			h.Set("Referrer-Policy", "same-origin")
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("X-Frame-Options", "DENY")
-			if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			if ForwardedProto(r) {
 				h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			}
 			next.ServeHTTP(w, r)
