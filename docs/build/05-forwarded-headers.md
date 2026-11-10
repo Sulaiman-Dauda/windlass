@@ -45,6 +45,48 @@ Settled during the build 10/11/2026, flagged for Pablo:
 - **Audit format.** A direct IPv6 client is recorded as `2001:db8::1`, no longer
   `[2001:db8::1]`.
 
+## Review follow-up
+
+A fresh Opus pass on the merged code (10/11/2026, after #111) gave four leads. Each was
+checked against the code with a test that failed on main, then fixed on
+`fix/forwarded-headers-review`:
+
+- **Every `X-Forwarded-For` line is read.** `trustedRealIP` read only the first line. Behind
+  a proxy that adds a line of its own, such as HAProxy's `option forwardfor`, the first line
+  is the client's, so a client could choose the address in the audit log, the rate limiter
+  and the plugin's `X-Forwarded-For`. Caddy appends to one line, so the recommended install
+  was not exposed. Older than #95.
+- **The plugin's query string is left alone.** In Rewrite mode Go re-encodes a query that
+  holds a `;` or a bad escape and drops what it cannot parse: `a=1;b=2` and `q=50%` reached
+  the plugin empty. #111 introduced that. The raw query is copied across again.
+- **Ten more header names are removed**: scheme claims (`X-Scheme`, `X-Url-Scheme`,
+  `Front-End-Https`), address claims (`Fastly-Client-IP`, `X-Envoy-External-Address`,
+  `X-Remote-Addr`, `X-Remote-IP`, `X-ProxyUser-IP`) and host claims (`X-Original-Host`,
+  `X-Host`). Still a denylist.
+- **Forwarding names are dropped from request trailers.** Go passed the name on with no
+  value, so nothing could be claimed that way; it is removed all the same.
+
+A second fresh pass, on this follow-up, found three more. Each was confirmed with a failing
+test first:
+
+- **An `X-Forwarded-For` entry that is not an address ended the trust, not the walk.** The
+  walk skipped it and took the entry to its left, which the client wrote. A proxy that
+  appends `203.0.113.5:4411`, a bracketed IPv6 address or `unknown` gave the client its pick
+  of address. Caddy writes a bare address, so the recommended install was not exposed. An
+  address with a port or brackets is now read; anything else stops the walk and the address
+  that connected stands.
+- **`X-Real-IP` was believed beside `X-Forwarded-For`.** When every `X-Forwarded-For` entry
+  was a trusted proxy, or none parsed, the client's own `X-Real-IP` was used, and Caddy does
+  not remove one. It is now read only when there is no `X-Forwarded-For` at all, from its
+  last line. With only trusted entries the farthest one is the client. This changes one
+  setup: a proxy that sends both headers and puts the real client only in `X-Real-IP`.
+- **22 more header names are removed**, among them `X-Original-URL` and `X-Rewrite-URL`,
+  which some frameworks route on in place of the request line, and the `HTTP_` spelling.
+  Still a denylist.
+
+Known and left: a request trailer's value never reaches a plugin, only its name, because
+Go's reverse proxy copies the trailer map before the body is read. That is older than #111.
+
 ## Touches
 
 `internal/server/server.go`, `internal/server/proxyproto.go`,
@@ -65,5 +107,26 @@ Settled during the build 10/11/2026, flagged for Pablo:
   when the last of two values is `http`
 - [x] A real plugin that prints its request headers, behind the proxy: it saw the two
   headers and none of seven spoofed ones, `Connection` naming both included
-- [ ] Not run behind a real Caddy with this build; CI's integration job covers Caddy routing,
-  not sign-in cookies
+- [x] Behind a real Caddy 2.11.8 with main at 35a398b (10/11/2026): `Secure` and HSTS over
+  HTTPS, neither over HTTP, a client's own `X-Forwarded-Proto` ignored both ways, and neither
+  once Caddy's address is not in `WINDLASS_TRUSTED_PROXIES`
+- [x] Review follow-up: the four new tests fail on main and pass on the branch
+
+## Warning for a proxy nobody named
+
+Built 10/11/2026 on Pablo's go, for the installs v0.61 changes without telling them.
+`trustedRealIP` logs one warning for each private address outside `WINDLASS_TRUSTED_PROXIES`
+that sends `X-Forwarded-Proto` or `X-Forwarded-For`, at most 16 between restarts. Public
+addresses are left out so a scanner cannot use the warnings up or fill the log.
+`docs/upgrading.md` is new and carries the v0.61 notes.
+
+Checked with Windlass and Caddy 2.11.8 as two containers on one Podman network, scratch data:
+
+| | default | Caddy's address trusted |
+|---|---|---|
+| Session cookie `Secure` | no | yes |
+| HSTS | no | yes |
+| OAuth `redirect_uri` | `http://` | `https://` |
+| Warnings over 8 requests | 1, naming Caddy | 0 |
+
+Not checked: whether GitHub refuses the `http://` callback. That needs a real OAuth app.

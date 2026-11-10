@@ -15,6 +15,14 @@ describe("appendLogLine", () => {
     expect(buf.lines[buf.lines.length - 1].text).toBe("newest");
     expect(buf.received).toBe(before + 1);
   });
+
+  it("numbers each line once, so a row's key survives older lines being dropped", () => {
+    let buf: LogBuffer = { lines: [], received: 0 };
+    for (let i = 0; i < LOG_CAP + 5; i++) buf = appendLogLine(buf, { stream: "stdout", text: `line ${i}` });
+    expect(buf.lines[0]).toMatchObject({ seq: 6, text: "line 5" });
+    expect(buf.lines[buf.lines.length - 1].seq).toBe(LOG_CAP + 5);
+    expect(new Set(buf.lines.map((l) => l.seq)).size).toBe(LOG_CAP);
+  });
 });
 
 describe("LogStream pane wiring", () => {

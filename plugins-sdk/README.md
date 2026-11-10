@@ -33,11 +33,16 @@ A plugin is an optional external process installed under
   left out, and reads are not recorded.
 - From v0.61, Windlass sets `X-Forwarded-For` to the one client address it settled on and
   `X-Forwarded-Proto` to `http` or `https`. It removes what the client sent in `Forwarded`,
-  `X-Forwarded`, every `X-Forwarded-*` header, `X-Real-IP`, `X-Client-IP`, `Client-IP`,
-  `True-Client-IP`, `CF-Connecting-IP`, `X-Cluster-Client-IP` and
-  `X-Original-Forwarded-For`, in hyphen or underscore spelling. Read the client's address
-  and scheme from the two headers Windlass sets and from nowhere else. Before v0.61,
-  whatever the client sent in these headers reached the plugin unchanged.
+  `X-Forwarded`, every `X-Forwarded-*` header, and 39 other names that proxies and CDNs use
+  for the client's address (`X-Real-IP`, `True-Client-IP`, `CF-Connecting-IP` and the like),
+  the scheme (`X-Scheme`, `Front-End-Https`, `CF-Visitor`), the host (`X-Original-Host`,
+  `X-Host`) and the requested URL (`X-Original-URL`, `X-Rewrite-URL`), in hyphen or
+  underscore spelling. `isForwardingHeader` in `internal/plugins/service.go` has the whole
+  list. It is a list of known names, not every name a framework might read, so read the
+  client's address and scheme from the two headers Windlass sets and from nowhere else.
+  Before v0.61, whatever the client sent in these headers reached the plugin unchanged.
+- A request trailer reaches the plugin as a name with no value, as it always has.
+- The query string reaches the plugin exactly as the caller sent it, as it always has.
 - Windlass does not tell the plugin who the caller is. A plugin that needs to tell users
   apart, or to allow some writes to members and not others, has to run its own sign-in.
 - Windlass starts enabled plugins when it starts, and starts a plugin when it is enabled.

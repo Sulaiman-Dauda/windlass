@@ -7,6 +7,7 @@ A Compose control plane that does not own your containers.
 - [Getting started](./getting-started.md), install, claim, deploy and route a first
   project on a real server
 - [Install](./install.md), the installation methods in detail
+- [Upgrading](./upgrading.md), what to check when you move to a new version
 
 ## Using it
 

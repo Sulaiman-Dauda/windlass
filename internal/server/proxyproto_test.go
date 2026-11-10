@@ -1,9 +1,13 @@
 package server
 
 import (
+	"bytes"
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -15,7 +19,7 @@ func TestForwardedProtoOnlyFromTrustedProxies(t *testing.T) {
 	trusted := []*net.IPNet{loopback}
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	h := trustedRealIP(trusted)(securityHeaders(nil)(next))
+	h := trustedRealIP(trusted, slog.New(slog.DiscardHandler))(securityHeaders(nil)(next))
 
 	do := func(remoteAddr, proto string, forwardedFor ...string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -87,5 +91,159 @@ func TestForwardedProtoOnlyFromTrustedProxies(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Header().Get("Strict-Transport-Security") == "" {
 		t.Error("direct TLS connection got no HSTS")
+	}
+}
+
+// A proxy may add its own X-Forwarded-For line instead of appending to the
+// client's (HAProxy's "option forwardfor" does). The client's line then comes
+// first, and reading only the first line would take the client's word.
+func TestClientAddressReadsEveryForwardedForLine(t *testing.T) {
+	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
+	for _, c := range []struct {
+		name   string
+		remote string
+		lines  []string
+		realIP string
+		want   string
+	}{
+		{"proxy adds its own line after the client's", "127.0.0.1:4000", []string{"6.6.6.6", "203.0.113.5"}, "", "203.0.113.5"},
+		{"proxy appends to the client's line", "127.0.0.1:4000", []string{"6.6.6.6, 203.0.113.5"}, "", "203.0.113.5"},
+		{"client sends two lines, proxy adds a third", "127.0.0.1:4000", []string{"6.6.6.6", "7.7.7.7", "203.0.113.5"}, "", "203.0.113.5"},
+		{"a second trusted hop on its own line", "127.0.0.1:4000", []string{"6.6.6.6", "203.0.113.5", "127.0.0.2"}, "", "203.0.113.5"},
+		{"only trusted hops: the farthest one, not X-Real-IP", "127.0.0.1:4000", []string{"127.0.0.3", "127.0.0.2"}, "6.6.6.6", "127.0.0.3"},
+		{"untrusted peer is never rewritten", "198.51.100.20:4000", []string{"6.6.6.6", "203.0.113.5"}, "6.6.6.6", "198.51.100.20:4000"},
+	} {
+		var got string
+		h := trustedRealIP([]*net.IPNet{loopback}, slog.New(slog.DiscardHandler))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			got = r.RemoteAddr
+		}))
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = c.remote
+		for _, line := range c.lines {
+			r.Header.Add("X-Forwarded-For", line)
+		}
+		if c.realIP != "" {
+			r.Header.Set("X-Real-IP", c.realIP)
+		}
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		if got != c.want {
+			t.Errorf("%s: client address = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// A proxy's own entry is not always a bare address. Skipping one that does
+// not parse would land on the entry to its left, which the client wrote.
+func TestClientAddressStopsAtAnEntryItCannotRead(t *testing.T) {
+	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
+	for _, c := range []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"address with a port", []string{"6.6.6.6, 203.0.113.5:4411"}, "203.0.113.5"},
+		{"bracketed IPv6", []string{"6.6.6.6, [2001:db8::5]"}, "2001:db8::5"},
+		{"bracketed IPv6 with a port", []string{"6.6.6.6, [2001:db8::5]:4411"}, "2001:db8::5"},
+		{"unknown", []string{"6.6.6.6, unknown"}, "127.0.0.1:4000"},
+		{"IPv6 with a zone", []string{"6.6.6.6, fe80::1%eth0"}, "127.0.0.1:4000"},
+		{"an empty entry", []string{"6.6.6.6,"}, "127.0.0.1:4000"},
+		{"unreadable entry behind a trusted hop", []string{"6.6.6.6, unknown, 127.0.0.2"}, "127.0.0.2"},
+		{"unreadable entry on its own line", []string{"6.6.6.6", "unknown"}, "127.0.0.1:4000"},
+	} {
+		var got string
+		h := trustedRealIP([]*net.IPNet{loopback}, slog.New(slog.DiscardHandler))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			got = r.RemoteAddr
+		}))
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = "127.0.0.1:4000"
+		for _, line := range c.lines {
+			r.Header.Add("X-Forwarded-For", line)
+		}
+		// Never believed while X-Forwarded-For is present.
+		r.Header.Set("X-Real-IP", "6.6.6.6")
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		if got != c.want {
+			t.Errorf("%s: client address = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// X-Real-IP is for a proxy that sends no X-Forwarded-For at all. Its last
+// line counts: a proxy that adds a line leaves the client's first.
+func TestClientAddressFromRealIP(t *testing.T) {
+	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
+	for _, c := range []struct {
+		name   string
+		remote string
+		xff    string
+		realIP []string
+		want   string
+	}{
+		{"no X-Forwarded-For", "127.0.0.1:4000", "", []string{"203.0.113.5"}, "203.0.113.5"},
+		{"proxy adds its own line", "127.0.0.1:4000", "", []string{"6.6.6.6", "203.0.113.5"}, "203.0.113.5"},
+		{"not an address", "127.0.0.1:4000", "", []string{"unknown"}, "127.0.0.1:4000"},
+		{"beside a trusted X-Forwarded-For", "127.0.0.1:4000", "127.0.0.1", []string{"6.6.6.6"}, "127.0.0.1"},
+		{"beside an unreadable X-Forwarded-For", "127.0.0.1:4000", "junk", []string{"6.6.6.6"}, "127.0.0.1:4000"},
+		{"untrusted peer", "198.51.100.20:4000", "", []string{"6.6.6.6"}, "198.51.100.20:4000"},
+	} {
+		var got string
+		h := trustedRealIP([]*net.IPNet{loopback}, slog.New(slog.DiscardHandler))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			got = r.RemoteAddr
+		}))
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = c.remote
+		if c.xff != "" {
+			r.Header.Set("X-Forwarded-For", c.xff)
+		}
+		for _, line := range c.realIP {
+			r.Header.Add("X-Real-IP", line)
+		}
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		if got != c.want {
+			t.Errorf("%s: client address = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// A reverse proxy nobody named in WINDLASS_TRUSTED_PROXIES is ignored, and
+// that has to show in the log: once for each address, and only for private
+// ones, so a scanner on the internet cannot flood it.
+func TestIgnoredProxyIsLoggedOnce(t *testing.T) {
+	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
+	var log bytes.Buffer
+	h := trustedRealIP([]*net.IPNet{loopback}, slog.New(slog.NewTextHandler(&log, nil)))(
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	send := func(remote, header, value string) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = remote
+		if header != "" {
+			r.Header.Set(header, value)
+		}
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}
+	warnings := func() int { return strings.Count(log.String(), "WINDLASS_TRUSTED_PROXIES") }
+
+	send("172.18.0.3:40000", "", "")
+	send("203.0.113.9:40000", "X-Forwarded-Proto", "https")
+	send("127.0.0.1:40000", "X-Forwarded-Proto", "https")
+	if warnings() != 0 {
+		t.Fatalf("a plain request, a public address or a trusted proxy was logged:\n%s", log.String())
+	}
+
+	send("172.18.0.3:40000", "X-Forwarded-Proto", "https")
+	send("172.18.0.3:40001", "X-Forwarded-For", "198.51.100.4")
+	if warnings() != 1 || !strings.Contains(log.String(), "address=172.18.0.3") {
+		t.Fatalf("want one warning naming 172.18.0.3, got %d:\n%s", warnings(), log.String())
+	}
+	send("[fd00::5]:40000", "X-Forwarded-For", "198.51.100.4")
+	if warnings() != 2 || !strings.Contains(log.String(), "address=fd00::5") {
+		t.Fatalf("want a second warning naming fd00::5, got %d:\n%s", warnings(), log.String())
+	}
+
+	for i := range 40 {
+		send(fmt.Sprintf("10.0.0.%d:40000", i+1), "X-Forwarded-Proto", "https")
+	}
+	if warnings() != maxIgnoredProxies {
+		t.Fatalf("warnings = %d, want the cap of %d", warnings(), maxIgnoredProxies)
 	}
 }

@@ -37,6 +37,10 @@ claim any source IP (which matters wherever an IP is used for a decision or an a
 entry) or claim HTTPS it does not have (which would earn it HSTS and Secure cookies over
 plain HTTP). The default trusts loopback only, which is right for Caddy on the same host.
 
+When a private address outside the list sends either header, Windlass ignores them and logs
+a warning naming the address, once for each address. That is usually a reverse proxy the
+setting does not cover yet: see [Upgrading](./upgrading.md).
+
 ## Settings in the panel
 
 These are not environment variables, and they are stored in SQLite. Credentials among
