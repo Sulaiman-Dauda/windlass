@@ -137,7 +137,8 @@ from the Caddy/Windlass networks.
 Caddy's requests do not arrive from loopback in this layout, so Windlass treats every request
 as plain HTTP until told otherwise: sign-in cookies are not marked `Secure`, and OAuth
 callback, GitHub App and webhook URLs are built with `http://`. Set `WINDLASS_TRUSTED_PROXIES`
-to the one address Caddy's requests arrive from, as the Windlass container sees it.
+to the one address Caddy's requests arrive from, as the Windlass container sees it. Windlass
+logs a warning that names it the first time Caddy forwards a request.
 
 Trust a single address, never a whole Docker network: every container on a trusted network
 can claim any client address and claim HTTPS. If that address is the network's gateway, also

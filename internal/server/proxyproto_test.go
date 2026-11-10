@@ -1,9 +1,13 @@
 package server
 
 import (
+	"bytes"
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -15,7 +19,7 @@ func TestForwardedProtoOnlyFromTrustedProxies(t *testing.T) {
 	trusted := []*net.IPNet{loopback}
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
-	h := trustedRealIP(trusted)(securityHeaders(nil)(next))
+	h := trustedRealIP(trusted, slog.New(slog.DiscardHandler))(securityHeaders(nil)(next))
 
 	do := func(remoteAddr, proto string, forwardedFor ...string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -110,7 +114,7 @@ func TestClientAddressReadsEveryForwardedForLine(t *testing.T) {
 		{"untrusted peer is never rewritten", "198.51.100.20:4000", []string{"6.6.6.6", "203.0.113.5"}, "6.6.6.6", "198.51.100.20:4000"},
 	} {
 		var got string
-		h := trustedRealIP([]*net.IPNet{loopback})(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		h := trustedRealIP([]*net.IPNet{loopback}, slog.New(slog.DiscardHandler))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			got = r.RemoteAddr
 		}))
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -147,7 +151,7 @@ func TestClientAddressStopsAtAnEntryItCannotRead(t *testing.T) {
 		{"unreadable entry on its own line", []string{"6.6.6.6", "unknown"}, "127.0.0.1:4000"},
 	} {
 		var got string
-		h := trustedRealIP([]*net.IPNet{loopback})(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		h := trustedRealIP([]*net.IPNet{loopback}, slog.New(slog.DiscardHandler))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			got = r.RemoteAddr
 		}))
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -183,7 +187,7 @@ func TestClientAddressFromRealIP(t *testing.T) {
 		{"untrusted peer", "198.51.100.20:4000", "", []string{"6.6.6.6"}, "198.51.100.20:4000"},
 	} {
 		var got string
-		h := trustedRealIP([]*net.IPNet{loopback})(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		h := trustedRealIP([]*net.IPNet{loopback}, slog.New(slog.DiscardHandler))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			got = r.RemoteAddr
 		}))
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -198,5 +202,48 @@ func TestClientAddressFromRealIP(t *testing.T) {
 		if got != c.want {
 			t.Errorf("%s: client address = %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+// A reverse proxy nobody named in WINDLASS_TRUSTED_PROXIES is ignored, and
+// that has to show in the log: once for each address, and only for private
+// ones, so a scanner on the internet cannot flood it.
+func TestIgnoredProxyIsLoggedOnce(t *testing.T) {
+	_, loopback, _ := net.ParseCIDR("127.0.0.0/8")
+	var log bytes.Buffer
+	h := trustedRealIP([]*net.IPNet{loopback}, slog.New(slog.NewTextHandler(&log, nil)))(
+		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	send := func(remote, header, value string) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = remote
+		if header != "" {
+			r.Header.Set(header, value)
+		}
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}
+	warnings := func() int { return strings.Count(log.String(), "WINDLASS_TRUSTED_PROXIES") }
+
+	send("172.18.0.3:40000", "", "")
+	send("203.0.113.9:40000", "X-Forwarded-Proto", "https")
+	send("127.0.0.1:40000", "X-Forwarded-Proto", "https")
+	if warnings() != 0 {
+		t.Fatalf("a plain request, a public address or a trusted proxy was logged:\n%s", log.String())
+	}
+
+	send("172.18.0.3:40000", "X-Forwarded-Proto", "https")
+	send("172.18.0.3:40001", "X-Forwarded-For", "198.51.100.4")
+	if warnings() != 1 || !strings.Contains(log.String(), "address=172.18.0.3") {
+		t.Fatalf("want one warning naming 172.18.0.3, got %d:\n%s", warnings(), log.String())
+	}
+	send("[fd00::5]:40000", "X-Forwarded-For", "198.51.100.4")
+	if warnings() != 2 || !strings.Contains(log.String(), "address=fd00::5") {
+		t.Fatalf("want a second warning naming fd00::5, got %d:\n%s", warnings(), log.String())
+	}
+
+	for i := range 40 {
+		send(fmt.Sprintf("10.0.0.%d:40000", i+1), "X-Forwarded-Proto", "https")
+	}
+	if warnings() != maxIgnoredProxies {
+		t.Fatalf("warnings = %d, want the cap of %d", warnings(), maxIgnoredProxies)
 	}
 }

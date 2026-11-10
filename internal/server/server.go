@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -36,7 +37,7 @@ func New(cfg config.Config, logger *slog.Logger, a *api.API) (http.Handler, erro
 	if err != nil {
 		return nil, err
 	}
-	r.Use(trustedRealIP(trustedProxies))
+	r.Use(trustedRealIP(trustedProxies, logger))
 	r.Use(securityHeaders(inlineScriptHashes(dist)))
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
@@ -83,7 +84,8 @@ func parseTrustedProxies(value string) ([]*net.IPNet, error) {
 	return out, nil
 }
 
-func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
+func trustedRealIP(trusted []*net.IPNet, logger *slog.Logger) func(http.Handler) http.Handler {
+	ignored := &ignoredProxies{logger: logger, seen: map[string]struct{}{}}
 	contains := func(ip net.IP) bool {
 		for _, network := range trusted {
 			if network.Contains(ip) {
@@ -98,11 +100,15 @@ func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
 			if host, _, err := net.SplitHostPort(peer); err == nil {
 				peer = host
 			}
-			trustedPeer := contains(net.ParseIP(strings.Trim(peer, "[]")))
+			peerIP := net.ParseIP(strings.Trim(peer, "[]"))
+			trustedPeer := contains(peerIP)
 			// Decided here, on the address that actually connected: the
 			// forwarding headers below may rewrite RemoteAddr.
 			r = api.SetForwardedProto(r, trustedPeer && forwardedHTTPS(r.Header))
 			if !trustedPeer {
+				if len(r.Header.Values("X-Forwarded-Proto")) > 0 || len(r.Header.Values("X-Forwarded-For")) > 0 {
+					ignored.warn(peerIP)
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -143,6 +149,48 @@ func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// maxIgnoredProxies bounds how many addresses ignoredProxies remembers, and
+// so how many warnings one run can log.
+const maxIgnoredProxies = 16
+
+// ignoredProxies logs, once for each address, that something on a private
+// network is forwarding requests without being in WINDLASS_TRUSTED_PROXIES.
+// That is a reverse proxy nobody told Windlass about far more often than an
+// attack, and the result is otherwise silent: no Secure cookies, http:// in
+// callback URLs, every client recorded at the proxy's address.
+//
+// Public addresses are left out. Anyone on the internet can send these
+// headers, and a scanner would use up the warnings before the real proxy
+// showed.
+type ignoredProxies struct {
+	logger *slog.Logger
+	mu     sync.Mutex
+	seen   map[string]struct{}
+}
+
+func (p *ignoredProxies) warn(peer net.IP) {
+	private := peer != nil && (peer.IsPrivate() || peer.IsLoopback() || peer.IsLinkLocalUnicast())
+	if !private {
+		return
+	}
+	addr := peer.String()
+	p.mu.Lock()
+	_, known := p.seen[addr]
+	if !known && len(p.seen) < maxIgnoredProxies {
+		p.seen[addr] = struct{}{}
+	} else {
+		known = true
+	}
+	p.mu.Unlock()
+	if known {
+		return
+	}
+	p.logger.Warn("forwarding headers ignored: this address is not in WINDLASS_TRUSTED_PROXIES. "+
+		"If it is your reverse proxy, add it, or Windlass treats every request as plain HTTP "+
+		"and records the proxy's address as the client's",
+		"address", addr)
 }
 
 // forwardedAddress reads one X-Forwarded-For entry. Some proxies write the
