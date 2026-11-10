@@ -175,8 +175,11 @@ version stays.
 2. GitHub holds build provenance for those exact bytes, and it verifies: signed through
    Sigstore, recorded in its public transparency log, and issued to
    `.github/workflows/release.yaml` in the update repository, running on a GitHub-hosted
-   runner at the tag being installed. This catches a rewritten release, and an older genuine
-   binary put up under a newer version.
+   runner at the tag being installed, as the binary for this server's architecture. This
+   catches a rewritten release, and an older genuine binary put up under a newer version.
+
+A release older than the running version is never offered, so marking an old release as the
+latest does not roll a server back.
 
 It is the check `gh attestation verify` makes, built into the panel. What it needs and where
 it stops:

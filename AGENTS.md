@@ -1,7 +1,7 @@
 # Windlass — agent brief
 
 Self-hosted Docker Compose control plane: projects, Git deployments, domains with HTTPS, logs,
-terminals, metrics, backups, templates, users, updates. Go single binary, `go 1.26`,
+terminals, metrics, backups, templates, users, updates. Go single binary, `go 1.27`,
 module `github.com/windlass-dev/windlass`. See `README.md` for the product model and
 `CLAUDE.md` for architecture rules — read both before changing code.
 

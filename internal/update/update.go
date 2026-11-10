@@ -18,7 +18,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/windlass-dev/windlass/internal/version"
@@ -51,6 +53,9 @@ type Service struct {
 	// restart asks the process to shut down gracefully; systemd
 	// (Restart=always) brings the new binary up.
 	restart func()
+	// applying lets one Apply run at a time. A second would download over
+	// the file the first has already verified.
+	applying sync.Mutex
 }
 
 func New(logger *slog.Logger, dataDir string, restart func()) *Service {
@@ -116,8 +121,47 @@ func (s *Service) Check(ctx context.Context) (Release, error) {
 	rel.UpdateReady = rel.Version != "" &&
 		rel.Version != version.Version &&
 		"v"+strings.TrimPrefix(version.Version, "v") != rel.Version &&
+		!olderRelease(rel.Version, version.Version) &&
 		rel.assetURL != ""
 	return rel, nil
+}
+
+// olderRelease reports whether release is a lower version than current. An
+// older release marked as the latest is genuine and carries valid build
+// provenance, so nothing else stops it rolling a server back. A version that
+// is not dotted numbers, a development build for one, is never older.
+func olderRelease(release, current string) bool {
+	r, ok1 := versionParts(release)
+	c, ok2 := versionParts(current)
+	if !ok1 || !ok2 {
+		return false
+	}
+	for i := 0; i < len(r) || i < len(c); i++ {
+		var a, b int
+		if i < len(r) {
+			a = r[i]
+		}
+		if i < len(c) {
+			b = c[i]
+		}
+		if a != b {
+			return a < b
+		}
+	}
+	return false
+}
+
+func versionParts(v string) ([]int, bool) {
+	fields := strings.Split(strings.TrimPrefix(v, "v"), ".")
+	parts := make([]int, 0, len(fields))
+	for _, f := range fields {
+		n, err := strconv.Atoi(f)
+		if err != nil || n < 0 {
+			return nil, false
+		}
+		parts = append(parts, n)
+	}
+	return parts, true
 }
 
 var ErrNotSupported = errors.New("self-update is only supported for the Linux binary install")
@@ -134,6 +178,16 @@ func (s *Service) Apply(ctx context.Context) error {
 	if !supported() {
 		return ErrNotSupported
 	}
+	if !s.applying.TryLock() {
+		return errors.New("an update is already being installed")
+	}
+	// Held for good once the binary is swapped: the restart is on its way.
+	installed := false
+	defer func() {
+		if !installed {
+			s.applying.Unlock()
+		}
+	}()
 	rel, err := s.Check(ctx)
 	if err != nil {
 		return err
@@ -181,6 +235,7 @@ func (s *Service) Apply(ctx context.Context) error {
 	} else {
 		s.logger.Info("update installed; restarting", "version", rel.Version)
 	}
+	installed = true
 	go func() {
 		time.Sleep(500 * time.Millisecond) // let the HTTP response flush
 		s.restart()
@@ -233,7 +288,8 @@ func (s *Service) fetchVerified(ctx context.Context, rel Release, dir string) (p
 
 	// Build provenance catches a rewritten release. It is checked against
 	// the digest of the file on disk, not the one checksums.txt claims.
-	if err := verifyProvenance(ctx, got, rel.Version); err != nil {
+	a := artifact{name: assetName, sha256: got, tag: rel.Version}
+	if err := verifyProvenance(ctx, a, filepath.Join(dir, "sigstore")); err != nil {
 		return "", fmt.Errorf("refusing update %s: %w", rel.Version, err)
 	}
 	s.logger.Info("update verified", "version", rel.Version, "sha256", got)

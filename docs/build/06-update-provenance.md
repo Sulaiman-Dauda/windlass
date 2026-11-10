@@ -14,12 +14,14 @@ deleted. `WINDLASS_NO_SELF_UPDATE` stays the way out.
 
 - `internal/update/provenance.go`: `verifyProvenance` fetches the Sigstore bundles for the
   binary's SHA-256 from GitHub's attestations API and verifies them with `sigstore-go`.
-  `checkBuild` then checks the statement type, source repository, tag and runner.
+  `checkBuild` then checks the statement type, the asset name, source repository, tag and
+  runner.
 - `internal/update/update.go`: `fetchVerified` holds the download, the checksum and the
-  provenance check, and deletes the file when any of them fails. `Apply` only swaps.
+  provenance check, and deletes the file when any of them fails. `Apply` only swaps, one
+  call at a time. `Check` does not offer a release older than the running version.
 - `internal/update/testdata/`: the real v0.60 linux/amd64 attestation and a snapshot of
   Sigstore's trusted root, so the tests run offline.
-- `Dockerfile`: Go 1.27, which `sigstore-go` v1.4.0 requires.
+- `Dockerfile`, `CONTRIBUTING.md`, `AGENTS.md`: Go 1.27, which `sigstore-go` v1.4.0 requires.
 - `docs/security.md`, `docs/install.md`, `docs/configuration.md`.
 
 ## What is checked
@@ -32,6 +34,9 @@ deleted. `WINDLASS_NO_SELF_UPDATE` stays the way out.
    repository compares without case, the tag exactly.
 4. Predicate `https://slsa.dev/provenance/v1`, source repository and ref equal to the update
    repository and tag, runner `github-hosted`.
+5. The statement lists those bytes under the asset name for this architecture,
+   `windlass-linux-<arch>`. One statement covers both binaries of a release and step 2
+   accepts either, so without this the arm64 binary served as the amd64 asset would pass.
 
 ## Decisions
 
@@ -41,11 +46,19 @@ Settled during the build, flagged for Pablo:
   transparency, Rekor and DSSE verification ourselves, in the one code path that replaces a
   binary running as root. `gh attestation verify` uses the same library.
 - **Keys fetched at update time.** Sigstore's trusted root comes over TUF from
-  `tuf-repo-cdn.sigstore.dev`, starting from the TUF root compiled in, with no cache on disk.
-  A snapshot baked into a release would go stale when Sigstore rotates a key and block every
-  update from that version.
-- **The tag is pinned.** A genuine v0.60 binary published as v0.61 is refused, so a rewritten
-  release cannot roll servers back to a version with a known hole.
+  `tuf-repo-cdn.sigstore.dev`, starting from the TUF root compiled in. A snapshot baked into
+  a release would go stale when Sigstore rotates a key and block every update from that
+  version. Nothing is written to disk. The TUF client still reads cached metadata when its
+  cache directory holds some, and its default is `$HOME/.sigstore` or the system temp
+  directory, so it is pointed at `<data>/update/sigstore`, which Windlass never creates.
+  The fetch carries the request's context and a 60 second limit.
+- **The tag is pinned.** A genuine v0.60 binary published as v0.61 is refused.
+- **An older release is not an update.** A genuine older release marked as the latest has
+  valid provenance for its own tag, so the tag pin does not stop it. `Check` compares dotted
+  version numbers and offers nothing lower than the running version. A version that is not
+  dotted numbers (`dev`, `v0.61-rc1`) is never treated as older.
+- **One install at a time.** A second `Apply` while one runs is refused; it would download
+  over the file the first had verified.
 - **Refuse, never skip.** No attestation, GitHub or Sigstore unreachable, or a bundle that
   does not parse: all refuse.
 - **Private update repositories are refused.** GitHub signs them with its own Sigstore
@@ -67,20 +80,40 @@ each, against main at 35a398b:
 About 9 MB of idle memory against the 40 MiB budget, for code that runs when someone presses
 Update now. Package initialisers account for 1.8 MB of it; the rest is the larger binary.
 
+## Review
+
+Two passes on the first commit by reviewers that did not write it. One found nothing. The
+other's leads, each checked against the code, became the asset name check, the older release
+rule, the install lock, the TUF cache directory, the context on the TUF fetch and
+`per_page=100` on the attestations request.
+
 ## Checks
 
-- `go test ./internal/update/`: the real v0.60 attestation passes; other bytes, another tag,
-  another repository, a statement edited after signing, a missing log entry, no attestation
-  and no Sigstore keys are each refused; a refused binary is not left on disk.
-- Removing the provenance call, or the tag from both places it is checked, fails the tests.
+- `go test ./internal/update/`: the real v0.60 attestation passes for amd64 and arm64; other
+  bytes, another tag, another repository, the arm64 binary under the amd64 name, a statement
+  edited after signing, a missing log entry, a trusted root with no certificate transparency
+  log, no attestation and no Sigstore keys are each refused; a refused binary is not left on
+  disk; an older release is not offered; a second `Apply` is refused.
+- Removing any one of these fails the tests: the provenance call, the `checkBuild` call, the
+  asset name, the subject digest, the older release rule, the install lock, the tag from
+  both places it is checked.
 - Live, 10/11/2026: the v0.60 binary verified against GitHub and Sigstore in 1.0 s; the same
   binary with one byte appended was refused; the same binary as v0.61 was refused.
 - Real update: a build of this branch calling itself v0.59 applied v0.60 from the panel API
-  on a scratch instance and ended up byte-identical to the release (`8ae64a5b...`).
+  on a scratch instance and ended up byte-identical to the release (`8ae64a5b...`). Nothing
+  was written under `<data>/update` or `$HOME/.sigstore`.
+- The same build calling itself v0.61 was not offered v0.60, and the API answered "no update
+  available".
 
 ## Not done
 
-- A refusal seen through the running panel. It talks to `api.github.com` only, and there is
-  no rewritten release to point it at; the refusals are covered by the tests above.
-- arm64, and the hardened systemd unit's staged swap, which this change does not touch.
+- A provenance refusal seen through the running panel. It talks to `api.github.com` only, and
+  there is no rewritten release to point it at; those refusals are covered by the tests.
+- arm64 is built and its attestation tested, never run. The hardened systemd unit's staged
+  swap is not touched by this change.
 - Private repositories and forks with their own workflow file, as above.
+- Only an attestation GitHub returns inline is read. One returned as a `bundle_url` alone is
+  skipped, which refuses the update.
+- Renaming or transferring the repository strands every install: the certificate would name
+  the new repository and the binary still asks for the old one. Updating by hand is the fix.
+- When several attestations fail, the message carries the last one's reason only.
