@@ -105,7 +105,7 @@ After the HTTPS hostname works, firewall public port 8080 or add a systemd overr
 | `WINDLASS_LOG_LEVEL` | Default `info`. One of `debug`, `info`, `warn` or `error`. |
 | `WINDLASS_CADDY_ADMIN` | Default `http://127.0.0.1:2019`. Caddy admin API used for targeted route updates. |
 | `WINDLASS_PANEL_UPSTREAM` | Default `127.0.0.1:8080`. Address Caddy dials for the Settings-managed panel route. |
-| `WINDLASS_TRUSTED_PROXIES` | Default `127.0.0.0/8,::1/128`. Proxy IPs/CIDRs allowed to supply client forwarding headers. |
+| `WINDLASS_TRUSTED_PROXIES` | Default `127.0.0.0/8,::1/128`. Proxy IPs/CIDRs allowed to supply the client address and `X-Forwarded-Proto`. |
 | `WINDLASS_NO_SELF_UPDATE` | Unset by default. Disable binary self-update when set. |
 | `WINDLASS_UPDATE_REPO` | Default `Sulaiman-Dauda/windlass`. Repository checked for releases. |
 | `WINDLASS_UPDATE_TOKEN` | Unset by default. GitHub token for a private update repository. |
@@ -133,6 +133,17 @@ It does not bundle Caddy. Application
 domains and the panel-domain setting remain unavailable until Windlass can reach an existing
 Caddy admin API. Set `WINDLASS_CADDY_ADMIN` and `WINDLASS_PANEL_UPSTREAM` to addresses valid
 from the Caddy/Windlass networks.
+
+Caddy's requests do not arrive from loopback in this layout, so Windlass treats every request
+as plain HTTP until told otherwise: sign-in cookies are not marked `Secure`, and OAuth
+callback, GitHub App and webhook URLs are built with `http://`. Set `WINDLASS_TRUSTED_PROXIES`
+to the one address Caddy's requests arrive from, as the Windlass container sees it.
+
+Trust a single address, never a whole Docker network: every container on a trusted network
+can claim any client address and claim HTTPS. If that address is the network's gateway, also
+stop anything but Caddy reaching port 8080, for example by publishing it as
+`127.0.0.1:8080:8080`. Rootless Docker, Podman and Docker Desktop can deliver all published-port
+traffic from the gateway, so trusting it there trusts every client.
 
 The example uses a named volume. Replace it with a host bind mount when SSH editing and
 filesystem-based recovery are required:

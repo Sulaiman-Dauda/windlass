@@ -94,12 +94,15 @@ func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = withForwardedProto(r, trusted)
 			peer := r.RemoteAddr
 			if host, _, err := net.SplitHostPort(peer); err == nil {
 				peer = host
 			}
-			if !contains(net.ParseIP(strings.Trim(peer, "[]"))) {
+			trustedPeer := contains(net.ParseIP(strings.Trim(peer, "[]")))
+			// Decided here, on the address that actually connected: the
+			// forwarding headers below may rewrite RemoteAddr.
+			r = api.SetForwardedProto(r, trustedPeer && forwardedHTTPS(r.Header))
+			if !trustedPeer {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -121,6 +124,22 @@ func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// forwardedHTTPS reports whether the nearest proxy said the request reached
+// it over HTTPS. Only the last X-Forwarded-Proto value counts, the same
+// right-to-left rule as X-Forwarded-For: a proxy that appends its own value
+// instead of replacing the header leaves a client-supplied one farther left.
+func forwardedHTTPS(h http.Header) bool {
+	values := h.Values("X-Forwarded-Proto")
+	if len(values) == 0 {
+		return false
+	}
+	last := values[len(values)-1]
+	if i := strings.LastIndexByte(last, ','); i >= 0 {
+		last = last[i+1:]
+	}
+	return strings.EqualFold(strings.TrimSpace(last), "https")
 }
 
 var inlineScriptRE = regexp.MustCompile(`(?is)<script(?:\s[^>]*)?>(.*?)</script>`)
@@ -163,7 +182,7 @@ func securityHeaders(scriptHashes []string) func(http.Handler) http.Handler {
 			h.Set("Referrer-Policy", "same-origin")
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("X-Frame-Options", "DENY")
-			if ForwardedProto(r) {
+			if api.ForwardedProto(r) {
 				h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			}
 			next.ServeHTTP(w, r)

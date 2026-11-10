@@ -277,10 +277,8 @@ func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// isTLS reports whether the request arrived over TLS, directly or via a
-// trusted proxy's X-Forwarded-Proto. The server middleware records the
-// trusted-proxy decision in the request context under ForwardedProtoKey;
-// without it the header is not believed.
+// isTLS reports whether the client reached Windlass over HTTPS, directly or
+// through a trusted proxy. It never reads X-Forwarded-Proto itself.
 func isTLS(r *http.Request) bool {
 	return ForwardedProto(r)
 }
