@@ -243,16 +243,70 @@ func (s *Service) StopAll() {
 	}
 }
 
+// Client is Windlass's own view of who sent a request bound for a plugin:
+// the address and scheme the server middleware settled on. It is the only
+// source of the forwarding headers a plugin receives.
+type Client struct {
+	IP    string // no port
+	HTTPS bool
+}
+
+type clientKey struct{}
+
 // newPluginProxy forwards to a plugin on addr. A plugin that is not
 // listening gets a JSON 502, the API's error shape, rather than an empty one.
+//
+// It rewrites rather than directs: Rewrite runs after the reverse proxy has
+// dropped hop-by-hop headers, so a client cannot name a forwarding header in
+// Connection to have it removed again once Windlass has set it.
 func newPluginProxy(addr string, logger *slog.Logger) *httputil.ReverseProxy {
 	target, _ := url.Parse("http://" + addr)
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		logger.Warn("plugin proxy", "addr", addr, "error", err)
-		writeError(w, http.StatusBadGateway, `{"error":{"code":"plugin_unreachable","message":"plugin did not answer"}}`)
+	return &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			// The plugin keeps seeing the host the caller asked for.
+			pr.Out.Host = pr.In.Host
+			client, _ := pr.In.Context().Value(clientKey{}).(Client)
+			setForwardedHeaders(pr.Out.Header, client)
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			logger.Warn("plugin proxy", "addr", addr, "error", err)
+			writeError(w, http.StatusBadGateway, `{"error":{"code":"plugin_unreachable","message":"plugin did not answer"}}`)
+		},
 	}
-	return proxy
+}
+
+// setForwardedHeaders removes the forwarding headers that arrived with the
+// request and writes Windlass's own. What arrived is the client's unless a
+// trusted proxy sent it, and a plugin cannot tell which.
+func setForwardedHeaders(h http.Header, client Client) {
+	for name := range h {
+		if isForwardingHeader(name) {
+			delete(h, name)
+		}
+	}
+	if client.IP != "" {
+		h.Set("X-Forwarded-For", client.IP)
+	}
+	proto := "http"
+	if client.HTTPS {
+		proto = "https"
+	}
+	h.Set("X-Forwarded-Proto", proto)
+}
+
+// isForwardingHeader reports whether a header claims the client's address,
+// scheme or host. Underscores count as hyphens: CGI-style servers fold both
+// spellings into one variable.
+func isForwardingHeader(name string) bool {
+	name = strings.ReplaceAll(strings.ToLower(name), "_", "-")
+	switch name {
+	case "forwarded", "x-forwarded", "x-real-ip", "x-client-ip", "client-ip",
+		"true-client-ip", "cf-connecting-ip", "x-cluster-client-ip",
+		"x-original-forwarded-for":
+		return true
+	}
+	return strings.HasPrefix(name, "x-forwarded-")
 }
 
 func writeError(w http.ResponseWriter, status int, body string) {
@@ -262,7 +316,8 @@ func writeError(w http.ResponseWriter, status int, body string) {
 }
 
 // Proxy forwards a request to a running plugin, or 503s if it is not up.
-func (s *Service) Proxy(name string, w http.ResponseWriter, r *http.Request) {
+// client is what the plugin is told about the caller.
+func (s *Service) Proxy(name string, client Client, w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	inst := s.running[name]
 	s.mu.Unlock()
@@ -283,5 +338,5 @@ func (s *Service) Proxy(name string, w http.ResponseWriter, r *http.Request) {
 			break // let the proxy surface the error
 		}
 	}
-	inst.proxy.ServeHTTP(w, r)
+	inst.proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, client)))
 }
