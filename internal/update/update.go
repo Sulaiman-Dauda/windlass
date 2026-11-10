@@ -253,7 +253,7 @@ func (s *Service) fetchVerified(ctx context.Context, rel Release, dir string) (p
 	newBin := filepath.Join(dir, "windlass-"+rel.Version)
 	defer func() {
 		if err != nil {
-			os.Remove(newBin)
+			_ = os.Remove(newBin) // a leftover is never run, and the next download replaces it
 		}
 	}()
 
@@ -294,7 +294,7 @@ func (s *Service) fetchVerified(ctx context.Context, rel Release, dir string) (p
 	}
 	s.logger.Info("update verified", "version", rel.Version, "sha256", got)
 
-	if err := os.Chmod(newBin, 0o755); err != nil {
+	if err := os.Chmod(newBin, 0o755); err != nil { //nolint:gosec // G302: it is the executable
 		return "", err
 	}
 	return newBin, nil

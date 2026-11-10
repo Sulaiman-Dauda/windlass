@@ -65,7 +65,7 @@ var trustedRoot = func(ctx context.Context, tufDir string) (root.TrustedMaterial
 type contextClient struct{ ctx context.Context }
 
 func (c contextClient) Do(req *http.Request) (*http.Response, error) {
-	return http.DefaultClient.Do(req.WithContext(c.ctx))
+	return http.DefaultClient.Do(req.WithContext(c.ctx)) //nolint:gosec // G704: the TUF client builds these, to Sigstore's mirror
 }
 
 // artifact is the downloaded binary as the checks need to know it.

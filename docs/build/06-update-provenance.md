@@ -42,6 +42,10 @@ deleted. `WINDLASS_NO_SELF_UPDATE` stays the way out.
 
 Settled during the build, flagged for Pablo:
 
+- **Three modules named in `go.mod`.** `github.com/sigstore/sigstore-go` verifies.
+  `github.com/theupdateframework/go-tuf/v2` was already pulled in by it and is imported
+  directly for the fetcher that carries the context. `github.com/in-toto/attestation`, also
+  already pulled in, is imported by the tests to build a statement.
 - **`sigstore-go`, not our own verifier.** Doing this by hand means writing certificate
   transparency, Rekor and DSSE verification ourselves, in the one code path that replaces a
   binary running as root. `gh attestation verify` uses the same library.
