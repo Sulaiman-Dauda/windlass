@@ -36,7 +36,7 @@ export interface LogBuffer {
  * a row keeps its DOM node when older lines are dropped and TermPane can hold
  * a reader's place. An index key would hand every row the next line's text.
  */
-export interface KeptLine extends LogLine {
+interface KeptLine extends LogLine {
   seq: number;
 }
 
