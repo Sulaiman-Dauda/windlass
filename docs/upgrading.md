@@ -2,6 +2,21 @@
 
 What to check when you move to a new version. A version not listed here needs nothing.
 
+## v0.62
+
+The panel now installs an update only when GitHub holds build provenance for the exact
+binary and it verifies. [Security](./security.md) has what is checked. The check runs in the
+version you are updating from, so it first applies to the update after v0.62. From then on
+**Update now** is refused, and the running version stays, for:
+
+- a private update repository (`WINDLASS_UPDATE_TOKEN`)
+- a fork that releases from a workflow file other than `.github/workflows/release.yaml`
+- a server that cannot reach `api.github.com` or `tuf-repo-cdn.sigstore.dev`
+
+Update those by hand with `install.sh --binary` after verifying the release, and set
+`WINDLASS_NO_SELF_UPDATE=1` to take the button out of the panel. A release older than the
+running version is no longer offered. Building from source needs Go 1.27.
+
 ## v0.61
 
 Windlass now believes forwarded headers only from a reverse proxy it has been told about,

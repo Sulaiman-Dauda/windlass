@@ -168,7 +168,7 @@ place of `amd64` on ARM servers.
 ### Updates from the panel
 
 **Software updates** under **Settings, System** downloads the new binary and makes two checks
-before anything is swapped in. From v0.61 a binary that fails either is deleted and the running
+before anything is swapped in. From v0.62 a binary that fails either is deleted and the running
 version stays.
 
 1. The SHA-256 matches the release's `checksums.txt`. This catches a broken download.
@@ -192,7 +192,7 @@ it stops:
 - A fork that releases from another workflow file is refused: the workflow path is fixed.
 - It trusts GitHub Actions, Sigstore and the release workflow at that tag. Someone who can
   push a tag and have the real workflow build it gets a valid attestation.
-- The check runs in the version you are updating from. Versions before v0.61 check the
+- The check runs in the version you are updating from. Versions before v0.62 check the
   checksum only, so verify by hand, as above, when updating from one.
 
 When the panel refuses, it says why. Set `WINDLASS_NO_SELF_UPDATE=1` to take updates out of

@@ -1,7 +1,8 @@
 # 06 Update provenance
 
 Status: built 10/11/2026 on `feat/update-provenance` for #90. Not part of the MCP scaffold.
-Whether it ships in v0.61 is Pablo's call: it adds a dependency and memory, see Cost.
+Held for v0.62 on Pablo's decision of 10/11/2026: it adds a dependency and memory, see Cost,
+and the review fixes have had no outside pass yet.
 
 ## Goal
 

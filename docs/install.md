@@ -108,7 +108,7 @@ After the HTTPS hostname works, firewall public port 8080 or add a systemd overr
 | `WINDLASS_TRUSTED_PROXIES` | Default `127.0.0.0/8,::1/128`. Proxy IPs/CIDRs allowed to supply the client address and `X-Forwarded-Proto`. |
 | `WINDLASS_NO_SELF_UPDATE` | Unset by default. Disable binary self-update when set. |
 | `WINDLASS_UPDATE_REPO` | Default `Sulaiman-Dauda/windlass`. Repository checked for releases. |
-| `WINDLASS_UPDATE_TOKEN` | Unset by default. GitHub token for a private update repository. From v0.61 the panel shows releases from one but refuses to install them. |
+| `WINDLASS_UPDATE_TOKEN` | Unset by default. GitHub token for a private update repository. From v0.62 the panel shows releases from one but refuses to install them. |
 | `DOCKER_HOST` | Defaults to the Docker client's default. The installer sets `tcp://127.0.0.1:2375` in systemd. |
 
 [Configuration](./configuration.md) explains each one.
