@@ -57,8 +57,13 @@ Settled during the build 10/11/2026, flagged for Pablo:
 
 - [x] `go vet ./...` and `go test ./... -count=1` pass (Pablo's run, 10/11/2026)
 - [x] One Opus pass and one Codex pass on each half, findings applied
-- [ ] CI green on the PR, the integration job included
-- [ ] The server tests fail with the trust check removed from `trustedRealIP`
-- [ ] A sign-in through a built binary gets a `Secure` cookie from a trusted address and not
-  from an untrusted one
-- [ ] A real plugin behind the proxy sees the two headers (the test uses a stand-in server)
+- [x] CI green on #111, the integration job included
+- [x] The tests fail with each fix removed in turn: the trust check, the last-value rule, and
+  the plugin header rewrite
+- [x] A sign-in through a built binary on loopback: `Secure` and HSTS with
+  `X-Forwarded-Proto: https` from a trusted address, neither from an untrusted one, neither
+  when the last of two values is `http`
+- [x] A real plugin that prints its request headers, behind the proxy: it saw the two
+  headers and none of seven spoofed ones, `Connection` naming both included
+- [ ] Not run behind a real Caddy with this build; CI's integration job covers Caddy routing,
+  not sign-in cookies
