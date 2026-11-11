@@ -154,10 +154,92 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 	} else if entries, err := os.ReadDir(target); err == nil && len(entries) > 0 {
 		// Files but no repository: what a restore leaves, since backups skip
 		// .git. Clone refuses a non-empty directory, so make it a checkout in
-		// place. Nothing is deleted; the checkout overwrites tracked files.
+		// place. The checkout overwrites tracked files and removes whatever
+		// stands where a tracked folder goes, so reportReplaced names both
+		// before it runs.
 		ref := req.Commit
 		if ref == "" {
 			ref = "origin/" + req.Branch
+		}
+		// reportReplaced logs each path the checkout would overwrite or remove
+		// that already exists in src, since neither the Git tab nor the
+		// deployment log would otherwise say that a project's own file was
+		// replaced. It runs after the fetch and before the checkout.
+		reportReplaced := func(ref string) {
+			gitOut := func(args ...string) ([]byte, error) {
+				cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // G204: args are built in this function
+				cmd.Dir = target
+				cmd.Env = env
+				return cmd.Output()
+			}
+			// Listing is advisory; the checkout itself reports real failures.
+			fail := func(err error) {
+				logLine(out, "could not list files the checkout replaces: "+err.Error())
+			}
+			tracked, err := gitOut("ls-tree", "-r", "-z", "--name-only", ref)
+			if err != nil {
+				fail(err)
+				return
+			}
+			// Index the ref and compare src with it. A file whose content
+			// already matches is left alone by the checkout, so it is not
+			// reported. update-index exits 1 when a file differs, which is the
+			// answer diff-files gives, so its exit status is not an error.
+			if _, err := gitOut("read-tree", ref); err != nil {
+				fail(err)
+				return
+			}
+			_, _ = gitOut("update-index", "-q", "--refresh")
+			changed, err := gitOut("diff-files", "--name-only", "-z")
+			if err != nil {
+				fail(err)
+				return
+			}
+			differs := map[string]bool{}
+			for _, p := range strings.Split(string(changed), "\x00") {
+				differs[p] = true
+			}
+			reported := map[string]bool{}
+			report := func(p string) {
+				if !reported[p] {
+					reported[p] = true
+					logLine(out, "checkout replaces existing file: "+p)
+				}
+			}
+			for _, p := range strings.Split(string(tracked), "\x00") {
+				if p == "" {
+					continue
+				}
+				// Walk down from src, checking each element with Lstat. Lstat
+				// follows a symlink in the middle of the path, so a parent that
+				// is a symlink or a file is what the checkout replaces, and the
+				// walk stops there.
+				parts := strings.Split(p, "/")
+				path := target
+				for i, part := range parts {
+					path = filepath.Join(path, part)
+					name := strings.Join(parts[:i+1], "/")
+					info, err := os.Lstat(path)
+					if err != nil {
+						if !os.IsNotExist(err) {
+							logLine(out, "could not inspect "+name+": "+err.Error())
+						}
+						break // nothing here for the checkout to replace
+					}
+					if i < len(parts)-1 {
+						if !info.IsDir() {
+							report(name)
+							break
+						}
+						continue
+					}
+					// The tracked path itself: a folder is always in the way, a
+					// file or symlink only when its content differs.
+					if info.IsDir() || differs[p] {
+						report(name)
+					}
+				}
+			}
 		}
 		steps := []struct {
 			name string
@@ -173,6 +255,9 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 			var err error
 			if step.args == nil {
 				err = requireOnBranch()
+				if err == nil {
+					reportReplaced(ref)
+				}
 			} else if err = run(step.args...); err != nil {
 				err = fmt.Errorf("%s: %w", step.name, err)
 			}
@@ -209,6 +294,13 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 		return agent.GitSyncResult{}, fmt.Errorf("git rev-parse: %w", err)
 	}
 	return agent.GitSyncResult{Commit: strings.TrimSpace(string(outBytes))}, nil
+}
+
+// logLine sends one line to out, if there is a sink.
+func logLine(out agent.LogSink, text string) {
+	if out != nil {
+		out(agent.LogLine{Stream: "stdout", Text: text, Time: time.Now().UTC()})
+	}
 }
 
 // gitConfigEnv adds key=value to env as if passed with git -c. It uses
