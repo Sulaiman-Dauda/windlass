@@ -126,6 +126,34 @@ func buildRoutesObject(routes []agent.Route) caddyRoute {
 	}
 }
 
+// buildPanelRoute renders the panel's route: plain HTTP for the hostname is
+// sent to HTTPS, and everything else goes to the panel. Without the redirect
+// the panel answers on port 80, where a sign-in travels in the clear and the
+// session cookie is set without Secure. Pure, so it is tested without Caddy.
+func buildPanelRoute(hostname, upstream string) caddyRoute {
+	return caddyRoute{
+		ID:    panelRouteID,
+		Match: []caddyMatch{{Host: []string{hostname}}},
+		Handle: []caddyHandle{{Handler: "subroute", Routes: []caddyRoute{
+			{
+				Match: []caddyMatch{{Protocol: "http"}},
+				Handle: []caddyHandle{{
+					Handler:    "static_response",
+					StatusCode: 308,
+					Headers:    map[string][]string{"Location": {"https://{http.request.host}{http.request.uri}"}},
+				}},
+				Terminal: true,
+			},
+			{
+				Handle: []caddyHandle{{Handler: "reverse_proxy",
+					Upstreams: []caddyUpstream{{Dial: upstream}}}},
+				Terminal: true,
+			},
+		}}},
+		Terminal: true,
+	}
+}
+
 // do sends one admin API call. Caddy can close idle admin connections when it
 // applies a config change (its /load restarts the admin server), and Go's
 // transport does not replay a request with a body, so the next call on that
@@ -212,13 +240,7 @@ func (p proxyLocal) ApplyPanelDomain(ctx context.Context, hostname string) error
 		return fmt.Errorf("remove panel domain: %s: %s", resp.Status, msg)
 	}
 
-	obj := caddyRoute{
-		ID:    panelRouteID,
-		Match: []caddyMatch{{Host: []string{hostname}}},
-		Handle: []caddyHandle{{Handler: "reverse_proxy",
-			Upstreams: []caddyUpstream{{Dial: p.l.cfg.PanelUpstream}}}},
-		Terminal: true,
-	}
+	obj := buildPanelRoute(hostname, p.l.cfg.PanelUpstream)
 	resp, err := p.do(ctx, http.MethodPatch, "/id/"+panelRouteID, obj)
 	if err != nil {
 		return fmt.Errorf("configure panel domain: %w", err)

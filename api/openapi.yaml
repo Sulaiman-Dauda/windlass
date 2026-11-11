@@ -678,6 +678,7 @@ paths:
       responses:
         "200": { description: Desired hostname stored and applied }
         "400": { description: Invalid hostname }
+        "409": { description: A project already routes this hostname }
 
   /system/backups/s3:
     get:
@@ -1099,7 +1100,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Domain" }
-        "409": { description: Hostname already in use }
+        "409": { description: "Hostname already in use, by a project or by the panel" }
 
   /projects/{name}/domains/{hostname}:
     delete:

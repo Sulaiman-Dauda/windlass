@@ -227,10 +227,9 @@ func (s *Service) Reconcile(ctx context.Context) error {
 		if err := s.setStagingOf(ctx, project, manifest); err != nil {
 			return fmt.Errorf("index staging link for %s: %w", name, err)
 		}
-		domains := make([]db.CreateDomainParams, 0, len(manifest.Domains))
-		for _, d := range manifest.Domains {
-			domains = append(domains, db.CreateDomainParams{ProjectID: project.ID,
-				Hostname: d.Hostname, Service: d.Service, ContainerPort: d.ContainerPort})
+		domains, err := s.indexableDomains(ctx, project, manifest, names)
+		if err != nil {
+			return fmt.Errorf("index domains for %s: %w", name, err)
 		}
 		if err := s.q.ReplaceProjectDomains(ctx, project.ID, domains); err != nil {
 			return fmt.Errorf("index domains for %s: %w", name, err)
@@ -240,6 +239,67 @@ func (s *Service) Reconcile(ctx context.Context) error {
 	// deployment history, backups, or other platform state. List() hides stale
 	// indexes; if the directory returns, its original history is reattached.
 	return nil
+}
+
+// indexableDomains turns a manifest's domains into rows. The manifest is a
+// file anyone who can edit the project can write, so it is not taken at its
+// word: hostnames are stored in the one form they are compared in, and a
+// name another project's manifest still lists stays with that project.
+// Without that the last manifest indexed took the hostname and its traffic.
+// A holder whose directory or manifest entry is gone does give the name up,
+// which is how a renamed project keeps its domains.
+func (s *Service) indexableDomains(ctx context.Context, project db.Project, manifest Manifest, names []string) ([]db.CreateDomainParams, error) {
+	domains := make([]db.CreateDomainParams, 0, len(manifest.Domains))
+	if len(manifest.Domains) == 0 {
+		return domains, nil
+	}
+	all, err := s.q.ListAllDomains(ctx)
+	if err != nil {
+		return nil, err
+	}
+	holders := map[string]string{}
+	for _, row := range all {
+		if row.ProjectID != project.ID {
+			holders[normalHostname(row.Hostname)] = row.ProjectName
+		}
+	}
+	for _, d := range manifest.Domains {
+		host := normalHostname(d.Hostname)
+		if holder, held := holders[host]; held && s.manifestLists(ctx, holder, host, names) {
+			s.logger.Warn("domain not indexed: another project holds it. Remove it from one of them",
+				"hostname", d.Hostname, "project", project.Name, "holder", holder)
+			continue
+		}
+		domains = append(domains, db.CreateDomainParams{ProjectID: project.ID,
+			Hostname: host, Service: d.Service, ContainerPort: d.ContainerPort})
+	}
+	return domains, nil
+}
+
+// manifestLists reports whether project is on disk and its manifest lists
+// host. A manifest that cannot be read counts as listing it: an unreadable
+// file must not cost a project its domains.
+func (s *Service) manifestLists(ctx context.Context, project, host string, names []string) bool {
+	if !containsProject(names, project) {
+		return false
+	}
+	manifest, err := s.readManifest(ctx, project)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	for _, d := range manifest.Domains {
+		if normalHostname(d.Hostname) == host {
+			return true
+		}
+	}
+	return false
+}
+
+func normalHostname(h string) string {
+	return strings.ToLower(strings.TrimSpace(h))
 }
 
 func boolInt(value bool) int64 {

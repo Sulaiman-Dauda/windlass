@@ -56,6 +56,10 @@ func (a *API) handleSetPanelDomain(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	if errors.Is(err, proxy.ErrConflict) {
+		writeError(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
 	if err != nil {
 		a.internalError(w, "configure panel domain", err)
 		return

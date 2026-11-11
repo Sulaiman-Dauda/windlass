@@ -216,3 +216,103 @@ func TestRunRestoresRoutesAfterCaddyReload(t *testing.T) {
 	ag.DropRoutes()
 	routed("after Caddy dropped them")
 }
+
+// A row from before the check, or one written past it, must not be routed:
+// after a Caddy restart the project's route was tried before the panel's.
+func TestSyncNeverRoutesThePanelHostnameToAProject(t *testing.T) {
+	s, ag, q := newTestService(t)
+	seedRoutedDomain(t, s, ag, q)
+	ctx := context.Background()
+	if err := q.SetSetting(ctx, db.SetSettingParams{Key: panelDomainSettingKey, Value: "shop.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Sync(ctx); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(ag.Routes) != 0 {
+		t.Fatalf("the panel's hostname is routed to a project: %+v", ag.Routes)
+	}
+	if ag.PanelDomain != "shop.example.com" {
+		t.Fatalf("panel hostname = %q", ag.PanelDomain)
+	}
+}
+
+// .windlass.json is indexed as written, so a row can hold a name Add would
+// refuse. Caddy matches hosts in any case and reads * and {placeholders} as
+// patterns: each of these would have covered the panel's hostname.
+func TestSyncNeverRoutesAManifestNameThatCoversThePanel(t *testing.T) {
+	for _, hostname := range []string{"Panel.Example.com", "*.example.com", "{http.request.host}", "panel.example.com."} {
+		t.Run(hostname, func(t *testing.T) {
+			s, ag, q := newTestService(t)
+			seedRoutedDomain(t, s, ag, q)
+			ctx := context.Background()
+			if err := q.SetSetting(ctx, db.SetSettingParams{Key: panelDomainSettingKey, Value: "panel.example.com"}); err != nil {
+				t.Fatal(err)
+			}
+			p, err := q.CreateProject(ctx, db.CreateProjectParams{Name: "other", Source: "manual"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := q.CreateDomain(ctx, db.CreateDomainParams{
+				ProjectID: p.ID, Hostname: hostname, Service: "web", ContainerPort: 3000,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			ag.Containers = append(ag.Containers, agent.Container{
+				ComposeProject: "other", ComposeService: "web", State: "running", IPAddress: "10.0.1.3",
+			})
+			if err := s.Sync(ctx); err != nil {
+				t.Fatalf("sync: %v", err)
+			}
+			if len(ag.Routes) != 1 || ag.Routes[0].Hostname != "shop.example.com" {
+				t.Fatalf("routes = %+v, want only shop.example.com", ag.Routes)
+			}
+		})
+	}
+}
+
+// The panel must not take a hostname a project holds, in whatever case the
+// row has it. A project whose directory is gone has no Domains tab to remove
+// the row in, so it does not block the panel, and saving the hostname the
+// panel already has is never refused.
+func TestSetPanelDomainAgainstProjectRows(t *testing.T) {
+	s, ag, q := newTestService(t)
+	ctx := context.Background()
+	p, err := q.CreateProject(ctx, db.CreateProjectParams{Name: "shop", Source: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.CreateDomain(ctx, db.CreateDomainParams{
+		ProjectID: p.ID, Hostname: "Shop.Example.com", Service: "web", ContainerPort: 3000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetPanelDomain(ctx, "shop.example.com"); err != nil {
+		t.Fatalf("a project with no directory blocked the panel hostname: %v", err)
+	}
+	if err := s.SetPanelDomain(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ag.FS().EnsureProject(ctx, "shop"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ag.FS().WriteFile(ctx, "shop", "compose.yaml", []byte("services: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPanelDomain(ctx, "shop.example.com"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("SetPanelDomain = %v, want ErrConflict", err)
+	}
+	if got, _ := s.PanelDomain(ctx); got != "" {
+		t.Fatalf("a refused panel hostname was saved: %q", got)
+	}
+
+	// An install updated with the row already in place.
+	if err := q.SetSetting(ctx, db.SetSettingParams{Key: panelDomainSettingKey, Value: "shop.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPanelDomain(ctx, "shop.example.com"); err != nil {
+		t.Fatalf("saving the unchanged panel hostname = %v", err)
+	}
+}
