@@ -133,7 +133,7 @@ bucket to the one key Windlass uses. See [Backups and restore](./backups-and-res
 
 1. **get.windlass.run**, a Cloudflare Worker that only redirects to `install.sh` attached to
    the latest GitHub release (or to the release named in the path, such as
-   `get.windlass.run/v0.60`). The script you run is the one that shipped with that release's
+   `get.windlass.run/v0.61`). The script you run is the one that shipped with that release's
    binaries, not whatever is on `main`.
 2. **get.docker.com**, Docker's own install script, only when Docker is missing and you say yes.
 3. **Caddy's package repository**, only when Caddy is missing: Cloudsmith for apt, the Caddy
@@ -155,7 +155,7 @@ release, which ties the exact bytes to the workflow run and commit that built th
 before anything runs as root:
 
 ```sh
-gh release download v0.60 --repo Sulaiman-Dauda/windlass \
+gh release download v0.61 --repo Sulaiman-Dauda/windlass \
   --pattern 'windlass-linux-amd64' --pattern install.sh
 gh attestation verify windlass-linux-amd64 --repo Sulaiman-Dauda/windlass
 less install.sh

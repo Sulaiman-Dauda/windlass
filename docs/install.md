@@ -32,7 +32,7 @@ up front when piping:
 curl -fsSL https://get.windlass.run | sudo sh -s -- --yes
 ```
 
-Supported flags are `--yes`, `--version v0.60` (any release tag), `--no-caddy`, `--no-docker`, and
+Supported flags are `--yes`, `--version v0.61` (any release tag), `--no-caddy`, `--no-docker`, and
 `--binary PATH` (local/CI installation).
 
 ## Verifying what you are about to run
@@ -55,7 +55,7 @@ release, where a release write cannot reach it.
 To check a binary before installing it:
 
 ```sh
-gh release download v0.60 --repo Sulaiman-Dauda/windlass --pattern 'windlass-linux-amd64'
+gh release download v0.61 --repo Sulaiman-Dauda/windlass --pattern 'windlass-linux-amd64'
 gh attestation verify windlass-linux-amd64 --repo Sulaiman-Dauda/windlass
 ```
 
