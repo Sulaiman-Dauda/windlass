@@ -398,3 +398,29 @@ func TestInstallHandlesServerWithoutRoutesArray(t *testing.T) {
 		})
 	}
 }
+
+// The panel must not answer on plain HTTP: a sign-in there travels in the
+// clear and its session cookie is set without Secure.
+func TestBuildPanelRouteRedirectsHTTP(t *testing.T) {
+	obj := buildPanelRoute("panel.example.com", "127.0.0.1:8080")
+	if obj.ID != panelRouteID || !obj.Terminal {
+		t.Fatalf("panel route id %q terminal %v", obj.ID, obj.Terminal)
+	}
+	if len(obj.Match) != 1 || len(obj.Match[0].Host) != 1 || obj.Match[0].Host[0] != "panel.example.com" || obj.Match[0].Protocol != "" {
+		t.Fatalf("panel route must match its hostname on every protocol, got %+v", obj.Match)
+	}
+	if len(obj.Handle) != 1 || obj.Handle[0].Handler != "subroute" || len(obj.Handle[0].Routes) != 2 {
+		t.Fatalf("panel route must hold a redirect and a proxy, got %+v", obj.Handle)
+	}
+	red, proxy := obj.Handle[0].Routes[0], obj.Handle[0].Routes[1]
+	if len(red.Match) != 1 || red.Match[0].Protocol != "http" || !red.Terminal {
+		t.Fatalf("the first child must match plain HTTP and end there, got %+v", red)
+	}
+	if red.Handle[0].Handler != "static_response" || red.Handle[0].StatusCode != 308 ||
+		red.Handle[0].Headers["Location"][0] != "https://{http.request.host}{http.request.uri}" {
+		t.Fatalf("redirect = %+v", red.Handle[0])
+	}
+	if len(proxy.Match) != 0 || proxy.Handle[0].Handler != "reverse_proxy" || proxy.Handle[0].Upstreams[0].Dial != "127.0.0.1:8080" {
+		t.Fatalf("proxy child = %+v", proxy)
+	}
+}

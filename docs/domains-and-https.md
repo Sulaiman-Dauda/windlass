@@ -58,7 +58,13 @@ includes a user-owned route and asserts it survives.
 
 The panel starts on port 8080. Under **Settings, General, Panel domain** you can give it a
 hostname, and Windlass adds `windlass_panel_route` so the panel is served over HTTPS on
-that name.
+that name. From v0.61 plain HTTP requests to the panel's hostname are redirected to HTTPS,
+as they are for a project's domain.
+
+The panel and a project cannot share a hostname. Adding the panel's hostname to a project
+is refused, and so is giving the panel a hostname a project already routes. Whichever
+route Caddy tried first would answer, and a project's container on the panel's hostname
+would receive the panel's sign-ins and session cookies.
 
 Do this before exposing the panel to the internet. A control plane on plain HTTP over the
 public network is worth avoiding even behind a password.

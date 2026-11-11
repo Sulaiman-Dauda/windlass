@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/windlass-dev/windlass/internal/agent"
@@ -34,6 +35,10 @@ type Service struct {
 	logger   *slog.Logger
 
 	syncCh chan struct{}
+
+	// hostMu makes "is this hostname free" and the save that follows one
+	// step, so the panel and a project cannot both take a name at once.
+	hostMu sync.Mutex
 }
 
 func New(q *db.Queries, ag agent.Agent, projectSvc *projects.Service, bus *events.Bus, logger *slog.Logger) *Service {
@@ -64,14 +69,59 @@ func (s *Service) SetPanelDomain(ctx context.Context, hostname string) error {
 	if hostname != "" && !validHostname(hostname) {
 		return fmt.Errorf("%w: %q", ErrInvalidHostname, hostname)
 	}
-	if err := s.q.SetSetting(ctx, db.SetSettingParams{Key: panelDomainSettingKey, Value: hostname}); err != nil {
+	s.hostMu.Lock()
+	if err := s.savePanelDomain(ctx, hostname); err != nil {
+		s.hostMu.Unlock()
 		return err
 	}
+	s.hostMu.Unlock()
 	s.RequestSync()
 	if err := s.agent.Proxy().ApplyPanelDomain(ctx, hostname); err != nil {
 		return fmt.Errorf("panel hostname saved but Caddy has not applied it yet: %w", err)
 	}
 	return nil
+}
+
+// savePanelDomain refuses a hostname a project holds, then saves it. The
+// caller holds hostMu.
+func (s *Service) savePanelDomain(ctx context.Context, hostname string) error {
+	current, err := s.PanelDomain(ctx)
+	if err != nil {
+		return err
+	}
+	// Saving the hostname the panel already has changes nothing, so it is
+	// not refused: an install updated with a project still holding the name
+	// can save its settings, and Sync keeps that row unrouted.
+	if hostname != "" && hostname != normalHostname(current) {
+		// The panel must never share a hostname with a project: whichever
+		// route Caddy tried first would answer, and a project's container
+		// would be handed the panel's sign-ins and session cookies.
+		all, err := s.q.ListAllDomains(ctx)
+		if err != nil {
+			return err
+		}
+		for _, d := range all {
+			// A manifest can hold a name in any case, and Caddy matches
+			// hosts without regard to it.
+			if normalHostname(d.Hostname) != hostname {
+				continue
+			}
+			// A project whose directory is gone keeps its rows so its
+			// history survives the directory coming back, but it has no
+			// Domains tab to remove one in. It must not block the panel;
+			// if it returns, Sync leaves the row unrouted and says so.
+			if _, err := s.projects.Get(ctx, d.ProjectName); errors.Is(err, projects.ErrNotFound) {
+				continue
+			}
+			return fmt.Errorf("%w: %s routes to %s", ErrConflict, hostname, d.ProjectName)
+		}
+	}
+	return s.q.SetSetting(ctx, db.SetSettingParams{Key: panelDomainSettingKey, Value: hostname})
+}
+
+// normalHostname is the form hostnames are compared in.
+func normalHostname(h string) string {
+	return strings.ToLower(strings.TrimSpace(h))
 }
 
 // CheckHostname reports why hostname cannot become a new domain: it is not
@@ -100,7 +150,7 @@ func (s *Service) CheckHostnameForProject(ctx context.Context, hostname string, 
 		return err
 	}
 	for _, d := range all {
-		if d.Hostname == hostname && d.ProjectID != projectID {
+		if normalHostname(d.Hostname) == hostname && d.ProjectID != projectID {
 			return fmt.Errorf("%w: %s routes to %s", ErrConflict, hostname, d.ProjectName)
 		}
 	}
@@ -117,6 +167,15 @@ func (s *Service) Add(ctx context.Context, projectID int64, hostname, service st
 	}
 	if service == "" || port <= 0 || port > 65535 {
 		return Domain{}, errors.New("service and a valid container port are required")
+	}
+	s.hostMu.Lock()
+	defer s.hostMu.Unlock()
+	panel, err := s.PanelDomain(ctx)
+	if err != nil {
+		return Domain{}, err
+	}
+	if normalHostname(panel) == hostname {
+		return Domain{}, fmt.Errorf("%w: %s is the panel's domain", ErrConflict, hostname)
 	}
 	project, err := s.q.ProjectByID(ctx, projectID)
 	if err != nil {
@@ -309,6 +368,23 @@ func (s *Service) Sync(ctx context.Context) error {
 
 	var routes []agent.Route
 	for _, d := range domains {
+		// Rows also arrive from .windlass.json, which is indexed as written,
+		// so nothing below trusts that Add saw them. Caddy matches hosts in
+		// any case and reads * and {placeholders} as patterns, so a name Add
+		// would refuse could cover the panel's hostname or another project's.
+		host := normalHostname(d.Hostname)
+		if !validHostname(host) {
+			s.logger.Warn("domain not routed: not a hostname the panel accepts. Remove it from the project and add it again",
+				"hostname", d.Hostname, "project", d.ProjectName)
+			continue
+		}
+		if panelDomain != "" && host == normalHostname(panelDomain) {
+			// Refused when either is saved, so this is a row from before that
+			// check or one written past it. The panel keeps its hostname.
+			s.logger.Warn("domain not routed: it is the panel's hostname. Remove it from the project",
+				"hostname", d.Hostname, "project", d.ProjectName)
+			continue
+		}
 		upstream, err := s.resolveUpstream(ctx, d.ProjectName, d.Service, d.ContainerPort)
 		if err != nil && !errors.Is(err, errNoRunningContainer) {
 			// Docker itself is unreachable, so we cannot tell which upstreams

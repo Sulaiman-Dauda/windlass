@@ -80,3 +80,50 @@ brackets is read as before.
 
 A client that connects directly over IPv6 is recorded as `2001:db8::1`, no longer
 `[2001:db8::1]`.
+
+### The panel's hostname
+
+Two changes to the hostname set under **Settings, General, Panel domain**.
+
+Plain HTTP requests to it are now redirected to HTTPS, as they already were for a project's
+domain. Before v0.61 the panel answered on port 80, where a sign-in travels unencrypted. If
+something in front of Caddy reaches the panel over plain HTTP on that hostname, for example
+Cloudflare in Flexible mode or a tunnel pointed at `http://localhost:80`, it now gets a
+redirect and can loop. Point it at HTTPS on port 443, or at Windlass on port 8080 with its
+address in `WINDLASS_TRUSTED_PROXIES`.
+
+A webhook registered while you were signed in over `http://` has an `http://` address, and
+GitHub and GitLab do not follow a redirect when they deliver one, so pushes stop starting
+deployments. Check the address of each project's webhook, and of the GitHub App if you
+created it from the panel, at the provider. Change `http://` to `https://` there, or sign in
+over HTTPS and save the project's Git settings again.
+
+The redirect needs Caddy to listen on port 443. The installer sets that up. If Caddy was
+already on the server and serves port 80 only, the panel's hostname stops answering after
+the update, as a project's domain already did there. Add a 443 listener to that Caddy
+server, or reach the panel on port 8080 until you have.
+
+The panel and a project can no longer share a hostname. Adding the panel's hostname to a
+project was accepted before v0.61, and after a Caddy restart the project's container
+answered on the panel's hostname. Now both sides refuse it. A project that already holds
+the panel's hostname is no longer routed there, and Windlass logs a warning naming it:
+
+```sh
+sudo journalctl -u windlass | grep "domain not routed"
+```
+
+Remove that domain from the project in its Domains tab.
+
+The same command shows one more case. A domain written by hand into a project's
+`.windlass.json` was routed as written before v0.61, including a wildcard such as
+`*.example.com`, which could cover the panel's hostname or another project's. A name the
+Domains tab would refuse is no longer routed. Caddy as Windlass sets it up cannot get a
+certificate for a wildcard, so in practice only plain HTTP traffic to one stops. Add each
+hostname you need by name.
+
+A hostname listed in two projects' `.windlass.json` files used to go to whichever project
+Windlass read last. It now stays with the project that already has it, and the other
+project's entry is ignored with a "domain not indexed" warning in the same log. The warning
+names both projects, so check it after updating: if two of your manifests already listed
+one hostname, the project that had it at the update keeps it, which may not be the one you
+meant. To move a hostname, remove it from the first project, then add it to the second.

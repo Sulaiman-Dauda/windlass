@@ -55,7 +55,7 @@ func (a *API) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 
 	d, err := a.Proxy.Add(r.Context(), p.ID, req.Hostname, req.Service, req.ContainerPort)
 	if errors.Is(err, proxy.ErrConflict) {
-		writeError(w, http.StatusConflict, "conflict", "hostname already in use")
+		writeError(w, http.StatusConflict, "conflict", err.Error())
 		return
 	}
 	if err != nil {
