@@ -21,3 +21,19 @@ func TestStripCookieKeepsOthers(t *testing.T) {
 		t.Fatalf("cookies = %v, want theme and plugin_state", r.Cookies())
 	}
 }
+
+func TestRemoteIP(t *testing.T) {
+	for addr, want := range map[string]string{
+		"203.0.113.9:4321":   "203.0.113.9",
+		"203.0.113.9":        "203.0.113.9",
+		"[2001:db8::1]:4321": "2001:db8::1",
+		"2001:db8::1":        "2001:db8::1",
+		"::1":                "::1",
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = addr
+		if got := remoteIP(r); got != want {
+			t.Errorf("remoteIP(%q) = %q, want %q", addr, got, want)
+		}
+	}
+}

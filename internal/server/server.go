@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -36,7 +37,7 @@ func New(cfg config.Config, logger *slog.Logger, a *api.API) (http.Handler, erro
 	if err != nil {
 		return nil, err
 	}
-	r.Use(trustedRealIP(trustedProxies))
+	r.Use(trustedRealIP(trustedProxies, logger))
 	r.Use(securityHeaders(inlineScriptHashes(dist)))
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Recoverer)
@@ -83,7 +84,8 @@ func parseTrustedProxies(value string) ([]*net.IPNet, error) {
 	return out, nil
 }
 
-func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
+func trustedRealIP(trusted []*net.IPNet, logger *slog.Logger) func(http.Handler) http.Handler {
+	ignored := &ignoredProxies{logger: logger, seen: map[string]struct{}{}}
 	contains := func(ip net.IP) bool {
 		for _, network := range trusted {
 			if network.Contains(ip) {
@@ -98,28 +100,130 @@ func trustedRealIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
 			if host, _, err := net.SplitHostPort(peer); err == nil {
 				peer = host
 			}
-			if !contains(net.ParseIP(strings.Trim(peer, "[]"))) {
+			peerIP := net.ParseIP(strings.Trim(peer, "[]"))
+			trustedPeer := contains(peerIP)
+			// Decided here, on the address that actually connected: the
+			// forwarding headers below may rewrite RemoteAddr.
+			r = api.SetForwardedProto(r, trustedPeer && forwardedHTTPS(r.Header))
+			if !trustedPeer {
+				if len(r.Header.Values("X-Forwarded-Proto")) > 0 || len(r.Header.Values("X-Forwarded-For")) > 0 {
+					ignored.warn(peerIP)
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			// Walk right-to-left: a trusted proxy appends the address it saw,
-			// while any client-supplied spoof is farther left.
-			forwarded := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-			for i := len(forwarded) - 1; i >= 0; i-- {
-				ip := net.ParseIP(strings.TrimSpace(forwarded[i]))
-				if ip != nil && !contains(ip) {
+			// while any client-supplied spoof is farther left. Every header
+			// line counts, in order: a proxy may add a line of its own rather
+			// than extend the client's, which then stays first.
+			//
+			// The walk ends at the first address that is not a trusted proxy:
+			// that is the client. It also ends at an entry that is not an
+			// address at all, because everything left of it is unverified;
+			// stepping over it would land on what the client wrote. If every
+			// entry is a trusted proxy, the farthest one is the client.
+			if lines := r.Header.Values("X-Forwarded-For"); len(lines) > 0 {
+				forwarded := strings.Split(strings.Join(lines, ","), ",")
+				for i := len(forwarded) - 1; i >= 0; i-- {
+					ip := forwardedAddress(forwarded[i])
+					if ip == nil {
+						break
+					}
 					r.RemoteAddr = ip.String()
-					next.ServeHTTP(w, r)
-					return
+					if !contains(ip) {
+						break
+					}
 				}
+				next.ServeHTTP(w, r)
+				return
 			}
-			if ip := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); ip != nil {
-				r.RemoteAddr = ip.String()
+			// X-Real-IP is for a proxy that sends no X-Forwarded-For. Beside
+			// one it is ignored: Caddy passes a client's X-Real-IP through
+			// untouched. The last line counts, for the reason above.
+			if lines := r.Header.Values("X-Real-IP"); len(lines) > 0 {
+				if ip := forwardedAddress(lines[len(lines)-1]); ip != nil {
+					r.RemoteAddr = ip.String()
+				}
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// maxIgnoredProxies bounds how many addresses ignoredProxies remembers, and
+// so how many warnings one run can log.
+const maxIgnoredProxies = 16
+
+// ignoredProxies logs, once for each address, that something on a private
+// network is forwarding requests without being in WINDLASS_TRUSTED_PROXIES.
+// That is a reverse proxy nobody told Windlass about far more often than an
+// attack, and the result is otherwise silent: no Secure cookies, http:// in
+// callback URLs, every client recorded at the proxy's address.
+//
+// Public addresses are left out. Anyone on the internet can send these
+// headers, and a scanner would use up the warnings before the real proxy
+// showed.
+type ignoredProxies struct {
+	logger *slog.Logger
+	mu     sync.Mutex
+	seen   map[string]struct{}
+}
+
+func (p *ignoredProxies) warn(peer net.IP) {
+	private := peer != nil && (peer.IsPrivate() || peer.IsLoopback() || peer.IsLinkLocalUnicast())
+	if !private {
+		return
+	}
+	addr := peer.String()
+	p.mu.Lock()
+	_, known := p.seen[addr]
+	if !known && len(p.seen) < maxIgnoredProxies {
+		p.seen[addr] = struct{}{}
+	} else {
+		known = true
+	}
+	p.mu.Unlock()
+	if known {
+		return
+	}
+	p.logger.Warn("forwarding headers ignored: this address is not in WINDLASS_TRUSTED_PROXIES. "+
+		"If it is your reverse proxy, add it, or Windlass treats every request as plain HTTP "+
+		"and records the proxy's address as the client's",
+		"address", addr)
+}
+
+// forwardedAddress reads one X-Forwarded-For entry. Some proxies write the
+// address with a port or in brackets. Anything else, "unknown" or an IPv6
+// zone included, is nil.
+func forwardedAddress(entry string) net.IP {
+	entry = strings.TrimSpace(entry)
+	if ip := net.ParseIP(entry); ip != nil {
+		return ip
+	}
+	if host, _, err := net.SplitHostPort(entry); err == nil {
+		return net.ParseIP(host)
+	}
+	if strings.HasPrefix(entry, "[") && strings.HasSuffix(entry, "]") {
+		return net.ParseIP(entry[1 : len(entry)-1])
+	}
+	return nil
+}
+
+// forwardedHTTPS reports whether the nearest proxy said the request reached
+// it over HTTPS. Only the last X-Forwarded-Proto value counts, the same
+// right-to-left rule as X-Forwarded-For: a proxy that appends its own value
+// instead of replacing the header leaves a client-supplied one farther left.
+func forwardedHTTPS(h http.Header) bool {
+	values := h.Values("X-Forwarded-Proto")
+	if len(values) == 0 {
+		return false
+	}
+	last := values[len(values)-1]
+	if i := strings.LastIndexByte(last, ','); i >= 0 {
+		last = last[i+1:]
+	}
+	return strings.EqualFold(strings.TrimSpace(last), "https")
 }
 
 var inlineScriptRE = regexp.MustCompile(`(?is)<script(?:\s[^>]*)?>(.*?)</script>`)
@@ -162,7 +266,7 @@ func securityHeaders(scriptHashes []string) func(http.Handler) http.Handler {
 			h.Set("Referrer-Policy", "same-origin")
 			h.Set("X-Content-Type-Options", "nosniff")
 			h.Set("X-Frame-Options", "DENY")
-			if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+			if api.ForwardedProto(r) {
 				h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			}
 			next.ServeHTTP(w, r)
