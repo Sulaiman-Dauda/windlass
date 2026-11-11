@@ -50,3 +50,6 @@ Thumbs.db
 
 # Local agent settings
 /.claude/
+
+# Design prototypes, kept local until a design is ported into web/
+/design/
