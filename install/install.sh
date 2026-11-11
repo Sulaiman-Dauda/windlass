@@ -5,7 +5,7 @@
 #
 # Flags:
 #   --yes            non-interactive (assume yes)
-#   --version vX.Y   install a specific release, e.g. v0.60 (default: latest)
+#   --version vX.Y   install a specific release, e.g. v0.61 (default: latest)
 #   --no-caddy       skip Caddy installation (no automatic HTTPS)
 #   --no-docker      skip Docker installation
 #   --binary PATH    install a local binary instead of downloading (CI/testing)
