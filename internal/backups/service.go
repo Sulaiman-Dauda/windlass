@@ -321,10 +321,10 @@ func (s *Service) dumpDatabase(ctx context.Context, project string) dumpResult {
 		for chunk := range sess.Output() {
 			_, _ = pw.Write(chunk)
 		}
-		pw.Close()
+		_ = pw.Close()
 	}()
 	path, size, spoolErr := s.agent.FS().SpoolFile(dumpCtx, pr)
-	pr.CloseWithError(errors.New("spool ended"))
+	_ = pr.CloseWithError(errors.New("spool ended"))
 	if spoolErr != nil {
 		sess.Close()
 	}

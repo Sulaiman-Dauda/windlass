@@ -96,7 +96,7 @@ func (f fsLocal) SpoolFile(ctx context.Context, r io.Reader) (string, int64, err
 		err = cerr
 	}
 	if err != nil {
-		os.Remove(out.Name())
+		_ = os.Remove(out.Name())
 		return "", 0, err
 	}
 	return out.Name(), n, nil
@@ -246,7 +246,7 @@ func (f fsLocal) addExtra(tw *tar.Writer, name, src string) error {
 	} else if !st.Mode().IsRegular() {
 		return fmt.Errorf("extra archive file %q is not a regular file", name)
 	}
-	in, err := os.Open(path)
+	in, err := os.Open(path) // #nosec G304 -- path is checked above to be a spool file in the backups dir
 	if err != nil {
 		return err
 	}
