@@ -18,7 +18,7 @@ export default function Setup() {
       footer={
         <>
           Lost the token? It's in the service log:{" "}
-          <code className="rounded-[5px] bg-sunken px-1.5 py-0.5 font-mono text-fg2">journalctl -u windlass | grep setup_token</code>
+          <code className="rounded-sm bg-sunken px-1.5 py-0.5 font-mono text-fg2">journalctl -u windlass | grep setup_token</code>
         </>
       }
     >

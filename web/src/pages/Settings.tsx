@@ -215,7 +215,7 @@ function PanelDomainSection() {
             <StatusPill tone={status.data.proxy_available ? "ok" : "warn"} live={status.data.proxy_available}>
               {status.data.proxy_available ? "Active" : "Caddy unavailable"}
             </StatusPill>
-            <a className="font-mono text-sm text-accent hover:underline" href={status.data.url}>
+            <a className="font-mono text-xs text-accent hover:underline" href={status.data.url}>
               {status.data.url}
             </a>
           </div>

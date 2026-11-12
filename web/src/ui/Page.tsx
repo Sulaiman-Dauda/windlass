@@ -148,7 +148,7 @@ export function EmptyState({
       )}
     >
       {icon && (
-        <div className="mb-4 grid h-11 w-11 place-items-center rounded-[10px] border border-hairline bg-surface text-fg2 shadow-[var(--shadow-sm)]">
+        <div className="mb-4 grid h-11 w-11 place-items-center rounded-sm border border-hairline bg-surface text-fg2 shadow-[var(--shadow-sm)]">
           <Icon name={icon} size={20} />
         </div>
       )}
@@ -195,7 +195,7 @@ export function Callout({
           type="button"
           onClick={onClose}
           aria-label="Dismiss"
-          className="-mr-1 grid h-6 w-6 flex-none place-items-center rounded-[6px] text-fg3 hover:bg-[color-mix(in_oklab,var(--fg)_8%,transparent)] hover:text-fg"
+          className="-mr-1 grid h-6 w-6 flex-none place-items-center rounded-sm text-fg3 hover:bg-[color-mix(in_oklab,var(--fg)_8%,transparent)] hover:text-fg"
         >
           <Icon name="x" size={14} />
         </button>

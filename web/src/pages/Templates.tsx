@@ -61,7 +61,7 @@ export default function Templates() {
           return (
             <Card key={t.key} className="flex flex-col p-5 transition-[border-color,box-shadow] duration-150 hover:border-edge hover:shadow-[var(--shadow-md)]">
               <div className="flex items-start justify-between gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-[10px] border border-hairline bg-surface2 text-fg2">
+                <span className="grid h-10 w-10 place-items-center rounded-sm border border-hairline bg-surface2 text-fg2">
                   <Icon name={isApp ? "globe" : "database"} size={19} />
                 </span>
                 <Tag tone={isApp ? "accent" : "idle"}>{isApp ? "Web app" : "Service"}</Tag>

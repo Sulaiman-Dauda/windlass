@@ -62,7 +62,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 type="button"
                 onClick={() => dismiss(t.id)}
                 aria-label="Dismiss"
-                className="-mr-1 grid h-6 w-6 place-items-center rounded-[6px] text-fg3 hover:bg-sunken hover:text-fg"
+                className="-mr-1 grid h-6 w-6 place-items-center rounded-sm text-fg3 hover:bg-sunken hover:text-fg"
               >
                 <Icon name="x" size={14} />
               </button>
