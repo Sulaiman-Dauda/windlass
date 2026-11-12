@@ -326,7 +326,7 @@ func (s *Service) dumpDatabase(ctx context.Context, project string) dumpResult {
 	path, size, spoolErr := s.agent.FS().SpoolFile(dumpCtx, pr)
 	_ = pr.CloseWithError(errors.New("spool ended"))
 	if spoolErr != nil {
-		sess.Close()
+		_ = sess.Close()
 	}
 	code, waitErr := sess.Wait()
 	remove := func() {

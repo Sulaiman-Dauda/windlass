@@ -22,6 +22,23 @@ it was.
 - `internal/deploy/failure.go`: step, exit code and the last error-looking log line.
 - API DTOs, OpenAPI schemas, MCP scrubbing of `error_line` and `db_dump_error`, panel.
 
+## Touches
+
+- `migrations/0012_honest_records.sql`
+- `internal/store/`
+- `internal/agent/`
+- `internal/backups/`
+- `internal/deploy/`
+- `internal/api/backups.go`
+- `internal/api/deployments.go`
+- `internal/mcp/read_tools.go`
+- `internal/mcp/mcp_test.go`
+- `api/openapi.yaml`
+- `web/src/api/deployments.ts`
+- `web/src/api/deployments.test.ts`
+- `web/src/components/BackupsTab.tsx`
+- `web/src/components/DeploymentsTab.tsx`
+
 ## Decisions
 
 - Rows from before 0012 have no `db_dump`; the panel shows "Database dump not recorded".
