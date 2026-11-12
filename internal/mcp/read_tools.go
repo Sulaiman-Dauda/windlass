@@ -61,11 +61,16 @@ func cleanProject(o object) object {
 	return o
 }
 
-// scrubError scrubs the error text of a deployment or backup, which is
+// errorFields are the free-text fields of a deployment or backup, which are
 // Compose or dump-tool output and can quote a value.
+var errorFields = []string{"error", "error_line", "db_dump_error"}
+
+// scrubError scrubs the error text of a deployment or backup.
 func scrubError(o object, sc *scrubber) object {
-	if msg := stringField(o, "error"); msg != "" {
-		setString(o, "error", sc.scrub(msg))
+	for _, field := range errorFields {
+		if msg := stringField(o, field); msg != "" {
+			setString(o, field, sc.scrub(msg))
+		}
 	}
 	return o
 }

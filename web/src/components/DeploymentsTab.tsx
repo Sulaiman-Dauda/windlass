@@ -12,6 +12,7 @@ import {
   useRollback,
   deploymentTone,
   isActive,
+  stageLabel,
   stageStates,
   type Deployment,
   type StageState,
@@ -126,7 +127,7 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
   const confirm = useConfirm();
   const toast = useToast();
   const [, setParams] = useSearchParams();
-  const stages = stageStates(eventLog, d.status);
+  const stages = stageStates(eventLog, d.status, d.failed_step);
   const active = isActive(d.status);
   const canRollBack = can("member") && d.status === "succeeded" && d.number !== latest;
   const p = useProject(project).data;
@@ -218,8 +219,11 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
       </ol>
 
       {d.status === "failed" && d.error && (
-        <Callout tone="err" title="Deployment failed" className="mx-5 mt-4">
-          <span className="break-words font-mono text-xs">{d.error}</span>
+        <Callout tone="err" title={failureTitle(d)} className="mx-5 mt-4">
+          <span className="block break-words font-mono text-xs">{d.error_line || d.error}</span>
+          {d.error_line && d.error_line !== d.error && (
+            <span className="mt-1.5 block break-words font-mono text-xs text-fg2">{d.error}</span>
+          )}
         </Callout>
       )}
 
@@ -236,6 +240,14 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
       </TermPane>
     </Card>
   );
+}
+
+// failureTitle names the step a deployment failed in and the exit code,
+// when they were recorded.
+function failureTitle(d: Deployment): string {
+  let title = d.failed_step ? `Failed at ${stageLabel(d.failed_step)}` : "Deployment failed";
+  if (d.exit_code !== undefined) title += `, exit code ${d.exit_code}`;
+  return title;
 }
 
 const stageIcon: Record<StageState, { className: string; node: ReactNode }> = {

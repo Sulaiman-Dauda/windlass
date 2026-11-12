@@ -55,7 +55,9 @@ func New(cfg Config) (*Local, error) {
 	if err := os.MkdirAll(cfg.ProjectsDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create projects dir: %w", err)
 	}
-	return &Local{cfg: cfg}, nil
+	l := &Local{cfg: cfg}
+	l.removeLeftovers()
+	return l, nil
 }
 
 // docker returns the SDK client, connecting on first use.

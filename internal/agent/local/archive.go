@@ -29,20 +29,93 @@ func (f fsLocal) BackupsDir(ctx context.Context) (string, error) {
 	return dir, nil
 }
 
-func (f fsLocal) RemoveArchive(ctx context.Context, archivePath string) error {
-	backups := f.l.backupsDir()
-	clean := filepath.Clean(archivePath)
-	if !strings.HasPrefix(clean, backups+string(filepath.Separator)) {
-		return fmt.Errorf("archive outside backups dir: %s", archivePath)
+// inBackupsDir returns the cleaned path if it names a file inside the
+// backups dir.
+func (f fsLocal) inBackupsDir(path string) (string, error) {
+	clean := filepath.Clean(path)
+	if !strings.HasPrefix(clean, f.l.backupsDir()+string(filepath.Separator)) {
+		return "", fmt.Errorf("archive outside backups dir: %s", path)
 	}
-	err := os.Remove(clean)
+	return clean, nil
+}
+
+func (f fsLocal) RemoveArchive(ctx context.Context, archivePath string) error {
+	clean, err := f.inBackupsDir(archivePath)
+	if err != nil {
+		return err
+	}
+	err = os.Remove(clean)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	return err
 }
 
-func (f fsLocal) ArchiveProject(ctx context.Context, project string, extraFiles map[string][]byte) (agent.ArchiveInfo, error) {
+// spoolPrefix starts every SpoolFile name.
+const spoolPrefix = ".windlass-spool-"
+
+// leftoverAge is how old a .windlass- temp file in the backups dir must be
+// before it counts as a crash's orphan. A spool is in use from the start of
+// its dump to the end of its archive; six hours is far beyond both.
+const leftoverAge = 6 * time.Hour
+
+// removeLeftovers deletes spool and archive temp files a crash left in the
+// backups dir; a spooled dump can run to gigabytes. It runs at startup and
+// before each spool, and spares recent files in case another process is
+// mid-backup on the same data dir.
+func (l *Local) removeLeftovers() {
+	dir := l.backupsDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.Type().IsRegular() || !strings.HasPrefix(e.Name(), ".windlass-") {
+			continue
+		}
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > leftoverAge {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
+}
+
+// SpoolFile writes r to a private temp file in the backups dir. The name
+// starts with .windlass-spool- so a file left by a crash is plainly ours.
+func (f fsLocal) SpoolFile(ctx context.Context, r io.Reader) (string, int64, error) {
+	backups := f.l.backupsDir()
+	if err := os.MkdirAll(backups, 0o700); err != nil {
+		return "", 0, err
+	}
+	f.l.removeLeftovers()
+	out, err := os.CreateTemp(backups, spoolPrefix+"*")
+	if err != nil {
+		return "", 0, err
+	}
+	n, err := io.Copy(out, ctxReader{ctx, r})
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(out.Name())
+		return "", 0, err
+	}
+	return out.Name(), n, nil
+}
+
+// ctxReader stops a copy once its context ends.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
+func (f fsLocal) ArchiveProject(ctx context.Context, project string, extraFiles map[string]string) (agent.ArchiveInfo, error) {
 	dir, err := f.projectDir(project)
 	if err != nil {
 		return agent.ArchiveInfo{}, err
@@ -89,6 +162,12 @@ func (f fsLocal) ArchiveProject(ctx context.Context, project string, extraFiles 
 		if _, replaced := extraFiles[filepath.ToSlash(rel)]; replaced {
 			return nil
 		}
+		// .windlass/backup holds the dump a restore extracted. It is never
+		// archived again: a new backup's dump comes only from extraFiles,
+		// so an archive cannot carry an old dump its record says it lacks.
+		if info.IsDir() && filepath.ToSlash(rel) == agent.BackupStagingDir {
+			return filepath.SkipDir
+		}
 		// Skip git internals: backups capture the deployable state, and a
 		// git project re-syncs its history from the remote.
 		if info.IsDir() && info.Name() == ".git" {
@@ -114,23 +193,8 @@ func (f fsLocal) ArchiveProject(ctx context.Context, project string, extraFiles 
 		return nil
 	})
 	if walkErr == nil {
-		for name, data := range extraFiles {
-			clean := filepath.Clean(filepath.FromSlash(name))
-			if filepath.IsAbs(clean) || clean == "." || clean == ".." ||
-				strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-				walkErr = fmt.Errorf("invalid extra archive path %q", name)
-				break
-			}
-			hdr := &tar.Header{
-				Name: filepath.ToSlash(clean), Mode: 0o600, Size: int64(len(data)),
-				ModTime: time.Now().UTC(), Typeflag: tar.TypeReg,
-			}
-			if err := tw.WriteHeader(hdr); err != nil {
-				walkErr = err
-				break
-			}
-			if _, err := tw.Write(data); err != nil {
-				walkErr = err
+		for name, src := range extraFiles {
+			if walkErr = f.addExtra(tw, name, src); walkErr != nil {
 				break
 			}
 		}
@@ -157,6 +221,49 @@ func (f fsLocal) ArchiveProject(ctx context.Context, project string, extraFiles 
 		return agent.ArchiveInfo{}, err
 	}
 	return agent.ArchiveInfo{Path: dest, Size: st.Size()}, nil
+}
+
+// addExtra writes the spooled file src into the archive as name. src must be
+// a regular file inside the backups dir, so a caller cannot pull another
+// file on the node into a backup.
+func (f fsLocal) addExtra(tw *tar.Writer, name, src string) error {
+	clean := filepath.Clean(filepath.FromSlash(name))
+	if filepath.IsAbs(clean) || clean == "." || clean == ".." ||
+		strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("invalid extra archive path %q", name)
+	}
+	path, err := f.inBackupsDir(src)
+	if err != nil {
+		return err
+	}
+	if filepath.Dir(path) != f.l.backupsDir() || !strings.HasPrefix(filepath.Base(path), spoolPrefix) {
+		return fmt.Errorf("extra archive file %q is not a spooled file", name)
+	}
+	// Lstat first, so a link planted in the backups dir is refused rather
+	// than followed.
+	if st, err := os.Lstat(path); err != nil {
+		return err
+	} else if !st.Mode().IsRegular() {
+		return fmt.Errorf("extra archive file %q is not a regular file", name)
+	}
+	in, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	st, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	hdr := &tar.Header{
+		Name: filepath.ToSlash(clean), Mode: 0o600, Size: st.Size(),
+		ModTime: time.Now().UTC(), Typeflag: tar.TypeReg,
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	_, err = io.Copy(tw, io.LimitReader(in, st.Size()))
+	return err
 }
 
 func (f fsLocal) RestoreProject(ctx context.Context, project, archivePath string) error {

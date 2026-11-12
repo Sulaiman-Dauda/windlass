@@ -9,6 +9,12 @@ export interface Deployment {
   triggered_by: string;
   git_commit?: string;
   error?: string;
+  /** The step a failed deployment stopped in (v0.62 and later). */
+  failed_step?: string;
+  /** The failing command's exit code, when it had one. */
+  exit_code?: number;
+  /** The line of output to show first for a failed deployment. */
+  error_line?: string;
   started_at?: string;
   finished_at?: string;
   created_at: string;
@@ -211,6 +217,11 @@ export const PIPELINE = [
   { key: "verifying", label: "Verify" },
 ] as const;
 
+/** The label the step strip shows for a step key, or the key itself. */
+export function stageLabel(step: string): string {
+  return PIPELINE.find((p) => p.key === step)?.label ?? step;
+}
+
 export type StageState = "pending" | "active" | "done" | "skipped" | "failed";
 
 // Step events carry prose, not stage keys. These prefixes are the messages
@@ -233,7 +244,7 @@ function stageOf(message: string): string | null {
 }
 
 /** Where each stage stands, from the events seen so far and the reported status. */
-export function stageStates(events: DeployEvent[], status: string): Record<string, StageState> {
+export function stageStates(events: DeployEvent[], status: string, failedStep?: string): Record<string, StageState> {
   const keys = PIPELINE.map((p) => p.key as string);
   const seen = new Set<string>();
   for (const ev of events) {
@@ -241,7 +252,13 @@ export function stageStates(events: DeployEvent[], status: string): Record<strin
     const k = stageOf(ev.message);
     if (k) seen.add(k);
   }
-  const lastSeen = Math.max(-1, ...Array.from(seen, (k) => keys.indexOf(k)));
+  // A failed deployment's recorded step beats the one read from its events,
+  // which miss a step that failed before it logged anything.
+  if (status === "failed" && failedStep && keys.includes(failedStep)) seen.add(failedStep);
+  const lastSeen =
+    status === "failed" && failedStep && keys.includes(failedStep)
+      ? keys.indexOf(failedStep)
+      : Math.max(-1, ...Array.from(seen, (k) => keys.indexOf(k)));
   const out: Record<string, StageState> = {};
 
   if (isActive(status)) {

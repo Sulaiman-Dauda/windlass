@@ -9,11 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/dbdetect"
@@ -122,16 +123,19 @@ func (s *Service) Run(ctx context.Context, projectName, kind, destination string
 		return db.Backup{}, err
 	}
 
-	path, size, err := s.execute(ctx, p, destination)
+	path, size, dump, err := s.execute(ctx, p, destination)
 	status, errMsg := "done", ""
 	if err != nil {
 		status, errMsg = "failed", err.Error()
 		s.logger.Error("backup failed", "project", projectName, "error", err)
 	}
+	dbDump := sql.NullString{String: dump.status, Valid: dump.status != ""}
+	dbDumpErr := sql.NullString{String: dump.reason, Valid: dump.reason != ""}
 	if ferr := s.q.FinishBackup(context.WithoutCancel(ctx), db.FinishBackupParams{
 		Status: status, Path: path, Size: size,
-		Error: sql.NullString{String: errMsg, Valid: errMsg != ""},
-		ID:    rec.ID,
+		Error:  sql.NullString{String: errMsg, Valid: errMsg != ""},
+		DbDump: dbDump, DbDumpError: dbDumpErr,
+		ID: rec.ID,
 	}); ferr != nil {
 		return db.Backup{}, ferr
 	}
@@ -140,6 +144,8 @@ func (s *Service) Run(ctx context.Context, projectName, kind, destination string
 	rec.Status = status
 	rec.Path = path
 	rec.Size = size
+	rec.DbDump = dbDump
+	rec.DbDumpError = dbDumpErr
 	if err != nil {
 		return rec, err
 	}
@@ -162,34 +168,42 @@ func (s *Service) done(project string) {
 	s.runningMu.Unlock()
 }
 
-func (s *Service) execute(ctx context.Context, p db.Project, destination string) (string, int64, error) {
-	// Best-effort DB dump is injected into the archive without touching the
-	// live project, so a failed attempt can never reuse a stale dump file.
-	extra := map[string][]byte{}
-	if dump, ok := s.dumpDatabase(ctx, p.Name); ok {
-		extra[".windlass/backup/db_dump.sql"] = dump
+func (s *Service) execute(ctx context.Context, p db.Project, destination string) (string, int64, dumpResult, error) {
+	// The dump is spooled to the backups dir and injected into the archive
+	// without touching the live project. The archive walk skips the
+	// project's own .windlass/backup, where a restore leaves the dump it
+	// unpacked, so the archive holds this run's dump or none.
+	dump := s.dumpDatabase(ctx, p.Name)
+	extra := map[string]string{}
+	if dump.path != "" {
+		extra[dumpArchivePath] = dump.path
+		defer func() {
+			if err := s.agent.FS().RemoveArchive(context.WithoutCancel(ctx), dump.path); err != nil {
+				s.logger.Warn("remove spooled database dump", "path", dump.path, "error", err)
+			}
+		}()
 	}
 
 	info, err := s.agent.FS().ArchiveProject(ctx, p.Name, extra)
 	if err != nil {
-		return "", 0, fmt.Errorf("archive: %w", err)
+		return "", 0, dump, fmt.Errorf("archive: %w", err)
 	}
 
 	if destination == "s3" {
 		cfg, err := s.s3Config(ctx)
 		if err != nil {
-			return "", 0, err
+			return "", 0, dump, err
 		}
 		if !cfg.Configured() {
-			return "", 0, errors.New("S3 is not configured: an admin sets it in Settings, Backups")
+			return "", 0, dump, errors.New("S3 is not configured: an admin sets it in Settings, Backups")
 		}
 		key := p.Name + "/" + filepath.Base(info.Path)
 		if err := newS3(cfg).PutFile(ctx, key, info.Path); err != nil {
-			return "", 0, err
+			return "", 0, dump, err
 		}
-		return key, info.Size, nil
+		return key, info.Size, dump, nil
 	}
-	return info.Path, info.Size, nil
+	return info.Path, info.Size, dump, nil
 }
 
 // Restore replaces the project directory with a backup's contents and
@@ -241,53 +255,148 @@ func (s *Service) List(ctx context.Context, projectName string) ([]db.Backup, er
 	return s.q.ListProjectBackups(ctx, projectName)
 }
 
+// dumpArchivePath is where a backup archive holds the database dump.
+const dumpArchivePath = ".windlass/backup/db_dump.sql"
+
+// Values of backups.db_dump.
+const (
+	dumpIncluded = "included"
+	dumpFailed   = "failed"
+	dumpNone     = "none"
+)
+
+// dumpResult is what dumpDatabase did: its status, the reason a dump was
+// not taken, and the spooled dump's path when it was.
+type dumpResult struct {
+	status, reason, path string
+}
+
 // dumpDatabase takes a native dump from the project's database container,
-// if it has one. The container is recognised by its image or service name,
-// and the dump command runs with that container's own environment, so it
-// finds the credentials whether they were written in compose.yaml, .env or
-// another env_file. Failure is logged and non-fatal: the file archive still
-// captures compose + env.
-func (s *Service) dumpDatabase(ctx context.Context, project string) ([]byte, bool) {
+// if it has one, and spools it to the backups dir so its size is bounded by
+// the disk rather than memory. The container is recognised by its image or
+// service name, and the dump command runs with that container's own
+// environment, so it finds the credentials whether they were written in
+// compose.yaml, .env or another env_file. A failed dump does not fail the
+// backup, since the file archive still holds compose and env, but the
+// result says why so the record can.
+func (s *Service) dumpDatabase(ctx context.Context, project string) dumpResult {
+	failed := func(reason string, args ...any) dumpResult {
+		reason = clip(reason, maxDumpReason)
+		s.logger.Warn("backup has no database dump", append([]any{"project", project, "reason", reason}, args...)...)
+		return dumpResult{status: dumpFailed, reason: reason}
+	}
 	containers, err := s.agent.Docker().ListContainers(ctx, agent.ContainerFilter{ComposeProject: project})
 	if err != nil {
-		s.logger.Warn("list containers; backup has no database dump", "project", project, "error", err)
-		return nil, false
+		return failed("could not list the project's containers: " + err.Error())
 	}
 	target, engine := databaseContainer(containers)
 	if engine == "" {
-		return nil, false
+		// No container, but the compose file may still name a database: a
+		// project that is down, or whose database was removed. Its data is
+		// then missing from the backup, which "none" would hide.
+		if svc := s.databaseService(ctx, project); svc != "" {
+			return failed(fmt.Sprintf("database service %s has no container", svc))
+		}
+		return dumpResult{status: dumpNone}
 	}
 	if target.State != "running" {
-		s.logger.Warn("database container not running; backup has no database dump",
-			"project", project, "container", target.Name, "engine", engine)
-		return nil, false
+		return failed(fmt.Sprintf("database container %s is not running", target.Name), "engine", engine)
 	}
 
-	dumpCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	dumpCtx, cancel := context.WithTimeout(ctx, dumpTimeout)
 	defer cancel()
 	sess, err := s.agent.Exec().Start(dumpCtx, agent.ExecReq{
 		ContainerID: target.ID,
 		Cmd:         []string{"sh", "-c", dbdetect.DumpCommands[engine]},
 	})
 	if err != nil {
-		s.logger.Warn("db dump exec", "project", project, "error", err)
-		return nil, false
+		return failed("could not start the dump: " + err.Error())
 	}
 	defer sess.Close()
 
-	var out strings.Builder
-	for chunk := range sess.Output() {
-		out.Write(chunk)
-		if out.Len() > 1<<30 {
-			s.logger.Warn("db dump too large; skipping", "project", project)
-			return nil, false
+	// The session's output feeds a pipe the spool reads. If the spool stops
+	// early, the rest of the output is drained so the session can end.
+	pr, pw := io.Pipe()
+	go func() {
+		for chunk := range sess.Output() {
+			_, _ = pw.Write(chunk)
+		}
+		pw.Close()
+	}()
+	path, size, spoolErr := s.agent.FS().SpoolFile(dumpCtx, pr)
+	pr.CloseWithError(errors.New("spool ended"))
+	if spoolErr != nil {
+		sess.Close()
+	}
+	code, waitErr := sess.Wait()
+	remove := func() {
+		if path == "" {
+			return
+		}
+		if err := s.agent.FS().RemoveArchive(context.WithoutCancel(ctx), path); err != nil {
+			s.logger.Warn("remove spooled database dump", "path", path, "error", err)
 		}
 	}
-	if code, err := sess.Wait(); err != nil || code != 0 {
-		s.logger.Warn("db dump failed; backup has no database dump", "project", project, "exit", code, "error", err)
-		return nil, false
+	switch {
+	case ctx.Err() != nil:
+		remove()
+		return failed("the backup was cancelled during the dump")
+	case dumpCtx.Err() != nil:
+		remove()
+		return failed(fmt.Sprintf("the dump took longer than %s", dumpTimeout))
+	case spoolErr != nil:
+		remove()
+		return failed("could not write the dump to disk: " + spoolErr.Error())
+	case waitErr != nil:
+		remove()
+		return failed("the dump failed: "+waitErr.Error(), "exit", code)
+	case code != 0:
+		remove()
+		return failed(fmt.Sprintf("the dump exited with code %d", code))
+	case size == 0:
+		remove()
+		return failed("the dump produced no output")
 	}
-	return []byte(out.String()), true
+	return dumpResult{status: dumpIncluded, path: path}
+}
+
+// maxDumpReason caps the stored reason; the stderr tail a failed dump
+// returns can run to 4 KiB.
+const maxDumpReason = 1000
+
+// clip shortens s to at most n bytes without splitting a character.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := n
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "..."
+}
+
+// dumpTimeout bounds one database dump.
+const dumpTimeout = 10 * time.Minute
+
+// databaseService returns the compose service that looks like a database,
+// by the same rules as the container match, or "" when there is none or the
+// compose file cannot be read.
+func (s *Service) databaseService(ctx context.Context, project string) string {
+	cfg, err := s.agent.Compose().Config(ctx, project)
+	if err != nil {
+		s.logger.Warn("backup could not read compose config", "project", project, "error", err)
+		return ""
+	}
+	var services []agent.Container
+	for name, svc := range cfg.Services {
+		services = append(services, agent.Container{ComposeService: name, Image: svc.Image})
+	}
+	best, engine := dbdetect.Best(services)
+	if engine == "" {
+		return ""
+	}
+	return best.ComposeService
 }
 
 // databaseContainer returns the project's database container and its engine.

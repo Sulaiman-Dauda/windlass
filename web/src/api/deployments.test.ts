@@ -39,6 +39,17 @@ describe("stageStates", () => {
     });
   });
 
+  it("marks the recorded failed step, even one that logged no step event", () => {
+    // Pull started, then the build failed before it logged its step.
+    expect(stageStates(manual.slice(0, 2), "failed", "building")).toMatchObject({
+      pulling: "done",
+      building: "failed",
+      applying: "pending",
+    });
+    // An unknown step falls back to the events.
+    expect(stageStates(manual.slice(0, 3), "failed", "seeding")).toMatchObject({ applying: "failed" });
+  });
+
   it("follows the reported status while running", () => {
     expect(stageStates(manual.slice(0, 1), "pulling")).toMatchObject({
       preparing: "done",

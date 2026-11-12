@@ -12,7 +12,7 @@ import (
 
 const createBackup = `-- name: CreateBackup :one
 INSERT INTO backups (project_id, kind, destination) VALUES (?, ?, ?)
-RETURNING id, project_id, kind, destination, path, size, status, error, created_at, finished_at
+RETURNING id, project_id, kind, destination, path, size, status, error, created_at, finished_at, db_dump, db_dump_error
 `
 
 type CreateBackupParams struct {
@@ -35,6 +35,8 @@ func (q *Queries) CreateBackup(ctx context.Context, arg CreateBackupParams) (Bac
 		&i.Error,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.DbDump,
+		&i.DbDumpError,
 	)
 	return i, err
 }
@@ -50,17 +52,19 @@ func (q *Queries) DeleteBackup(ctx context.Context, id int64) error {
 
 const finishBackup = `-- name: FinishBackup :exec
 UPDATE backups
-SET status = ?, path = ?, size = ?, error = ?,
+SET status = ?, path = ?, size = ?, error = ?, db_dump = ?, db_dump_error = ?,
     finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?
 `
 
 type FinishBackupParams struct {
-	Status string
-	Path   string
-	Size   int64
-	Error  sql.NullString
-	ID     int64
+	Status      string
+	Path        string
+	Size        int64
+	Error       sql.NullString
+	DbDump      sql.NullString
+	DbDumpError sql.NullString
+	ID          int64
 }
 
 func (q *Queries) FinishBackup(ctx context.Context, arg FinishBackupParams) error {
@@ -69,13 +73,15 @@ func (q *Queries) FinishBackup(ctx context.Context, arg FinishBackupParams) erro
 		arg.Path,
 		arg.Size,
 		arg.Error,
+		arg.DbDump,
+		arg.DbDumpError,
 		arg.ID,
 	)
 	return err
 }
 
 const getBackup = `-- name: GetBackup :one
-SELECT b.id, b.project_id, b.kind, b.destination, b.path, b.size, b.status, b.error, b.created_at, b.finished_at FROM backups b
+SELECT b.id, b.project_id, b.kind, b.destination, b.path, b.size, b.status, b.error, b.created_at, b.finished_at, b.db_dump, b.db_dump_error FROM backups b
 JOIN projects p ON p.id = b.project_id
 WHERE p.name = ? AND b.id = ?
 `
@@ -99,6 +105,8 @@ func (q *Queries) GetBackup(ctx context.Context, arg GetBackupParams) (Backup, e
 		&i.Error,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.DbDump,
+		&i.DbDumpError,
 	)
 	return i, err
 }
@@ -123,7 +131,7 @@ func (q *Queries) GetBackupSchedule(ctx context.Context, projectID int64) (Backu
 }
 
 const listBackupsForPrune = `-- name: ListBackupsForPrune :many
-SELECT id, project_id, kind, destination, path, size, status, error, created_at, finished_at FROM backups
+SELECT id, project_id, kind, destination, path, size, status, error, created_at, finished_at, db_dump, db_dump_error FROM backups
 WHERE project_id = ? AND status = 'done' AND destination = ?
 ORDER BY id DESC
 `
@@ -153,6 +161,8 @@ func (q *Queries) ListBackupsForPrune(ctx context.Context, arg ListBackupsForPru
 			&i.Error,
 			&i.CreatedAt,
 			&i.FinishedAt,
+			&i.DbDump,
+			&i.DbDumpError,
 		); err != nil {
 			return nil, err
 		}
@@ -218,7 +228,7 @@ func (q *Queries) ListDueSchedules(ctx context.Context) ([]ListDueSchedulesRow, 
 }
 
 const listProjectBackups = `-- name: ListProjectBackups :many
-SELECT b.id, b.project_id, b.kind, b.destination, b.path, b.size, b.status, b.error, b.created_at, b.finished_at FROM backups b
+SELECT b.id, b.project_id, b.kind, b.destination, b.path, b.size, b.status, b.error, b.created_at, b.finished_at, b.db_dump, b.db_dump_error FROM backups b
 JOIN projects p ON p.id = b.project_id
 WHERE p.name = ?
 ORDER BY b.id DESC
@@ -245,6 +255,8 @@ func (q *Queries) ListProjectBackups(ctx context.Context, name string) ([]Backup
 			&i.Error,
 			&i.CreatedAt,
 			&i.FinishedAt,
+			&i.DbDump,
+			&i.DbDumpError,
 		); err != nil {
 			return nil, err
 		}

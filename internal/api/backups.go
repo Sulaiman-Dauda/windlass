@@ -22,13 +22,19 @@ type backupDTO struct {
 	Size        int64  `json:"size"`
 	Status      string `json:"status"`
 	Error       string `json:"error,omitempty"`
+	// DBDump is included, failed or none; absent for a backup taken before
+	// Windlass recorded it, when the panel cannot say.
+	DBDump      string `json:"db_dump,omitempty"`
+	DBDumpError string `json:"db_dump_error,omitempty"`
 	CreatedAt   string `json:"created_at"`
 }
 
 func toBackupDTO(b db.Backup) backupDTO {
 	return backupDTO{
 		ID: b.ID, Kind: b.Kind, Destination: b.Destination, Size: b.Size,
-		Status: b.Status, Error: b.Error.String, CreatedAt: b.CreatedAt,
+		Status: b.Status, Error: b.Error.String,
+		DBDump: b.DbDump.String, DBDumpError: b.DbDumpError.String,
+		CreatedAt: b.CreatedAt,
 	}
 }
 

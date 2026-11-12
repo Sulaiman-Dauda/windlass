@@ -114,15 +114,15 @@ func TestDumpDatabaseGivesUpWithoutCredentials(t *testing.T) {
 		t.Fatalf("compose up: %v: %s", err, out)
 	}
 
-	done := make(chan bool, 1)
-	go func() {
-		_, ok := s.dumpDatabase(ctx, project)
-		done <- ok
-	}()
+	done := make(chan dumpResult, 1)
+	go func() { done <- s.dumpDatabase(ctx, project) }()
 	select {
-	case ok := <-done:
-		if ok {
-			t.Fatal("dump reported success without credentials")
+	case res := <-done:
+		if res.status != dumpFailed || res.path != "" {
+			t.Fatalf("dump without credentials = %+v, want failed with no file", res)
+		}
+		if res.reason == "" {
+			t.Fatal("failed dump recorded no reason")
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("dump still waiting after 30s; it is stuck on a password prompt")
@@ -168,9 +168,16 @@ func TestDumpDatabaseRealContainers(t *testing.T) {
 				t.Fatalf("compose up: %v: %s", err, out)
 			}
 
-			dump, ok := s.dumpDatabase(ctx, project)
-			if !ok {
-				t.Fatal("no dump taken")
+			res := s.dumpDatabase(ctx, project)
+			if res.status != dumpIncluded {
+				t.Fatalf("no dump taken: %+v", res)
+			}
+			dump, err := os.ReadFile(res.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ag.FS().RemoveArchive(ctx, res.path); err != nil {
+				t.Fatal(err)
 			}
 			text := string(dump)
 			if !strings.Contains(text, "windlass_marker") || !strings.Contains(text, "backup-proof") {
