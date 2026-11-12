@@ -90,7 +90,7 @@ function Editor({ project, path }: { project: string; path: string }) {
     <Card className="min-w-0 overflow-hidden">
       <div className="flex flex-wrap items-center gap-3 border-b border-hairline px-4 py-2.5">
         <Icon name="file" size={16} className="text-fg3" />
-        <span className="font-mono text-sm font-medium text-fg">{path}</span>
+        <span className="font-mono text-xs font-medium text-fg">{path}</span>
         {dirty && <Tag tone="warn">Unsaved</Tag>}
         {!editable && <Tag>Read only</Tag>}
         {editable && (
@@ -142,7 +142,7 @@ function CodeEditor({
   const lines = value.split("\n").length;
 
   return (
-    <div className="flex h-[min(68vh,720px)] min-h-[360px] bg-surface font-mono text-[13px] leading-6">
+    <div className="flex h-[min(68vh,720px)] min-h-[360px] bg-surface font-mono text-xs leading-6">
       <div
         ref={gutter}
         aria-hidden="true"

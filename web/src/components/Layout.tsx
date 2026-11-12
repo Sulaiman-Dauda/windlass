@@ -164,7 +164,7 @@ function Sidebar({ user, onSearch }: { user: User; onSearch: () => void }) {
             to="/projects?new=1"
             aria-label="New project"
             title="New project"
-            className="-mr-1 grid h-6 w-6 place-items-center rounded-[6px] text-fg3 transition-colors hover:bg-[color-mix(in_oklab,var(--fg)_6%,transparent)] hover:text-fg"
+            className="-mr-1 grid h-6 w-6 place-items-center rounded-sm text-fg3 transition-colors hover:bg-[color-mix(in_oklab,var(--fg)_6%,transparent)] hover:text-fg"
           >
             <Icon name="plus" size={15} />
           </Link>
@@ -222,9 +222,9 @@ export function Monogram({ name, size = "sm" }: { name: string; size?: "sm" | "m
       aria-hidden="true"
       className={cn(
         "grid flex-none place-items-center border border-accent-edge bg-accent-soft font-bold uppercase text-accent",
-        size === "sm" && "h-[18px] w-[18px] rounded-[5px] text-2xs",
-        size === "md" && "h-8 w-8 rounded-[8px] text-sm",
-        size === "lg" && "h-10 w-10 rounded-[10px] text-md",
+        size === "sm" && "h-[18px] w-[18px] rounded-sm text-2xs",
+        size === "md" && "h-8 w-8 rounded-control text-sm",
+        size === "lg" && "h-10 w-10 rounded-sm text-md",
       )}
     >
       {name.slice(0, 1)}
@@ -240,7 +240,7 @@ function InstanceCard() {
       to="/"
       className="mt-4 flex items-center gap-2.5 rounded-control border border-hairline bg-surface px-2.5 py-2 shadow-[var(--shadow-xs)] transition-colors hover:border-edge"
     >
-      <span className="grid h-7 w-7 flex-none place-items-center rounded-[7px] bg-sunken text-fg2">
+      <span className="grid h-7 w-7 flex-none place-items-center rounded-sm bg-sunken text-fg2">
         <Icon name="server" size={15} />
       </span>
       <span className="min-w-0 flex-1">

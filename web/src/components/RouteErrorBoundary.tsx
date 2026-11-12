@@ -34,7 +34,7 @@ class Boundary extends Component<BoundaryProps, BoundaryState> {
     return (
       <div className="grid min-h-[60vh] place-items-center px-4">
         <div className="max-w-md text-center">
-          <div className="mx-auto grid h-11 w-11 place-items-center rounded-[10px] border border-hairline bg-err-soft text-err">
+          <div className="mx-auto grid h-11 w-11 place-items-center rounded-sm border border-hairline bg-err-soft text-err">
             <Icon name="warning" size={20} />
           </div>
           <h1 className="mt-4 text-lg font-semibold text-fg">This page could not be displayed</h1>

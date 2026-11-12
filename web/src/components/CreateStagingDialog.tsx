@@ -125,7 +125,7 @@ export default function CreateStagingDialog({ live, onClose }: { live: string; o
             <Section title="Domains" hint={`Staging gets its own certificates and tells search engines not to index it.`}>
               {p.domains.map((d) => (
                 <div key={d.live} className="grid grid-cols-1 items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                  <span className="truncate font-mono text-sm text-fg2" title={d.live}>
+                  <span className="truncate font-mono text-xs text-fg2" title={d.live}>
                     {d.live}
                   </span>
                   <Input

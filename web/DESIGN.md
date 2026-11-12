@@ -11,14 +11,17 @@ button will do before it does it. Register: dense and practical, technical and e
 Source of truth: `web/src/index.css` (the `@theme` block and the light and dark token blocks).
 The website's `scripts/sync-brand.mjs` reads that file, so keep its markers (see `AGENTS.md`).
 
-- fonts: Manrope, Windlass Mono
-- colours (light): #f3f4f6, #ffffff, #f8f9fa, #f1f2f4, #0c0e12, #0e1116, #4a515c, #676c77, #0d6f97, #0a5c7f, #12804a, #a15e00, #c4382a
-- colours (dark): #08090a, #0e0f11, #131416, #18191c, #0a0b0d, #f2f3f5, #a0a5ae, #878d97, #3aa9d6, #1786b8, #3ccf85, #f0a83a, #ff6b5b
-- radii: 8px (controls), 12px (cards), 16px (dialogs), full (pills, dots, switches)
+- fonts: Instrument Sans, Red Hat Mono, Manrope
+- colours: #f3f4f6, #ffffff, #f8f9fa, #f1f2f4, #0c0e12, #0e1116, #4a515c, #676c77, #0d6f97, #0a5c7f, #0e7a45, #985800, #c4382a, #ececed, #08090a, #0e0f11, #131416, #18191c, #0a0b0d, #f2f3f5, #a0a5ae, #878d97, #3aa9d6, #1786b8, #3ccf85, #f0a83a, #ff6b5b, #2d2e30, #1f2022, #c5dde6
+- radii: 0 (rows and tables), 6px (tiles and keys), 8px (controls), 12px (cards), 16px (panel and dialogs), pill
+- Light first, then dark. #ececed, #2d2e30 and #1f2022 are `--hairline` and `--edge` blended on
+  white and on the dark panel, and #c5dde6 is `--accent-edge` on white; listed so the lint reads
+  them as tokens.
 - accent: #0d6f97 light, #3aa9d6 dark. The primary action, the selected row, links and focus.
 
 Type scale (px): 11 / 12.5 / 14 / 15 / 16 / 17 / 20 / 24 / 30. App body 14/20; card titles 15
-semibold; dialog titles 17 semibold. Commits, image names, paths and keys are in Windlass Mono.
+semibold; dialog titles 17 semibold. Commits, image names, paths and keys are in Red Hat Mono;
+Manrope is the wordmark only.
 Spacing: Tailwind's 4px steps; cards pad 16 to 20, rows 10 to 14 vertical.
 Elevation: `--shadow-xs` on cards, `--shadow-lg` on dialogs and menus only.
 Density: table rows 36 to 48px, side cards in a 340px column beside the main card at xl.
@@ -51,6 +54,10 @@ Density: table rows 36 to 48px, side cards in a 340px column beside the main car
 - No competing Tailwind classes on kit components (`cn()` does not resolve conflicts).
 
 ## Allowlist
+
+- `motion` transition: all: the reduced-motion reset in index.css sets a 0.001ms duration on
+  every element, which the lint counts. Component transitions name their properties.
+- `off-token-font` Manrope: the wordmark only, until the logo is outlined as SVG.
 
 ## References
 

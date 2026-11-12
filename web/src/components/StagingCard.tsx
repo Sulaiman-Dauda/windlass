@@ -73,7 +73,7 @@ function Side({
           className="group mt-1 flex min-h-7 items-baseline gap-2 py-0.5"
         >
           <span className="text-md font-semibold text-fg group-hover:text-accent">#{current.number}</span>
-          {current.commit && <span className="font-mono text-sm text-fg2">{shortCommit(current.commit)}</span>}
+          {current.commit && <span className="font-mono text-xs text-fg2">{shortCommit(current.commit)}</span>}
           <span className="text-xs text-fg3">{currentLabel}</span>
         </Link>
       ) : (
@@ -205,7 +205,7 @@ function PairCard({ st, onRecreate }: { st: StagingStatus; onRecreate?: () => vo
           <ul className="divide-y divide-hairline">
             {st.drift.map((f) => (
               <li key={f.file} className="flex items-center gap-3 px-5 py-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-sm text-fg">{f.file}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-fg">{f.file}</span>
                 <span className="text-xs text-fg3">{driftLabel[f.state]}</span>
                 {member && (
                   <Button size="xs" variant="ghost" onClick={() => setDiffing(f)}>

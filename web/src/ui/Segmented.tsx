@@ -41,7 +41,7 @@ export function Segmented<T extends string>({
             aria-pressed={on}
             onClick={() => onChange(o.value)}
             className={cn(
-              "inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-[6px] border font-medium transition-[background-color,color,box-shadow] duration-150",
+              "inline-flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-sm border font-medium transition-[background-color,color,box-shadow] duration-150",
               size === "sm" ? "h-6 px-2 text-xs" : "h-7 px-2.5 text-sm",
               on
                 ? "border-hairline bg-surface text-fg shadow-[var(--shadow-sm)]"

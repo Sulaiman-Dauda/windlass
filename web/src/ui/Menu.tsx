@@ -158,7 +158,7 @@ export function Menu({
 }
 
 const itemClass =
-  "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-[6px] px-2.5 text-left text-sm font-medium outline-none " +
+  "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-sm px-2.5 text-left text-sm font-medium outline-none " +
   "transition-colors duration-100 focus-visible:outline-none";
 
 export function MenuItem({

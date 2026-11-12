@@ -76,7 +76,7 @@ export function Tag({ children, tone = "idle", className }: { children: ReactNod
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center whitespace-nowrap rounded-[6px] px-1.5 text-2xs font-semibold uppercase tracking-[0.04em]",
+        "inline-flex h-5 items-center whitespace-nowrap rounded-sm px-1.5 text-2xs font-semibold uppercase tracking-[0.04em]",
         tones[tone],
         className,
       )}
@@ -90,7 +90,7 @@ export function Kbd({ children, className }: { children: ReactNode; className?: 
   return (
     <kbd
       className={cn(
-        "inline-flex h-5 min-w-5 items-center justify-center rounded-[5px] border border-edge bg-surface px-1 font-sans text-2xs font-semibold text-fg3 shadow-[0_1px_0_var(--edge)]",
+        "inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-edge bg-surface px-1 font-sans text-2xs font-semibold text-fg3 shadow-[0_1px_0_var(--edge)]",
         className,
       )}
     >
