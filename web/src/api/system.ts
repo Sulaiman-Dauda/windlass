@@ -46,7 +46,7 @@ export function useAttention() {
   });
 }
 
-export interface DiskKind {
+interface DiskKind {
   count: number;
   active_count: number;
   bytes: number;

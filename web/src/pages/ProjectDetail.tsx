@@ -406,4 +406,3 @@ export default function ProjectDetail() {
     </Page>
   );
 }
-
