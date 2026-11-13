@@ -31,7 +31,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { sqlDB.Close() })
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err := store.Migrate(sqlDB, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
