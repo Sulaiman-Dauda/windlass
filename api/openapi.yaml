@@ -669,11 +669,34 @@ paths:
 
   /system/metrics:
     get:
-      summary: Host, node, and container metrics
+      summary: Host, node, container and panel metrics
       operationId: systemMetrics
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
-        "200": { description: "{host, node, containers}" }
+        "200": { description: "{host, node, containers, panel: {rss_bytes, history: [{time, rss_bytes}]}}" }
+
+  /system/attention:
+    get:
+      summary: What needs a person (Needs you list)
+      description: |
+        Projects whose last deploy failed, the projects disk at or over its
+        threshold (setting attention_disk_percent, default 85), projects with
+        volumes and no enabled backup schedule, Caddy not answering while a
+        domain needs it, and (admins only) a panel update. Cached for 30
+        seconds. Items are sorted error, warn, info.
+      operationId: systemAttention
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: "{checked_at, items: [{kind, tone, project, title, detail, link, action}]}" }
+
+  /system/disk:
+    get:
+      summary: Disk use of the projects volume and of Docker by kind
+      description: Docker's figures are cached for 5 minutes, since counting volume sizes is slow.
+      operationId: systemDisk
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: "{host: {used_bytes, total_bytes}, docker: {images, containers, volumes, build_cache}, checked_at}" }
 
   /system/update:
     get:
@@ -900,6 +923,12 @@ paths:
   /projects/{name}/logs:
     get:
       summary: Container log stream (SSE)
+      description: |
+        Without service, every container of the project is shown, merged by
+        Docker's timestamps; a service scaled to several containers is merged
+        the same way. tail is the history sent in all, at most 5000 lines when
+        merged. Each "log" event is
+        {stream, text, time, service, container}.
       operationId: projectLogs
       security: [{ session: [] }, { bearerAuth: [] }]
       parameters:
@@ -908,6 +937,20 @@ paths:
         - { name: tail, in: query, schema: { type: integer, default: 200 } }
       responses:
         "200": { description: text/event-stream of log lines }
+
+  /projects/{name}/drift:
+    get:
+      summary: Containers that no longer match the project's files or images (read-only)
+      description: |
+        Compares each container's Compose config hash with `docker compose
+        config --hash` for the files the live deploy used, and its image with
+        the local image its tag names now. Nothing is pulled or recreated.
+      operationId: projectDrift
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: "{project, checked_at, drifted, extra_files, services: [{service, container, config_changed, image_changed, missing, orphan}]}" }
+        "404": { description: Project not found }
+        "502": { description: Compose or Docker could not be read }
 
   /projects/{name}/terminal:
     get:

@@ -370,6 +370,61 @@ func (q *Queries) ListDeployments(ctx context.Context, arg ListDeploymentsParams
 	return items, nil
 }
 
+const listLatestFailedDeployments = `-- name: ListLatestFailedDeployments :many
+SELECT p.name AS project_name, d.number, d.error, d.failed_step, d.error_line, d.finished_at,
+    CAST(COALESCE((SELECT MAX(s.number) FROM deployments s
+     WHERE s.project_id = p.id AND s.status = 'succeeded'), 0) AS INTEGER) AS live_number
+FROM projects p
+JOIN deployments d ON d.id = (
+    SELECT l.id FROM deployments l WHERE l.project_id = p.id ORDER BY l.number DESC LIMIT 1
+)
+WHERE d.status = 'failed'
+ORDER BY p.name
+`
+
+type ListLatestFailedDeploymentsRow struct {
+	ProjectName string
+	Number      int64
+	Error       sql.NullString
+	FailedStep  sql.NullString
+	ErrorLine   sql.NullString
+	FinishedAt  sql.NullString
+	LiveNumber  int64
+}
+
+// Projects whose most recent deployment failed, with the number of the last
+// one that succeeded (0 when none has).
+func (q *Queries) ListLatestFailedDeployments(ctx context.Context) ([]ListLatestFailedDeploymentsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listLatestFailedDeployments)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLatestFailedDeploymentsRow
+	for rows.Next() {
+		var i ListLatestFailedDeploymentsRow
+		if err := rows.Scan(
+			&i.ProjectName,
+			&i.Number,
+			&i.Error,
+			&i.FailedStep,
+			&i.ErrorLine,
+			&i.FinishedAt,
+			&i.LiveNumber,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markDeploymentStarted = `-- name: MarkDeploymentStarted :exec
 UPDATE deployments
 SET status = ?, started_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')

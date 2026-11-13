@@ -14,6 +14,7 @@ import (
 
 	"github.com/windlass-dev/windlass/internal/agent/local"
 	"github.com/windlass-dev/windlass/internal/api"
+	"github.com/windlass-dev/windlass/internal/attention"
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/backups"
@@ -28,6 +29,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/proxy"
 	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/secrets"
+	"github.com/windlass-dev/windlass/internal/selfstat"
 	"github.com/windlass-dev/windlass/internal/server"
 	"github.com/windlass-dev/windlass/internal/staging"
 	"github.com/windlass-dev/windlass/internal/store"
@@ -152,6 +154,9 @@ func run() error {
 		Audit:     api.MCPAudit(auditLog),
 	})
 
+	selfRing := selfstat.NewRing()
+	go selfRing.Run(ctx)
+
 	a := &api.API{
 		Auth:       authSvc,
 		Audit:      auditLog,
@@ -170,6 +175,8 @@ func run() error {
 		Box:        box,
 		Logger:     logger,
 		MCP:        mcpSrv,
+		Attention:  attention.New(queries, ag, proxySvc, updateSvc, logger),
+		SelfStat:   selfRing,
 	}
 
 	handler, err := server.New(cfg, logger, a)

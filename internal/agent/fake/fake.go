@@ -87,6 +87,21 @@ type Fake struct {
 	// Spools maps SpoolFile paths to their contents until RemoveArchive.
 	Spools map[string][]byte
 
+	// Hashes is what Compose().ConfigHashes returns, keyed by project, and
+	// HashFiles records the extra files each call layered.
+	Hashes    map[string]map[string]string
+	HashFiles map[string][]string
+	// ImageIDs maps an image reference to its local ID for Docker().ImageID;
+	// a reference not in it is an error, as an image not pulled is.
+	ImageIDs map[string]string
+	// Disk is what Docker().DiskUsage reports.
+	Disk agent.DiskUsage
+	// LogLines, keyed by container ID, replace the single default line
+	// Docker().Logs emits. Logs honours Tail and Since over them.
+	LogLines map[string][]agent.LogLine
+	// LogOpts records the options of each Logs call, keyed by container ID.
+	LogOpts map[string][]agent.LogOpts
+
 	Metrics       agent.HostMetrics
 	HTTPResponses map[string]agent.HTTPCheckResult
 	ImageUsage    agent.ImageDiskUsage
@@ -115,6 +130,11 @@ func New() *Fake {
 		ExecScripts:    map[string]ExecScript{},
 		ExecInput:      map[string][]byte{},
 		ExecCmds:       map[string][]string{},
+		Hashes:         map[string]map[string]string{},
+		HashFiles:      map[string][]string{},
+		ImageIDs:       map[string]string{},
+		LogLines:       map[string][]agent.LogLine{},
+		LogOpts:        map[string][]agent.LogOpts{},
 		DockerFree:     100 << 30,
 		ProjectsFree:   100 << 30,
 	}
@@ -233,6 +253,16 @@ func (c composeFake) Config(ctx context.Context, project string) (agent.Resolved
 	return c.f.Resolved[project], nil
 }
 
+func (c composeFake) ConfigHashes(ctx context.Context, project string, extraFiles []string) (map[string]string, error) {
+	if err := c.f.record(fmt.Sprintf("compose.hashes(%s)", project), nil); err != nil {
+		return nil, err
+	}
+	c.f.mu.Lock()
+	defer c.f.mu.Unlock()
+	c.f.HashFiles[project] = slices.Clone(extraFiles)
+	return maps.Clone(c.f.Hashes[project]), nil
+}
+
 // ---------------------------------------------------------------------------
 
 type dockerFake struct{ f *Fake }
@@ -259,8 +289,58 @@ func (d dockerFake) Logs(ctx context.Context, id string, opts agent.LogOpts, out
 	if err := d.f.record(fmt.Sprintf("docker.logs(%s)", id), nil); err != nil {
 		return err
 	}
-	d.f.emit(out, "log line from "+id)
+	d.f.mu.Lock()
+	d.f.LogOpts[id] = append(d.f.LogOpts[id], opts)
+	lines, scripted := d.f.LogLines[id]
+	lines = slices.Clone(lines)
+	d.f.mu.Unlock()
+	if !scripted {
+		d.f.emit(out, "log line from "+id)
+		return nil
+	}
+	if !opts.Since.IsZero() {
+		var after []agent.LogLine
+		for _, l := range lines {
+			if !l.Time.Before(opts.Since) {
+				after = append(after, l)
+			}
+		}
+		lines = after
+	} else {
+		tail := opts.Tail
+		if tail <= 0 {
+			tail = 200
+		}
+		if len(lines) > tail {
+			lines = lines[len(lines)-tail:]
+		}
+	}
+	for _, l := range lines {
+		out(l)
+	}
 	return nil
+}
+
+func (d dockerFake) ImageID(ctx context.Context, ref string) (string, error) {
+	if err := d.f.record(fmt.Sprintf("docker.imageid(%s)", ref), nil); err != nil {
+		return "", err
+	}
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	id, ok := d.f.ImageIDs[ref]
+	if !ok {
+		return "", fmt.Errorf("no such image: %s", ref)
+	}
+	return id, nil
+}
+
+func (d dockerFake) DiskUsage(ctx context.Context) (agent.DiskUsage, error) {
+	if err := d.f.record("docker.df", nil); err != nil {
+		return agent.DiskUsage{}, err
+	}
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	return d.f.Disk, nil
 }
 
 func (d dockerFake) Stats(ctx context.Context, ids []string) ([]agent.ContainerStats, error) {
@@ -299,7 +379,7 @@ func (d dockerFake) Events(ctx context.Context, out func(agent.DockerEvent)) err
 type proxyFake struct{ f *Fake }
 
 func (p proxyFake) Available(ctx context.Context) (agent.ProxyInfo, error) {
-	if err := p.f.record("proxy.available", nil); err != nil {
+	if err := p.f.record("proxy.available", ctx.Err()); err != nil {
 		return agent.ProxyInfo{}, err
 	}
 	p.f.mu.Lock()

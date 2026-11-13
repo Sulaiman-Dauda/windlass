@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/windlass-dev/windlass/internal/agent"
+	"github.com/windlass-dev/windlass/internal/selfstat"
 )
 
 type systemMetricsResponse struct {
@@ -13,6 +14,12 @@ type systemMetricsResponse struct {
 		Running int `json:"running"`
 		Total   int `json:"total"`
 	} `json:"containers"`
+	// Panel is the Windlass process itself. RSSBytes is 0 where it cannot
+	// be read; History is once a minute for the last hour, oldest first.
+	Panel struct {
+		RSSBytes uint64            `json:"rss_bytes"`
+		History  []selfstat.Sample `json:"history"`
+	} `json:"panel"`
 }
 
 func (a *API) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +40,11 @@ func (a *API) handleSystemMetrics(w http.ResponseWriter, r *http.Request) {
 				resp.Containers.Running++
 			}
 		}
+	}
+	resp.Panel.RSSBytes, _ = selfstat.RSS()
+	resp.Panel.History = []selfstat.Sample{}
+	if a.SelfStat != nil {
+		resp.Panel.History = a.SelfStat.Samples()
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

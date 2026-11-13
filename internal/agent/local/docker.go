@@ -22,6 +22,7 @@ const (
 	labelComposeProject = "com.docker.compose.project"
 	labelComposeService = "com.docker.compose.service"
 	labelComposeWorkDir = "com.docker.compose.project.working_dir"
+	labelComposeHash    = "com.docker.compose.config-hash"
 )
 
 type dockerLocal struct{ l *Local }
@@ -55,7 +56,14 @@ func (d dockerLocal) ListContainers(ctx context.Context, filter agent.ContainerF
 			ComposeProject:    c.Labels[labelComposeProject],
 			ComposeService:    c.Labels[labelComposeService],
 			ComposeWorkingDir: c.Labels[labelComposeWorkDir],
+			ConfigHash:        c.Labels[labelComposeHash],
+			ImageID:           c.ImageID,
 			CreatedAt:         time.Unix(c.Created, 0).UTC(),
+		}
+		for _, m := range c.Mounts {
+			if m.Type == mount.TypeVolume && m.Name != "" && !anonymousVolume(m.Name) {
+				ac.Volumes = append(ac.Volumes, m.Name)
+			}
 		}
 		if c.NetworkSettings != nil {
 			for _, nw := range c.NetworkSettings.Networks {
@@ -94,12 +102,18 @@ func (d dockerLocal) Logs(ctx context.Context, containerID string, opts agent.Lo
 	if opts.Tail > 0 {
 		tail = fmt.Sprintf("%d", opts.Tail)
 	}
+	since := ""
+	if !opts.Since.IsZero() {
+		tail = "all"
+		since = fmt.Sprintf("%d.%09d", opts.Since.Unix(), opts.Since.Nanosecond())
+	}
 	rc, err := cli.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     opts.Follow,
-		Timestamps: false,
+		Timestamps: true,
 		Tail:       tail,
+		Since:      since,
 	})
 	if err != nil {
 		return err
@@ -107,7 +121,8 @@ func (d dockerLocal) Logs(ctx context.Context, containerID string, opts agent.Lo
 	defer rc.Close()
 
 	emit := func(stream, text string) {
-		out(agent.LogLine{Stream: stream, Text: text, Time: time.Now().UTC()})
+		at, text := splitLogTime(text)
+		out(agent.LogLine{Stream: stream, Text: text, Time: at})
 	}
 
 	if inspectResult.Container.Config != nil && inspectResult.Container.Config.Tty {
@@ -130,6 +145,35 @@ func (d dockerLocal) Logs(ctx context.Context, containerID string, opts agent.Lo
 		return nil // follow cancelled by caller
 	}
 	return err
+}
+
+// splitLogTime takes the timestamp Docker writes at the start of each line
+// when asked for one. A line without it keeps its text and gets the time it
+// was read, so nothing is dropped.
+func splitLogTime(line string) (time.Time, string) {
+	stamp, rest, ok := strings.Cut(line, " ")
+	if !ok {
+		stamp, rest = line, ""
+	}
+	if at, err := time.Parse(time.RFC3339Nano, stamp); err == nil {
+		return at.UTC(), rest
+	}
+	return time.Now().UTC(), line
+}
+
+// anonymousVolume reports a volume Docker named itself, for an image's
+// VOLUME line or an unnamed mount: 64 hex characters. Compose names the
+// volumes it declares project_name.
+func anonymousVolume(name string) bool {
+	if len(name) != 64 {
+		return false
+	}
+	for _, r := range name {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // lineWriter splits a byte stream into lines for the LogSink.
@@ -229,6 +273,41 @@ func (d dockerLocal) ImageDigest(ctx context.Context, ref string) (string, error
 		}
 	}
 	return inspect.ID, nil
+}
+
+func (d dockerLocal) ImageID(ctx context.Context, ref string) (string, error) {
+	cli, err := d.l.docker()
+	if err != nil {
+		return "", err
+	}
+	inspect, err := cli.ImageInspect(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+	return inspect.ID, nil
+}
+
+func (d dockerLocal) DiskUsage(ctx context.Context) (agent.DiskUsage, error) {
+	cli, err := d.l.docker()
+	if err != nil {
+		return agent.DiskUsage{}, err
+	}
+	du, err := cli.DiskUsage(ctx, client.DiskUsageOptions{
+		Containers: true, Images: true, Volumes: true, BuildCache: true,
+	})
+	if err != nil {
+		return agent.DiskUsage{}, err
+	}
+	return agent.DiskUsage{
+		Images: agent.DiskUsageKind{Count: du.Images.TotalCount, ActiveCount: du.Images.ActiveCount,
+			Bytes: du.Images.TotalSize, ReclaimableBytes: du.Images.Reclaimable},
+		Containers: agent.DiskUsageKind{Count: du.Containers.TotalCount, ActiveCount: du.Containers.ActiveCount,
+			Bytes: du.Containers.TotalSize, ReclaimableBytes: du.Containers.Reclaimable},
+		Volumes: agent.DiskUsageKind{Count: du.Volumes.TotalCount, ActiveCount: du.Volumes.ActiveCount,
+			Bytes: du.Volumes.TotalSize, ReclaimableBytes: du.Volumes.Reclaimable},
+		BuildCache: agent.DiskUsageKind{Count: du.BuildCache.TotalCount, ActiveCount: du.BuildCache.ActiveCount,
+			Bytes: du.BuildCache.TotalSize, ReclaimableBytes: du.BuildCache.Reclaimable},
+	}, nil
 }
 
 func (d dockerLocal) ImageDiskUsage(ctx context.Context) (agent.ImageDiskUsage, error) {

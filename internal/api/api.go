@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/windlass-dev/windlass/internal/agent"
+	"github.com/windlass-dev/windlass/internal/attention"
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/backups"
@@ -24,6 +25,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/proxy"
 	"github.com/windlass-dev/windlass/internal/registries"
 	"github.com/windlass-dev/windlass/internal/secrets"
+	"github.com/windlass-dev/windlass/internal/selfstat"
 	"github.com/windlass-dev/windlass/internal/staging"
 	"github.com/windlass-dev/windlass/internal/store/db"
 	"github.com/windlass-dev/windlass/internal/update"
@@ -49,8 +51,14 @@ type API struct {
 	// MCP serves the Model Context Protocol at /mcp when set. It needs an
 	// API token and calls these routes in process with it.
 	MCP http.Handler
+	// Attention builds the Needs you list.
+	Attention *attention.Service
+	// SelfStat holds the panel's memory over the last hour; nil leaves the
+	// history out of /system/metrics.
+	SelfStat *selfstat.Ring
 
 	authLimiter *authRateLimiter
+	disk        diskCache
 }
 
 // agentUpReq builds the standard up request for manual start actions.
@@ -104,6 +112,10 @@ func (a *API) Routes(r chi.Router) {
 		r.Get("/events", a.handleGlobalEvents)
 		r.Get("/proxy/status", a.handleProxyStatus)
 		r.Get("/system/metrics", a.handleSystemMetrics)
+		r.Get("/system/disk", a.handleSystemDisk)
+		if a.Attention != nil {
+			r.Get("/system/attention", a.handleAttention)
+		}
 		// GitHub redirects the admin's browser here after authorizing the
 		// repo-scope connect flow; the session cookie authenticates it.
 		r.With(auth.RejectToken, auth.RequireRole("admin")).
