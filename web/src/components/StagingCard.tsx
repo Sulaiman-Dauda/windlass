@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useCan } from "../api/auth";
 import { useProject } from "../api/projects";
-import { deploymentTone, isActive } from "../api/deployments";
+import { deploymentTone, isActive, useCreateDeployment } from "../api/deployments";
 import {
   shortCommit,
   useCopyToLive,
@@ -11,6 +11,7 @@ import {
   useStagingDiff,
   useStagingStatus,
   type DeploymentRef,
+  type GitCommit,
   type StagingStatus,
 } from "../api/staging";
 import { Card, CardHeader, CardFooter } from "../ui/Card";
@@ -22,7 +23,7 @@ import { Skeleton } from "../ui/Skeleton";
 import { useToast, errorText } from "../ui/Toast";
 import { diffLines } from "../ui/diff";
 import { cn } from "../ui/cn";
-import { plural } from "../ui/format";
+import { plural, timeAgo } from "../ui/format";
 import RecreateStagingDialog from "./RecreateStagingDialog";
 
 /**
@@ -98,6 +99,49 @@ const driftLabel = {
   live_only: "Only on live",
 } as const;
 
+/** One line per commit: hash, subject, and on the card the author and when. */
+function CommitList({ commits, compact }: { commits: GitCommit[]; compact?: boolean }) {
+  return (
+    <ul className="divide-y divide-hairline">
+      {commits.map((c) => (
+        <li key={c.hash} className={cn("flex items-baseline gap-3 py-1.5 text-xs", compact ? "px-3" : "px-5")}>
+          <span className="shrink-0 font-mono text-fg2">{shortCommit(c.hash)}</span>
+          <span className="min-w-0 flex-1 truncate text-fg" title={c.subject}>
+            {c.subject}
+          </span>
+          {!compact && (
+            <span className="hidden shrink-0 text-fg3 sm:inline">
+              {c.author}, {timeAgo(c.time)}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function commitsHeading(st: StagingStatus) {
+  const n = st.commits?.length ?? 0;
+  return st.commits_more ? `More than ${plural(n, "commit")} to promote` : `${plural(n, "commit")} to promote`;
+}
+
+function envMissingText(st: StagingStatus) {
+  const keys = st.env_missing ?? [];
+  return (
+    <>
+      {st.live}'s .env lacks {keys.length === 1 ? "a key" : `${keys.length} keys`} staging has:{" "}
+      <span className="font-mono">{keys.join(", ")}</span>. Add {keys.length === 1 ? "it" : "them"} to {st.live} first unless
+      its compose file or an env_file sets {keys.length === 1 ? "it" : "them"}.
+    </>
+  );
+}
+
+/** Staging's branch has moved on past what staging last deployed. */
+function behind(st: StagingStatus) {
+  const last = st.staging_latest;
+  return !!st.branch_head && !!last?.commit && !isActive(last.status) && st.branch_head !== last.commit;
+}
+
 /**
  * Promote with its confirm, then a jump to live's new deployment. Shared by
  * the pair card and staging's deployment detail.
@@ -117,6 +161,15 @@ export function usePromoteAction(st: StagingStatus | null | undefined) {
         <>
           {st.live} deploys {p.commit ? <>commit <span className="font-mono">{shortCommit(p.commit)}</span> with </> : null}
           the images {st.staging} ran. Pull and build are skipped. {st.live} keeps its own compose files, environment and data.
+          {st.commits && st.commits.length > 0 && (
+            <span className="mt-3 block">
+              <span className="block text-xs font-semibold text-fg2">{commitsHeading(st)}</span>
+              <span className="mt-1 block max-h-56 overflow-auto rounded-control border border-hairline">
+                <CommitList commits={st.commits} compact />
+              </span>
+            </span>
+          )}
+          {!!st.env_missing?.length && <span className="mt-2 block text-warn">{envMissingText(st)}</span>}
           {st.drift.length > 0 && (
             <span className="mt-2 block text-warn">
               {plural(st.drift.length, "compose file")} {st.drift.length === 1 ? "differs" : "differ"} from staging. Copy any
@@ -146,8 +199,13 @@ function PairCard({ st, onRecreate }: { st: StagingStatus; onRecreate?: () => vo
   const promote = usePromoteAction(st);
   const setAuto = useSetAutoPromote(st.staging);
   const [diffing, setDiffing] = useState<StagingStatus["drift"][number] | null>(null);
+  const [allCommits, setAllCommits] = useState(false);
+  const deploy = useCreateDeployment(st.staging);
+  const navigate = useNavigate();
   const member = can("member");
   const p = st.promotable;
+  const commits = st.commits ?? [];
+  const shown = allCommits ? commits : commits.slice(0, 5);
 
   return (
     <Card>
@@ -179,7 +237,6 @@ function PairCard({ st, onRecreate }: { st: StagingStatus; onRecreate?: () => vo
                 onClick={promote.run}
                 disabled={!!st.promote_blocked}
                 loading={promote.pending}
-                title={st.promote_blocked ? `Promote is unavailable because ${st.promote_blocked}` : undefined}
               >
                 {p ? `Promote #${p.number}` : "Promote"}
               </Button>
@@ -195,6 +252,49 @@ function PairCard({ st, onRecreate }: { st: StagingStatus; onRecreate?: () => vo
         <p className="border-t border-hairline px-5 py-2.5 text-xs text-fg3">
           Promote is unavailable because {st.promote_blocked}.
         </p>
+      )}
+
+      {behind(st) && (
+        <div className="flex items-center gap-3 border-t border-hairline px-5 py-2.5 text-xs">
+          <p className="min-w-0 flex-1 text-warn">
+            Staging is behind <span className="font-mono">{st.branch}</span>: commit{" "}
+            <span className="font-mono">{shortCommit(st.branch_head!)}</span> has not been deployed to {st.staging}.
+          </p>
+          {member && (
+            <Button
+              size="xs"
+              variant="secondary"
+              icon="deploy"
+              loading={deploy.isPending}
+              onClick={() =>
+                deploy.mutate(undefined, {
+                  onSuccess: (d) => navigate(`/projects/${st.staging}/deployments?d=${d.number}`),
+                  onError: (e) => toast.err("Could not deploy staging", errorText(e)),
+                })
+              }
+            >
+              Deploy staging
+            </Button>
+          )}
+        </div>
+      )}
+
+      {commits.length > 0 && (
+        <div className="border-t border-hairline pb-1.5">
+          <div className="px-5 pb-1 pt-3 text-xs font-semibold text-fg2">{commitsHeading(st)}</div>
+          <CommitList commits={shown} />
+          {commits.length > shown.length && (
+            <div className="px-5 pt-1">
+              <Button size="xs" variant="ghost" onClick={() => setAllCommits(true)}>
+                Show all {commits.length}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!!st.env_missing?.length && (
+        <p className="border-t border-hairline px-5 py-2.5 text-xs text-warn">{envMissingText(st)}</p>
       )}
 
       {st.drift.length > 0 && (

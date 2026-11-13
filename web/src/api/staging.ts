@@ -87,6 +87,21 @@ export interface StagingStatus {
   recreate_flagged_keys?: string[];
   rewrites: HostnameRewrite[];
   drift: { file: string; state: "changed" | "staging_only" | "live_only" }[];
+  /** What Promote brings to live, newest first; absent when it cannot be read. */
+  commits?: GitCommit[];
+  /** More commits than the list holds. */
+  commits_more?: boolean;
+  /** Staging's branch at the remote; absent when the remote cannot be reached. */
+  branch_head?: string;
+  /** .env keys staging has and live lacks. Names only; absent when a .env cannot be read. */
+  env_missing?: string[];
+}
+
+export interface GitCommit {
+  hash: string;
+  subject: string;
+  author: string;
+  time: string;
 }
 
 export interface FileDiff {

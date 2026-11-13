@@ -1,10 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
+import { panelData, stagingProject as project } from "./staging-fixture";
 
 async function panel(page: Page, options: { role?: string; eligible?: boolean; hasPassword?: boolean; flaggedKeys?: string[] } = {}) {
   const role = options.role ?? "member";
-  const project = { id: 2, name: "app-staging", source: "git", git_repo: "https://example.com/app.git",
-    git_branch: "preview", auto_deploy: true, staging_of: "app", created_at: "2026-10-27T00:00:00Z" };
-  const live = { ...project, id: 1, name: "app", staging_of: undefined, staging: "app-staging" };
   const latest = { id: 1, number: 1, status: "failed", triggered_by: "manual", created_at: project.created_at };
   let inGap = false;
   let gapReads = 0;
@@ -15,19 +13,13 @@ async function panel(page: Page, options: { role?: string; eligible?: boolean; h
       gapReads++;
       return route.fulfill({ status: 404, json: { error: { code: "not_found", message: "project has no staging" } } });
     }
-    const data = path === "/auth/status" ? { authenticated: true, needs_setup: false, user: { id: 1, email: "member@example.com", role } }
-      : path === "/auth/me" ? { id: 1, email: "member@example.com", role, has_password: options.hasPassword ?? true }
-      : path === "/system/metrics" ? { node: { hostname: "test-server" }, containers: { running: 0, total: 0 } }
-      : path === "/projects" ? [live, project]
-      : path === "/projects/app" ? live
-      : path === "/projects/app-staging" ? project
-      : path.endsWith("/staging") ? { live: "app", staging: "app-staging", branch: "preview", auto_promote: true,
+    const data = panelData(path, role, options.hasPassword ?? true)
+      ?? (path.endsWith("/staging") ? { live: "app", staging: "app-staging", branch: "preview", auto_promote: true,
         staging_latest: latest, live_current: null, live_latest: null, promotable: null,
         promote_blocked: "staging has no succeeded deployment yet", can_recreate: options.eligible ?? true,
-        recreate_flagged_keys: options.flaggedKeys ?? [], rewrites: [], drift: [] }
-      : path.endsWith("/services") ? { services: [] }
+        recreate_flagged_keys: options.flaggedKeys ?? [], rewrites: [], drift: [], env_missing: [] }
       : path.endsWith("/deployments") ? [latest]
-      : path.endsWith("/domains") ? [] : {};
+      : {});
     return route.fulfill({ json: data });
   });
   return { project, gap: () => { inGap = true; }, gapReads: () => gapReads };

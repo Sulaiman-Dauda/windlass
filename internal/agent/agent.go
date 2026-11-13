@@ -537,7 +537,51 @@ type HostAgent interface {
 	HTTPCheck(ctx context.Context, req HTTPCheckReq) (HTTPCheckResult, error)
 	// GitSync clones or updates a repository into a project directory.
 	GitSync(ctx context.Context, req GitSyncReq, out LogSink) (GitSyncResult, error)
+	// GitLog lists the commits in a project's checkout that To has and From
+	// does not, newest first. It reads only the local repository.
+	GitLog(ctx context.Context, req GitLogReq) (GitLogResult, error)
+	// GitRemoteHead reads the commit a branch points at on the remote,
+	// without touching any checkout.
+	GitRemoteHead(ctx context.Context, req GitRemoteHeadReq) (string, error)
 }
+
+type GitLogReq struct {
+	Project string `json:"project"`
+	// Subdir holding the checkout (default "src").
+	Subdir string `json:"subdir,omitempty"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	// Limit caps the commits returned; More says whether there were others.
+	Limit int `json:"limit"`
+}
+
+type GitCommit struct {
+	Hash    string    `json:"hash"`
+	Subject string    `json:"subject"`
+	Author  string    `json:"author"`
+	Time    time.Time `json:"time"`
+}
+
+type GitLogResult struct {
+	Commits []GitCommit `json:"commits"`
+	More    bool        `json:"more"`
+}
+
+// ErrUnknownCommit is returned by GitLog when the checkout does not have
+// From or To, as after a force push or when the two projects track
+// unrelated histories.
+var ErrUnknownCommit = errors.New("commit is not in the checkout")
+
+type GitRemoteHeadReq struct {
+	URL    string `json:"url"`
+	Branch string `json:"branch"`
+	// Token as in GitSyncReq; never written to disk.
+	Token string `json:"token,omitempty"`
+}
+
+// ErrBranchNotFound is returned by GitRemoteHead when the remote has no
+// such branch.
+var ErrBranchNotFound = errors.New("branch not found at the remote")
 
 type HTTPCheckReq struct {
 	URL     string `json:"url"`
