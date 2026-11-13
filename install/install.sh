@@ -22,6 +22,7 @@ LOCAL_BINARY=""
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m ✓ \033[0m%s\n' "$*"; }
+warn() { printf '\033[1;33m ! \033[0m%s\n' "$*"; }
 fail() { printf '\033[1;31m ✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
@@ -248,11 +249,63 @@ else
   log "systemd not found — start manually: WINDLASS_DATA=$DATA_DIR windlass"
 fi
 
-IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "<server-ip>")
+IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -n "$IP" ] || IP="<server-ip>"
+
+# --- Firewall ----------------------------------------------------------------
+# Read only: the installer never changes a firewall, it says what it sees (#117).
+# FIREWALL is ufw, firewalld or empty; port_closed answers for that one.
+FIREWALL=""
+UFW_STATUS=""
+if command -v ufw >/dev/null 2>&1; then
+  UFW_STATUS=$(LC_ALL=C ufw status 2>/dev/null || true)
+  case "$UFW_STATUS" in "Status: active"*) FIREWALL=ufw ;; esac
+fi
+if [ -z "$FIREWALL" ] && command -v firewall-cmd >/dev/null 2>&1 \
+  && [ "$(firewall-cmd --state 2>/dev/null)" = "running" ]; then
+  FIREWALL=firewalld
+fi
+
+# port_closed PORT [SERVICE]: true when the firewall found does not allow PORT/tcp.
+port_closed() {
+  case "$FIREWALL" in
+    ufw)
+      # Matches "80/tcp ALLOW", "80 ALLOW" and lists such as "80,443/tcp ALLOW".
+      ! printf '%s\n' "$UFW_STATUS" | grep -Eq "^([0-9]+,)*$1(,[0-9]+)*(/tcp)?[[:space:]]+ALLOW"
+      ;;
+    firewalld)
+      firewall-cmd --query-port="$1/tcp" >/dev/null 2>&1 && return 1
+      [ -n "$2" ] && firewall-cmd --query-service="$2" >/dev/null 2>&1 && return 1
+      return 0
+      ;;
+    *) return 1 ;;
+  esac
+}
+
 echo
 ok "Windlass is running"
 echo
-echo "  Open:        http://$IP:8080"
+if port_closed 8080; then
+  echo "  Port 8080 looks closed by $FIREWALL, so open the panel through an SSH tunnel."
+  echo "  From your own computer run:"
+  echo "    ssh -L 8080:127.0.0.1:8080 ${SUDO_USER:-root}@$IP"
+  echo "  then open http://localhost:8080"
+else
+  echo "  Open:        http://$IP:8080"
+fi
 echo "  Setup token: journalctl -u windlass | grep setup_token"
 echo
 echo "  The one-time setup token in the server log claims this instance."
+
+CLOSED=""
+port_closed 80 http && CLOSED="80"
+port_closed 443 https && CLOSED="${CLOSED:+$CLOSED and }443"
+if [ "$WANT_CADDY" = "1" ] && [ -n "$CLOSED" ]; then
+  echo
+  warn "Port $CLOSED looks closed by $FIREWALL. Domains and HTTPS need 80 and 443 open."
+  if [ "$FIREWALL" = "ufw" ]; then
+    echo "    sudo ufw allow 80/tcp && sudo ufw allow 443/tcp"
+  else
+    echo "    sudo firewall-cmd --permanent --add-service=http --add-service=https && sudo firewall-cmd --reload"
+  fi
+fi

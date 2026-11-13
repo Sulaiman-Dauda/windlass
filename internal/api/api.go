@@ -62,7 +62,9 @@ type API struct {
 	SelfStat *selfstat.Ring
 
 	authLimiter *authRateLimiter
-	disk        diskCache
+	// preflightLimiter is separate so checks never lock an IP out of sign-in.
+	preflightLimiter *authRateLimiter
+	disk             diskCache
 }
 
 // agentUpReq builds the standard up request for manual start actions.
@@ -79,11 +81,14 @@ func (a *API) Routes(r chi.Router) {
 
 	// 20 credential attempts per IP per minute.
 	a.authLimiter = newAuthRateLimiter(20, time.Minute)
+	a.preflightLimiter = newAuthRateLimiter(20, time.Minute)
 
 	// Public
 	r.Get("/system/health", handleHealth)
 	r.Get("/openapi.yaml", handleOpenAPI)
 	r.Get("/auth/status", a.handleAuthStatus)
+	// Before the claim the setup token opens it; afterwards admins only.
+	r.Get("/system/preflight", a.handlePreflight)
 	r.With(limitRequestBody(64<<10)).Post("/auth/setup", a.limitAuth(a.handleSetup))
 	r.With(limitRequestBody(64<<10)).Post("/auth/login", a.limitAuth(a.handleLogin))
 	r.Post("/auth/logout", a.handleLogout)

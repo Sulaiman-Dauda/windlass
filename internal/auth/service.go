@@ -76,6 +76,16 @@ func (s *Service) NeedsSetup(ctx context.Context) (bool, error) {
 	return n == 0, err
 }
 
+// SetupTokenValid reports whether token is the unclaimed instance's setup
+// token. It is false once any user exists, so it never outlives the claim.
+func (s *Service) SetupTokenValid(ctx context.Context, token string) bool {
+	needs, err := s.NeedsSetup(ctx)
+	if err != nil || !needs || s.setupToken == "" || token == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(s.setupToken)) == 1
+}
+
 // Setup creates the admin account using the one-time token and returns a
 // signed session token for immediate sign-in.
 func (s *Service) Setup(ctx context.Context, token, email, password, ip, userAgent string) (string, db.User, error) {

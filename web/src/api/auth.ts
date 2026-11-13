@@ -39,6 +39,23 @@ export function useSetup() {
   });
 }
 
+export interface PreflightCheck {
+  id: string;
+  status: "ok" | "warn" | "fail";
+  title: string;
+  detail?: string;
+}
+
+/** First-run checks. Before the claim the setup token opens them. */
+export function usePreflight() {
+  return useMutation({
+    mutationFn: (token: string) =>
+      api<{ version: string; checks: PreflightCheck[] }>("/system/preflight", {
+        headers: { "X-Setup-Token": token },
+      }),
+  });
+}
+
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({

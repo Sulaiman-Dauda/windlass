@@ -78,6 +78,13 @@ const topLine = (page: Page) =>
     return null;
   });
 
+/** Scrolls up to the middle of the kept lines, as a reader would, and returns the top line. */
+async function scrollToMiddle(page: Page) {
+  await page.locator(".wl-term").evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 2); });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  return topLine(page);
+}
+
 /** Where a given line sits below the pane's top edge, or null once it is gone. */
 const lineY = (page: Page, text: string) =>
   page.locator(".wl-term").evaluate((el, want) => {
@@ -98,10 +105,7 @@ test("a reader scrolled up keeps their place while lines arrive past the cap", a
   await stream(page, 11, 200);
   await expect(page.getByText("2000 lines")).toBeVisible();
 
-  // Scroll up to the middle of the kept lines, as a reader would.
-  await page.locator(".wl-term").evaluate((el) => { el.scrollTop = Math.round(el.scrollHeight / 2); });
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-  const before = await topLine(page);
+  const before = await scrollToMiddle(page);
   expect(before).not.toBeNull();
 
   // 300 more lines: each one drops a line from the top of the pane.
@@ -112,6 +116,22 @@ test("a reader scrolled up keeps their place while lines arrive past the cap", a
   await page.locator(".wl-term").evaluate((el) => { el.scrollTop = el.scrollHeight; });
   await stream(page, 5, 20);
   expect(await fromBottom(page)).toBeLessThanOrEqual(1);
+});
+
+test("a reader's place does not drift over many small bursts past the cap (#116)", async ({ page }) => {
+  await openLogs(page);
+  await stream(page, 11, 200);
+  const before = await scrollToMiddle(page);
+
+  // Rows are 20.4 px tall, so each correction is a fraction of a pixel off a
+  // whole scrollTop. 150 one- and two-line bursts let any lost remainder add up.
+  await stream(page, 75, 1);
+  await stream(page, 75, 2);
+  const exact = await page.locator(".wl-term").evaluate((el, want) => {
+    const row = Array.from(el.children).find((r) => r.textContent === want)!;
+    return row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+  }, before!.text!);
+  expect(Math.abs(exact - before!.y)).toBeLessThan(1);
 });
 
 test("with following switched off the pane stays put, and resumes when switched back on", async ({ page }) => {
