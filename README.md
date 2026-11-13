@@ -49,17 +49,34 @@ on a server you cannot rebuild.
 
 ## How it compares
 
-Checked against each project's own docs and source on 30/10/2026. Corrections welcome.
+Checked against each project's own docs and source on 13/11/2026. Corrections welcome.
 
 | | Windlass | Coolify | Dokploy | CapRover | Dokku |
 |---|---|---|---|---|---|
-| Deploys your compose file with | `docker compose`, file unchanged | its own labels, networks and volume names added ("Raw" mode leaves it mostly alone) | `docker compose`, Traefik labels written into the file | converted into CapRover apps; `build`, `networks` and `deploy` ignored | no compose support; git push, image or archive |
+| Deploys your compose file with | `docker compose`, file unchanged | its own labels, networks and volume names added ("Raw" mode leaves it mostly alone) | `docker compose`, Traefik labels written into the file for domains set in the panel | converted into CapRover apps; `build`, `networks`, `deploy` and more ignored | no compose support; git push, image or archive |
 | Runs alongside | Caddy and a restricted Docker socket proxy; SQLite is built in | Postgres, Redis, Traefik or Caddy | Docker Swarm, Postgres, Traefik | Docker Swarm, nginx | nginx (other proxies optional) |
-| Stated server minimum | none; the panel idles at about 24 MB | 2 GB RAM | 2 GB RAM | 1 GB RAM recommended | 1 GB RAM |
-| Licence | Apache-2.0 | Apache-2.0 | Apache-2.0, except `/proprietary` | Apache-2.0 | MIT |
+| Stated server minimum | none; the panel idles at about 24 MB | 2 GB RAM | 2 GB RAM | 1 GB RAM | 1 GB RAM |
+| Licence | Apache-2.0 | Apache-2.0 | Apache-2.0, except `/proprietary` | Apache-2.0 with added terms | MIT |
 
 If you want a Heroku-style git push workflow, Dokku is the better fit. If you already write
 Compose files and want a panel that leaves them alone, that is what Windlass is for.
+
+## Coming from Coolify, Dokploy or Portainer?
+
+Windlass runs Compose projects on one server. What carries over:
+
+- **From Coolify or Dokploy:** bring the compose file you wrote, not the copy the panel ran,
+  which has its labels and networks in it. Put it with its `.env` in
+  `/var/lib/windlass/projects/<name>/`, add the domain in Windlass and deploy. Volume data
+  has to be copied across, because Compose names volumes after the project; see
+  [adopting stacks you already have](docs/projects-and-compose.md#adopting-stacks-you-already-have).
+  Windlass never turns on Docker Swarm.
+- **From Portainer:** Portainer manages containers across many hosts and Kubernetes, and
+  Windlass does not try to. On one server it adds what Portainer leaves to you: domains with
+  HTTPS, volume backups and a staging copy that promotes what it tested. A Portainer stack is a Compose project, so it
+  moves the same way. Rename `docker-compose.yml` to `compose.yaml`.
+- **Not here yet:** more than one server, and preview deployments for pull requests. If you
+  need those today, Coolify and Dokploy have them.
 
 ![The Windlass dashboard](docs/screenshots/dashboard-light.png)
 

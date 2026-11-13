@@ -3,7 +3,7 @@
   "name": "run.windlass/windlass",
   "title": "Windlass",
   "description": "Read projects, logs and deployments on a self-hosted Windlass server; deploy, roll back, promote.",
-  "version": "0.61.0",
+  "version": "0.62.0",
   "websiteUrl": "https://windlass.run/guides/mcp/",
   "repository": {
     "url": "https://github.com/Sulaiman-Dauda/windlass",
