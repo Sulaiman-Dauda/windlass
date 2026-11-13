@@ -1,7 +1,7 @@
 /** The live and staging pair the staging specs mock, and the routes every panel page reads. */
 export const stagingProject = { id: 2, name: "app-staging", source: "git", git_repo: "https://example.com/app.git",
   git_branch: "preview", auto_deploy: true, staging_of: "app", created_at: "2026-10-27T00:00:00Z" };
-export const liveProject = { ...stagingProject, id: 1, name: "app", staging_of: undefined, staging: "app-staging" };
+const liveProject = { ...stagingProject, id: 1, name: "app", staging_of: undefined, staging: "app-staging" };
 
 /** The answer for a route outside the staging card, or undefined for the spec to answer. */
 export function panelData(path: string, role: string, hasPassword = true): unknown {
