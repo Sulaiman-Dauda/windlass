@@ -1,12 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
+import { panelData } from "./staging-fixture";
 
 const h = (c: string) => c.repeat(40);
 
 async function panel(page: Page, options: { role?: string; behind?: boolean } = {}) {
   const role = options.role ?? "member";
-  const project = { id: 2, name: "app-staging", source: "git", git_repo: "https://example.com/app.git",
-    git_branch: "preview", auto_deploy: true, staging_of: "app", created_at: "2026-10-27T00:00:00Z" };
-  const live = { ...project, id: 1, name: "app", staging_of: undefined, staging: "app-staging" };
   const at = new Date(Date.now() - 3 * 3600_000).toISOString();
   const staged = { number: 7, status: "succeeded", commit: h("d") };
   const commits = ["Fix the basket total", "Add the VAT line to invoices", "Tidy the header", "Bump images",
@@ -19,20 +17,14 @@ async function panel(page: Page, options: { role?: string; behind?: boolean } = 
       deployed = true;
       return route.fulfill({ status: 201, json: { id: 9, number: 8, status: "queued", triggered_by: "manual", created_at: at } });
     }
-    const data = path === "/auth/status" ? { authenticated: true, needs_setup: false, user: { id: 1, email: "member@example.com", role } }
-      : path === "/auth/me" ? { id: 1, email: "member@example.com", role, has_password: true }
-      : path === "/system/metrics" ? { node: { hostname: "test-server" }, containers: { running: 0, total: 0 } }
-      : path === "/projects" ? [live, project]
-      : path === "/projects/app" ? live
-      : path === "/projects/app-staging" ? project
-      : path.endsWith("/staging") ? { live: "app", staging: "app-staging", branch: "preview", live_branch: "main",
+    const data = panelData(path, role)
+      ?? (path.endsWith("/staging") ? { live: "app", staging: "app-staging", branch: "preview", live_branch: "main",
         auto_promote: false, staging_latest: staged, promotable: staged,
         live_current: { number: 4, status: "succeeded", commit: h("a") }, live_latest: { number: 4, status: "succeeded", commit: h("a") },
         can_recreate: false, rewrites: [], drift: [], commits, commits_more: false,
         branch_head: options.behind ? h("e") : h("d"), env_missing: ["SMTP_HOST", "STRIPE_WEBHOOK_SECRET"] }
-      : path.endsWith("/services") ? { services: [] }
       : path.endsWith("/deployments") ? [{ id: 7, ...staged, triggered_by: "webhook", created_at: at }]
-      : path.endsWith("/domains") ? [] : {};
+      : {});
     return route.fulfill({ json: data });
   });
   return { deployed: () => deployed };
