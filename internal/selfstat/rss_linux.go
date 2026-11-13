@@ -21,5 +21,5 @@ func RSS() (uint64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	return pages * uint64(os.Getpagesize()), true
+	return pages * uint64(os.Getpagesize()), true //nolint:gosec // G115: a page size is positive
 }

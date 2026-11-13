@@ -251,7 +251,7 @@ func diskItem(m agent.HostMetrics, percent int) (Item, bool) {
 		return Item{}, false
 	}
 	used := m.DiskUsed * 100 / m.DiskTotal
-	if used < uint64(percent) {
+	if used < uint64(percent) { //nolint:gosec // G115: percent is 50 to 99, checked when read
 		return Item{}, false
 	}
 	return Item{Kind: KindDisk, Tone: ToneWarn,
