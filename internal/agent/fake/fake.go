@@ -372,6 +372,26 @@ func (s fsFake) DiscoverProjects(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
+func (s fsFake) SkippedProjects(ctx context.Context) ([]agent.SkippedProject, error) {
+	if err := s.f.record("fs.skipped", nil); err != nil {
+		return nil, err
+	}
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	var out []agent.SkippedProject
+	for name, files := range s.f.Files {
+		reason := agent.SkipReason(name, func(file string) bool {
+			_, ok := files[file]
+			return ok
+		})
+		if reason != "" {
+			out = append(out, agent.SkippedProject{Name: name, Reason: reason})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
 // validRel rejects absolute and traversal paths, mirroring agent/local.
 func validRel(rel string) error {
 	clean := path.Clean(strings.ReplaceAll(rel, "\\", "/"))

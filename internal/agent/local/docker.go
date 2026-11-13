@@ -21,6 +21,7 @@ import (
 const (
 	labelComposeProject = "com.docker.compose.project"
 	labelComposeService = "com.docker.compose.service"
+	labelComposeWorkDir = "com.docker.compose.project.working_dir"
 )
 
 type dockerLocal struct{ l *Local }
@@ -47,13 +48,14 @@ func (d dockerLocal) ListContainers(ctx context.Context, filter agent.ContainerF
 			name = strings.TrimPrefix(c.Names[0], "/")
 		}
 		ac := agent.Container{
-			ID:             c.ID,
-			Name:           name,
-			Image:          c.Image,
-			State:          string(c.State),
-			ComposeProject: c.Labels[labelComposeProject],
-			ComposeService: c.Labels[labelComposeService],
-			CreatedAt:      time.Unix(c.Created, 0).UTC(),
+			ID:                c.ID,
+			Name:              name,
+			Image:             c.Image,
+			State:             string(c.State),
+			ComposeProject:    c.Labels[labelComposeProject],
+			ComposeService:    c.Labels[labelComposeService],
+			ComposeWorkingDir: c.Labels[labelComposeWorkDir],
+			CreatedAt:         time.Unix(c.Created, 0).UTC(),
 		}
 		if c.NetworkSettings != nil {
 			for _, nw := range c.NetworkSettings.Networks {

@@ -86,7 +86,11 @@ func (a *API) deploymentRoutes(r chi.Router) {
 func (a *API) handleCreateDeployment(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	d, err := a.Deploy.Deploy(r.Context(), name, "manual")
+	var adoption *projects.AdoptionError
 	switch {
+	case errors.As(err, &adoption):
+		writeError(w, http.StatusConflict, "adoption_conflict", adoption.Error())
+		return
 	case errors.Is(err, projects.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "project not found")
 		return

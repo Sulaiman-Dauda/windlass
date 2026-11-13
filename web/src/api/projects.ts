@@ -46,10 +46,28 @@ export function useCreateProject() {
   });
 }
 
+// A stack on the server that Compose knows under another project name.
+// Deploying the directory would start a second copy with empty volumes.
+export interface AdoptionConflict {
+  project: string;
+  running_as: string;
+  working_dir: string;
+  containers: string[];
+  new_volumes?: string[];
+  message: string;
+}
+
+export interface ScanResult {
+  count: number;
+  // Directories with a Compose file that were not picked up, and why.
+  skipped: { name: string; reason: string }[];
+  conflicts: AdoptionConflict[];
+}
+
 export function useScanProjects() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api<{ count: number }>("/projects/scan", { method: "POST" }),
+    mutationFn: () => api<ScanResult>("/projects/scan", { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   });
 }

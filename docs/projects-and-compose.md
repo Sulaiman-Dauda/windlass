@@ -50,6 +50,20 @@ with a letter or digit, and it holds a `compose.yaml` or `compose.yml`. A file n
 `docker-compose.yml` is not recognised, so rename it. Symlinks are not followed: move the
 directory itself.
 
+The scan lists any directory it passed over and why, such as a `docker-compose.yml` that
+needs renaming or a name with capitals in it.
+
+Windlass runs every project as `docker compose -p <directory name>`, and Compose names a
+project's volumes after the project. If the stack was started under another name (a `name:`
+key, `COMPOSE_PROJECT_NAME`, or a directory called something else before you moved it),
+its data sits in volumes Windlass would not use. The first deploy would start a second copy
+with new, empty volumes. So until a project has deployed successfully once, Windlass checks
+the running containers first and refuses that deploy, and the scan warns about it too.
+
+To keep the data, rename the directory to the name the stack runs under and scan again.
+To start fresh, remove the old stack with `docker compose -p <old name> down`, which keeps
+its volumes, and deploy.
+
 This is also the recovery path after restoring a machine from a backup: put the
 directories back, scan, and the panel knows about them again.
 

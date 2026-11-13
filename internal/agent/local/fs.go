@@ -41,6 +41,28 @@ func (f fsLocal) DiscoverProjects(ctx context.Context) ([]string, error) {
 	return projects, nil
 }
 
+func (f fsLocal) SkippedProjects(ctx context.Context) ([]agent.SkippedProject, error) {
+	entries, err := os.ReadDir(f.l.cfg.ProjectsDir)
+	if err != nil {
+		return nil, err
+	}
+	var out []agent.SkippedProject
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := filepath.Join(f.l.cfg.ProjectsDir, entry.Name())
+		reason := agent.SkipReason(entry.Name(), func(file string) bool {
+			info, err := os.Stat(filepath.Join(dir, file))
+			return err == nil && info.Mode().IsRegular()
+		})
+		if reason != "" {
+			out = append(out, agent.SkippedProject{Name: entry.Name(), Reason: reason})
+		}
+	}
+	return out, nil
+}
+
 // hasDriveLetter reports whether p begins with a Windows drive letter such as
 // "C:". filepath.VolumeName and filepath.IsAbs only detect these on Windows,
 // so on other hosts a value like `C:\config` cleans to `C:/config` and would

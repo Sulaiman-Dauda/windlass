@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useCan } from "../api/auth";
-import { useCreateProject, useProjects, useScanProjects } from "../api/projects";
+import { useCreateProject, useProjects, useScanProjects, type ScanResult } from "../api/projects";
 import { Page, EmptyState, FormError } from "../ui/Page";
 import { Button } from "../ui/Button";
 import { Input, Field } from "../ui/Field";
@@ -10,6 +10,7 @@ import { Modal } from "../ui/Modal";
 import { useToast, errorText } from "../ui/Toast";
 import { plural } from "../ui/format";
 import ProjectsTable from "../components/ProjectsTable";
+import { ScanReport } from "../components/AdoptionReport";
 
 export default function Projects() {
   const projects = useProjects();
@@ -19,6 +20,7 @@ export default function Projects() {
   const [params, setParams] = useSearchParams();
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState("");
+  const [report, setReport] = useState<ScanResult | null>(null);
 
   // /projects?new=1 (sidebar plus, command palette) opens the dialog directly.
   useEffect(() => {
@@ -44,7 +46,10 @@ export default function Projects() {
               loading={scan.isPending}
               onClick={() =>
                 scan.mutate(undefined, {
-                  onSuccess: (r) => toast.ok("Scan complete", `${plural(r.count, "project")} found in the stacks directory.`),
+                  onSuccess: (r) =>
+                    r.skipped.length || r.conflicts.length
+                      ? setReport(r)
+                      : toast.ok("Scan complete", `${plural(r.count, "project")} found in the stacks directory.`),
                   onError: (e) => toast.err("Scan failed", errorText(e)),
                 })
               }
@@ -59,6 +64,7 @@ export default function Projects() {
       }
     >
       {creating && <CreateProjectDialog onClose={() => setCreating(false)} />}
+      {report && <ScanReport result={report} onClose={() => setReport(null)} />}
 
       {projects.data && list.length === 0 ? (
         <EmptyState
