@@ -79,7 +79,14 @@ export const TermPane = forwardRef<
   // so this is the only thing that moves scrollTop besides the pin and the reader.
   useLayoutEffect(() => {
     const el = pane.current;
-    if (!el || (follow && scroll.current.atBottom)) return;
+    if (!el) return;
+    if (follow && scroll.current.atBottom) {
+      // The pin moves the text under a fixed scrollTop at the cap, so an
+      // anchor kept from before would be stale by the time following stops,
+      // and correcting to it jumps the view up. Measure afresh then instead.
+      anchor.current = null;
+      return;
+    }
     const a = anchor.current;
     // Only trust an anchor measured at the current scrollTop. Anything else
     // means the pane moved since (the pin, or a scroll whose event has not

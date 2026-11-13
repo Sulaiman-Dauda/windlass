@@ -134,6 +134,28 @@ test("a reader's place does not drift over many small bursts past the cap (#116)
   expect(Math.abs(exact - before!.y)).toBeLessThan(1);
 });
 
+test("switching following off after a long run at the cap keeps the view where it was", async ({ page }) => {
+  await openLogs(page);
+  // Well past the cap, so the pane has followed while dropping rows for a while.
+  await stream(page, 30, 200);
+  await page.getByRole("button", { name: "Stop following new lines" }).click();
+  const before = await topLine(page);
+  expect(await fromBottom(page)).toBeLessThanOrEqual(1);
+  await stream(page, 15, 20);
+  expect(await lineY(page, before!.text!)).toBe(before!.y);
+});
+
+test("switching following off soon after reaching the cap keeps the view at the bottom", async ({ page }) => {
+  await openLogs(page);
+  await stream(page, 11, 200);
+  // A few more lines while following: the row measured last is still kept,
+  // but it has moved up, and the pin leaves scrollTop where it was.
+  await stream(page, 5, 20);
+  await page.getByRole("button", { name: "Stop following new lines" }).click();
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  expect(await fromBottom(page)).toBeLessThanOrEqual(1);
+});
+
 test("with following switched off the pane stays put, and resumes when switched back on", async ({ page }) => {
   await openLogs(page);
   await stream(page, 11, 200);

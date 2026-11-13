@@ -105,6 +105,15 @@ deployment would. Roll it back from the Deployments tab as usual.
 Promote is unavailable while either project is deploying, before staging has a deployment
 that succeeded, and when live already runs that staging deployment or its commit.
 
+On a Git project the card lists the commits that promoting would take to live, up to 50,
+each linked to GitHub when the repository is there. It also says when staging is behind its
+branch, naming the commit that has not been deployed to staging yet, with a button to
+deploy it.
+
+If staging's `.env` has keys that live's `.env` lacks, the card names them. It is a
+warning, not a block: promotion never touches live's `.env`, so add the keys to live first
+unless its compose file or an `env_file` sets them.
+
 **Promote automatically** promotes each staging deployment that succeeds. Staging's first
 deployment, the one that creates it, is never promoted, and neither is a rollback on staging:
 promoting it would roll live back too. Roll live back from its own Deployments tab.

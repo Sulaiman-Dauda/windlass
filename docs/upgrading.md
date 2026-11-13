@@ -2,6 +2,17 @@
 
 What to check when you move to a new version. A version not listed here needs nothing.
 
+## v0.62
+
+Docker storage clean-up is on by default. After the first successful deployment on v0.62,
+Windlass removes unused images older than 7 days, keeping the images of each project's
+last 5 successful deployments, and trims the build cache to 10 GB. That is every image on
+the host that no container uses, not only ones Windlass pulled, and the age is from when
+the image was built. If you keep images on the server that no container uses, such as ones
+you load by hand for later, switch it off or change the limits in **Settings, System,
+Docker storage** before deploying. See
+[Deployments](./deployments.md#cleaning-up-docker-storage).
+
 ## v0.61
 
 Windlass now believes forwarded headers only from a reverse proxy it has been told about,
