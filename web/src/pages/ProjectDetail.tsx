@@ -7,10 +7,12 @@ import {
   useCreateDeployment,
   useDeployments,
   useProjectAction,
+  useRollback,
   useServices,
   summariseServices,
   deploymentTone,
   isActive,
+  rollbackTarget,
 } from "../api/deployments";
 import { useDomains } from "../api/domains";
 import BackupsTab from "../components/BackupsTab";
@@ -34,7 +36,7 @@ import { RouteTabs, type TabItem } from "../ui/Tabs";
 import { Skeleton } from "../ui/Skeleton";
 import { useConfirm } from "../ui/Modal";
 import { useToast, errorText } from "../ui/Toast";
-import { timeAgo } from "../ui/format";
+import { formatStamp, timeAgo } from "../ui/format";
 
 const TerminalTab = lazy(() => import("../components/TerminalTab"));
 
@@ -61,6 +63,7 @@ export default function ProjectDetail() {
   const domains = useDomains(name);
   const deploy = useCreateDeployment(name);
   const action = useProjectAction(name);
+  const rollback = useRollback(name);
   const navigate = useNavigate();
   const can = useCan();
   const confirm = useConfirm();
@@ -92,6 +95,9 @@ export default function ProjectDetail() {
   const summary = summariseServices(services.data?.services);
   const latest = deployments.data?.[0];
   const domain = domains.data?.[0];
+  const target = rollbackTarget(deployments.data);
+  const allUp = !!summary && summary.total > 0 && summary.running === summary.total;
+  const noneUp = !summary || summary.running === 0;
   const current = TABS.find((t) => t.to && rest.split("/")[0] === t.to);
 
   const runDeploy = async () => {
@@ -155,6 +161,24 @@ export default function ProjectDetail() {
     });
   };
 
+  const runRollback = async () => {
+    if (!target) return;
+    const ok = await confirm({
+      title: `Roll back to deployment #${target.number}?`,
+      body: "This starts a new deployment that re-applies the images and files recorded for this one. Pull and build are skipped.",
+      confirmLabel: "Roll back",
+      tone: "primary",
+    });
+    if (!ok) return;
+    rollback.mutate(target.number, {
+      onSuccess: (r) => {
+        toast.info(`Rollback started as #${r.number}`);
+        navigate(`/projects/${name}/deployments?d=${r.number}`);
+      },
+      onError: (e) => toast.err("Rollback failed to start", errorText(e)),
+    });
+  };
+
   return (
     <Page
       title={name}
@@ -194,9 +218,9 @@ export default function ProjectDetail() {
                 )}
                 {p.git_branch && <span className="text-fg3"> on {p.git_branch}</span>}
                 {p.staging ? (
-                  <span className="text-fg3"> · deploys through staging</span>
+                  <span className="text-fg3">, deploys through staging</span>
                 ) : (
-                  p.auto_deploy && <span className="text-fg3"> · deploys on push</span>
+                  p.auto_deploy && <span className="text-fg3">, deploys on push</span>
                 )}
               </MetaItem>
             ) : (
@@ -212,7 +236,11 @@ export default function ProjectDetail() {
             {latest ? (
               <span className="inline-flex items-center gap-2">
                 <StatusDot tone={deploymentTone(latest.status)} live={isActive(latest.status)} />
-                <Link to={`/projects/${name}/deployments?d=${latest.number}`} className="hover:text-accent">
+                <Link
+                  to={`/projects/${name}/deployments?d=${latest.number}`}
+                  className="hover:text-accent"
+                  title={formatStamp(latest.finished_at || latest.created_at)}
+                >
                   {isActive(latest.status)
                     ? `Deploying (${latest.status})`
                     : `${latest.status === "succeeded" ? "Deployed" : `Deployment ${latest.status}`} ${timeAgo(latest.finished_at || latest.created_at)}`}
@@ -231,19 +259,56 @@ export default function ProjectDetail() {
               Deploy
             </Button>
             <Menu
+              width={320}
               trigger={(props) => <IconButton {...props} icon="more" label="Project actions" variant="secondary" size="md" />}
             >
-              <MenuItem icon="play" onSelect={() => runAction("start")}>
-                Start services
-              </MenuItem>
-              <MenuItem icon="restart" onSelect={() => runAction("restart")}>
+              <MenuItem
+                icon="restart"
+                onSelect={() => runAction("restart")}
+                description="Restarts the containers as they are. No pull, no build, compose.yaml is not re-read."
+              >
                 Restart services
               </MenuItem>
-              <MenuItem icon="stop" onSelect={() => runAction("stop")}>
+              <MenuItem
+                icon="stop"
+                onSelect={() => runAction("stop")}
+                disabled={noneUp}
+                description="Stops the containers. Volumes and data stay."
+              >
                 Stop services
               </MenuItem>
+              <MenuItem
+                icon="play"
+                onSelect={() => runAction("start")}
+                disabled={allUp}
+                description={allUp ? `Starts stopped containers. All ${summary?.total} are running.` : "Starts stopped containers as they are."}
+              >
+                Start services
+              </MenuItem>
+              {target && (
+                <>
+                  <MenuSeparator />
+                  <MenuItem
+                    icon="rollback"
+                    onSelect={runRollback}
+                    disabled={rollback.isPending}
+                    description={`Re-applies the image digests and files #${target.number} ran. A new deployment, so you can undo it.`}
+                  >
+                    Roll back to #{target.number}
+                  </MenuItem>
+                </>
+              )}
               <MenuSeparator />
-              <MenuItem icon="trash" tone="danger" onSelect={() => setConfirmingDelete(true)}>
+              <MenuItem
+                icon="trash"
+                tone="danger"
+                onSelect={() => setConfirmingDelete(true)}
+                description={
+                  p?.staging_of
+                    ? "Removes the containers, the directory and this staging's volumes."
+                    : "Removes the containers and the directory. Named volumes are kept."
+                }
+              >
                 Delete project
               </MenuItem>
             </Menu>

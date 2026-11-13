@@ -227,6 +227,7 @@ func (a *API) handleProjectServices(w http.ResponseWriter, r *http.Request) {
 			if service, ok := config.Services[statuses[i].Service]; ok {
 				statuses[i].MemoryLimit = service.MemoryLimit
 				statuses[i].CPULimit = service.CPULimit
+				statuses[i].ContainerPorts = service.ContainerPorts
 			}
 		}
 	}

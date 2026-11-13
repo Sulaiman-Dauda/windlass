@@ -30,9 +30,17 @@ export default function DomainsTab({ project }: { project: string }) {
   const listId = useId();
 
   const [hostname, setHostname] = useState("");
-  const [service, setService] = useState("web");
-  const [port, setPort] = useState("3000");
-  const names = Array.from(new Set(services.data?.services.map((s) => s.service) ?? []));
+  // null means not edited: the field follows compose.yaml until the person
+  // types, so a project whose app listens on 8080 is not offered web:3000.
+  const [service, setService] = useState<string | null>(null);
+  const [port, setPort] = useState<string | null>(null);
+  const portsId = useId();
+  const list = services.data?.services ?? [];
+  const names = Array.from(new Set(list.map((s) => s.service)));
+  const portsOf = (name: string) => list.find((s) => s.service === name)?.container_ports ?? [];
+  const serviceValue = service ?? list.find((s) => s.container_ports?.length)?.service ?? names[0] ?? "web";
+  const ports = portsOf(serviceValue);
+  const portValue = port ?? (ports[0] ? String(ports[0]) : "");
 
   const doRemove = async (hostname: string) => {
     const ok = await confirm({
@@ -66,7 +74,7 @@ export default function DomainsTab({ project }: { project: string }) {
             onSubmit={(e) => {
               e.preventDefault();
               add.mutate(
-                { hostname, service, container_port: parseInt(port, 10) },
+                { hostname, service: serviceValue, container_port: parseInt(portValue, 10) },
                 {
                   onSuccess: () => {
                     toast.ok(`Added ${hostname}`, "HTTPS is issued on the first request once DNS resolves here.");
@@ -90,8 +98,11 @@ export default function DomainsTab({ project }: { project: string }) {
               <Input
                 required
                 list={listId}
-                value={service}
-                onChange={(e) => setService(e.target.value)}
+                value={serviceValue}
+                onChange={(e) => {
+                  setService(e.target.value);
+                  setPort(null);
+                }}
                 spellCheck={false}
                 className="font-mono"
               />
@@ -107,10 +118,16 @@ export default function DomainsTab({ project }: { project: string }) {
                 type="number"
                 min={1}
                 max={65535}
-                value={port}
+                list={portsId}
+                value={portValue}
                 onChange={(e) => setPort(e.target.value)}
                 className="font-mono"
               />
+              <datalist id={portsId}>
+                {ports.map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
             </Field>
             <Button type="submit" variant="primary" icon="plus" loading={add.isPending}>
               Add domain
