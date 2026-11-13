@@ -87,6 +87,7 @@ func (a *API) projectRoutes(r chi.Router) {
 	r.Get("/{name}/env", a.handleGetProjectEnv)
 	r.Get("/{name}/services", a.handleProjectServices)
 	r.Get("/{name}/logs", a.handleProjectLogs)
+	r.Get("/{name}/drift", a.handleProjectDrift)
 	r.With(auth.RejectToken, auth.RequireRole("member")).Get("/{name}/terminal", a.handleTerminal)
 	r.Route("/{name}/deployments", a.deploymentRoutes)
 	r.Route("/{name}/domains", a.domainRoutes)

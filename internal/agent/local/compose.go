@@ -59,21 +59,9 @@ func subcommand(args []string) string {
 }
 
 func (c composeLocal) Up(ctx context.Context, req agent.ComposeUpReq, out agent.LogSink) error {
-	args := []string{}
-	if len(req.ExtraFiles) > 0 && agent.ValidProjectName(req.Project) {
-		// Naming any file with -f stops Compose finding the project's own
-		// and its override file, so name those first.
-		for _, f := range projectComposeFiles(filepath.Join(c.l.cfg.ProjectsDir, req.Project)) {
-			args = append(args, "-f", f)
-		}
-	}
-	for _, f := range req.ExtraFiles {
-		// Compose resolves -f relative to the project directory; reject
-		// anything that could escape it.
-		if strings.ContainsAny(f, "/\\") || strings.HasPrefix(f, ".") {
-			return fmt.Errorf("invalid extra compose file %q", f)
-		}
-		args = append(args, "-f", f)
+	args, err := c.fileArgs(req.Project, req.ExtraFiles)
+	if err != nil {
+		return err
 	}
 	args = append(args, "up", "-d", "--quiet-pull")
 	if req.RemoveOrphans {
@@ -94,6 +82,63 @@ func (c composeLocal) Up(ctx context.Context, req agent.ComposeUpReq, out agent.
 // serviceNameRe is the Compose specification's service name pattern, with a
 // leading letter or digit so a name can never read as a flag.
 var serviceNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+func (c composeLocal) ConfigHashes(ctx context.Context, project string, extraFiles []string) (map[string]string, error) {
+	args, err := c.fileArgs(project, extraFiles)
+	if err != nil {
+		return nil, err
+	}
+	cmd, err := c.cmd(ctx, project, append(args, "config", "--hash", "*")...)
+	if err != nil {
+		return nil, err
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("compose file invalid: %s", strings.TrimSpace(stderr.String()))
+	}
+	return parseConfigHashes(stdout.String()), nil
+}
+
+// parseConfigHashes reads `compose config --hash` output: one line per
+// service, the name then the hash.
+func parseConfigHashes(out string) map[string]string {
+	hashes := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if fields := strings.Fields(line); len(fields) == 2 {
+			hashes[fields[0]] = fields[1]
+		}
+	}
+	return hashes
+}
+
+// fileArgs is the -f list for a command that layers extraFiles over the
+// project's own files. With none it is empty, and Compose finds the files
+// itself.
+func (c composeLocal) fileArgs(project string, extraFiles []string) ([]string, error) {
+	if len(extraFiles) == 0 {
+		return nil, nil
+	}
+	if !agent.ValidProjectName(project) {
+		return nil, fmt.Errorf("invalid project name %q", project)
+	}
+	args := []string{}
+	// Naming any file with -f stops Compose finding the project's own
+	// and its override file, so name those first.
+	for _, f := range projectComposeFiles(filepath.Join(c.l.cfg.ProjectsDir, project)) {
+		args = append(args, "-f", f)
+	}
+	for _, f := range extraFiles {
+		// Compose resolves -f relative to the project directory; reject
+		// anything that could escape it.
+		if strings.ContainsAny(f, "/\\") || strings.HasPrefix(f, ".") {
+			return nil, fmt.Errorf("invalid extra compose file %q", f)
+		}
+		args = append(args, "-f", f)
+	}
+	return args, nil
+}
 
 func (c composeLocal) Create(ctx context.Context, project string, out agent.LogSink) error {
 	return c.run(ctx, project, out, "create", "--quiet-pull")

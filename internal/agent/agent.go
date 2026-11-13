@@ -92,9 +92,11 @@ type NodeInfo struct {
 // callbacks receive lines as they happen; over a future wire transport this
 // becomes a server-streaming RPC.
 type LogLine struct {
-	Stream string    `json:"stream"` // "stdout" | "stderr"
-	Text   string    `json:"text"`
-	Time   time.Time `json:"time"`
+	Stream string `json:"stream"` // "stdout" | "stderr"
+	Text   string `json:"text"`
+	// Time is when the line was written: Docker's timestamp for container
+	// logs, the time it was read for command output.
+	Time time.Time `json:"time"`
 }
 
 type LogSink func(LogLine)
@@ -118,6 +120,12 @@ type ComposeAgent interface {
 	// Config validates and resolves the project via `compose config`,
 	// returning the fully-resolved model (for image refs, ports, volumes).
 	Config(ctx context.Context, project string) (ResolvedConfig, error)
+	// ConfigHashes runs `compose config --hash '*'` with the project's own
+	// files and then extraFiles, the way Up layers them. Each service maps to
+	// the hash Compose puts in a container's com.docker.compose.config-hash
+	// label, so a container whose label differs runs a configuration the
+	// files no longer describe.
+	ConfigHashes(ctx context.Context, project string, extraFiles []string) (map[string]string, error)
 	// Create runs `compose create`, which makes the project's network,
 	// volumes and containers without starting anything. A staging seed uses
 	// it so the volumes exist, labelled as Compose's own, before data is
@@ -255,6 +263,31 @@ type DockerAgent interface {
 	VolumeSizes(ctx context.Context) (map[string]int64, error)
 	// FreeSpace reports the bytes free where Docker keeps its volumes.
 	FreeSpace(ctx context.Context) (uint64, error)
+	// DiskUsage reports what Docker holds on disk, split by kind, in one
+	// call to the daemon. Volume sizes make it slow on a big host, so
+	// callers cache it.
+	DiskUsage(ctx context.Context) (DiskUsage, error)
+	// ImageID resolves an image reference to the local image ID, the value
+	// a container created from it reports. A reference with no local image
+	// is an error.
+	ImageID(ctx context.Context, ref string) (string, error)
+}
+
+// DiskUsage is Docker's disk use by kind. Reclaimable is what Docker counts
+// as unused: images no container uses, stopped containers, volumes no
+// container mounts, and build cache not in use.
+type DiskUsage struct {
+	Images     DiskUsageKind `json:"images"`
+	Containers DiskUsageKind `json:"containers"`
+	Volumes    DiskUsageKind `json:"volumes"`
+	BuildCache DiskUsageKind `json:"build_cache"`
+}
+
+type DiskUsageKind struct {
+	Count            int64 `json:"count"`
+	ActiveCount      int64 `json:"active_count"`
+	Bytes            int64 `json:"bytes"`
+	ReclaimableBytes int64 `json:"reclaimable_bytes"`
 }
 
 type ImageDiskUsage struct {
@@ -291,6 +324,13 @@ type Container struct {
 	// ComposeWorkingDir is the directory Compose ran in when it created the
 	// container, from the com.docker.compose.project.working_dir label.
 	ComposeWorkingDir string `json:"compose_working_dir,omitempty"`
+	// ConfigHash is the com.docker.compose.config-hash label: the hash of
+	// the service configuration Compose created the container from.
+	ConfigHash string `json:"config_hash,omitempty"`
+	// ImageID is the local ID of the image the container runs.
+	ImageID string `json:"image_id,omitempty"`
+	// Volumes names the Docker volumes the container mounts.
+	Volumes []string `json:"volumes,omitempty"`
 	// IPAddress is the container's address on its first network, reachable
 	// from the host on standard bridge networking; used for proxy upstreams.
 	IPAddress string    `json:"ip_address,omitempty"`
@@ -300,6 +340,10 @@ type Container struct {
 type LogOpts struct {
 	Follow bool `json:"follow"`
 	Tail   int  `json:"tail"` // 0 = default (e.g. 200 lines)
+	// Since starts the logs after this time and returns every line from
+	// then on, so Tail is ignored. A merged follow uses it to pick up where
+	// the tail it already sent ended.
+	Since time.Time `json:"since,omitzero"`
 }
 
 type ContainerStats struct {

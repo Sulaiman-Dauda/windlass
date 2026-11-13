@@ -6,7 +6,9 @@ package local
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -210,5 +212,72 @@ func TestExecWithoutTTYSeesEndOfInput(t *testing.T) {
 	case <-closed:
 	case <-time.After(10 * time.Second):
 		t.Fatal("cat still waiting on stdin after 10s")
+	}
+}
+
+// Drift compares `docker compose config --hash` with the config-hash label
+// Compose put on the container. They must agree on a stack that has not
+// changed, and differ once the file has, or every project reads as drifted
+// (or none does).
+func TestConfigHashMatchesContainerLabel(t *testing.T) {
+	root := t.TempDir()
+	l, err := New(Config{ProjectsDir: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	const project = "windlass-inttest-drift"
+	dir := filepath.Join(root, project)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(cmd string) {
+		body := "services:\n  web:\n    image: busybox\n    command: [\"sleep\", \"" + cmd + "\"]\n" +
+			"    volumes: [\"/scratch\", \"data:/data\"]\nvolumes:\n  data:\n"
+		if err := os.WriteFile(filepath.Join(dir, "compose.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("300")
+	t.Cleanup(func() { _ = l.Compose().Down(context.Background(), project, true, func(agent.LogLine) {}) })
+	if err := l.Compose().Up(ctx, agent.ComposeUpReq{Project: project}, func(agent.LogLine) {}); err != nil {
+		t.Fatalf("up: %v", err)
+	}
+	list, err := l.Docker().ListContainers(ctx, agent.ContainerFilter{ComposeProject: project})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("containers = %+v, %v", list, err)
+	}
+	if list[0].ConfigHash == "" || list[0].ImageID == "" {
+		t.Fatalf("container = %+v", list[0])
+	}
+	// The anonymous /scratch volume is not one to back up; the named one is.
+	if v := list[0].Volumes; len(v) != 1 || v[0] != project+"_data" {
+		t.Errorf("volumes = %v", v)
+	}
+	hashes, err := l.Compose().ConfigHashes(ctx, project, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hashes["web"] != list[0].ConfigHash {
+		t.Fatalf("config --hash %q, label %q", hashes["web"], list[0].ConfigHash)
+	}
+	image, err := l.Docker().ImageID(ctx, "busybox")
+	if err != nil || image != list[0].ImageID {
+		t.Errorf("image id %q (%v), container runs %q", image, err, list[0].ImageID)
+	}
+
+	write("301")
+	changed, err := l.Compose().ConfigHashes(ctx, project, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed["web"] == list[0].ConfigHash {
+		t.Error("an edited service must hash differently")
+	}
+
+	du, err := l.Docker().DiskUsage(ctx)
+	if err != nil || du.Images.Count == 0 || du.Containers.Count == 0 {
+		t.Errorf("disk usage = %+v, %v", du, err)
 	}
 }

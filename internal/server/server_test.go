@@ -16,6 +16,7 @@ import (
 
 	"github.com/windlass-dev/windlass/internal/agent/fake"
 	"github.com/windlass-dev/windlass/internal/api"
+	"github.com/windlass-dev/windlass/internal/attention"
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/backups"
@@ -119,7 +120,8 @@ func newTestEnv(t *testing.T) *testEnv {
 		Logger:     logger,
 		// A stand-in, so the route coverage test sees /mcp; withMCP
 		// mounts the real server.
-		MCP: http.NotFoundHandler(),
+		MCP:       http.NotFoundHandler(),
+		Attention: attention.New(queries, ag, proxySvc, nil, logger),
 	}
 	h, err := New(config.Config{Addr: ":0", DataDir: dir}, logger, a)
 	if err != nil {

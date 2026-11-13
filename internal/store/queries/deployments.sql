@@ -83,3 +83,16 @@ SELECT * FROM deployments
 WHERE project_id = ? AND status = 'succeeded'
 ORDER BY number DESC
 LIMIT 1;
+
+-- name: ListLatestFailedDeployments :many
+-- Projects whose most recent deployment failed, with the number of the last
+-- one that succeeded (0 when none has).
+SELECT p.name AS project_name, d.number, d.error, d.failed_step, d.error_line, d.finished_at,
+    CAST(COALESCE((SELECT MAX(s.number) FROM deployments s
+     WHERE s.project_id = p.id AND s.status = 'succeeded'), 0) AS INTEGER) AS live_number
+FROM projects p
+JOIN deployments d ON d.id = (
+    SELECT l.id FROM deployments l WHERE l.project_id = p.id ORDER BY l.number DESC LIMIT 1
+)
+WHERE d.status = 'failed'
+ORDER BY p.name;
