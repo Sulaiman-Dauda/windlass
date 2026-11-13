@@ -79,8 +79,9 @@ logs. Treat any token that can deploy as able to reach the project's secrets, an
 as carefully as the secrets themselves.
 
 Every token expires, after 90 days by default and at most 365. Tokens can be revoked at
-any time in Settings, and an admin can see and revoke anyone's under
-`GET /users/{id}/tokens`. The audit log records which token made each change.
+any time in Settings. An admin can also open a user's tokens from the Users card in
+Settings and revoke one, or call `GET /users/{id}/tokens` and
+`DELETE /users/{id}/tokens/{tokenID}`. The audit log records which token made each change.
 Signing out does not end tokens. If an account may have been compromised, revoke its
 tokens in Settings as well.
 

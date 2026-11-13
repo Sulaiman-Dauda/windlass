@@ -22,7 +22,7 @@ Three roles, in increasing order:
 | --- | --- |
 | `viewer` | Read projects, deployments, logs and metrics |
 | `member` | Everything a viewer can, plus deploy, edit files and environment, manage domains and backups |
-| `admin` | Everything a member can, plus manage users, API tokens, settings, Git and registry credentials, and updates |
+| `admin` | Everything a member can, plus manage users, API tokens (including other users' tokens: see and revoke them from the Users card), settings, Git and registry credentials, and updates |
 
 Viewers see which env keys a project sets, but not their values, and so do API tokens
 created without **Can read env values**. The same goes for values
