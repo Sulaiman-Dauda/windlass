@@ -60,6 +60,11 @@ type Fake struct {
 	// OffBranch lists commits GitSync treats as not on their branch, for
 	// requests that set RequireOnBranch.
 	OffBranch map[string]bool
+	// History is each project's checkout as one line of commits, newest
+	// first, for Host().GitLog. A commit not listed is unknown.
+	History map[string][]agent.GitCommit
+	// RemoteHeads is what Host().GitRemoteHead answers, keyed "url branch".
+	RemoteHeads map[string]string
 
 	// DownVolumes records the projects taken down with their volumes.
 	DownVolumes []string
@@ -131,6 +136,8 @@ func New() *Fake {
 		Spools:         map[string][]byte{},
 		HTTPResponses:  map[string]agent.HTTPCheckResult{},
 		OffBranch:      map[string]bool{},
+		History:        map[string][]agent.GitCommit{},
+		RemoteHeads:    map[string]string{},
 		Volumes:        map[string]int64{},
 		ExecScripts:    map[string]ExecScript{},
 		ExecInput:      map[string][]byte{},
@@ -864,6 +871,42 @@ func (h hostFake) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.L
 		commit = h.f.GitCommit
 	}
 	return agent.GitSyncResult{Commit: commit}, nil
+}
+
+func (h hostFake) GitLog(ctx context.Context, req agent.GitLogReq) (agent.GitLogResult, error) {
+	if err := h.f.record(fmt.Sprintf("host.gitlog(%s,%s..%s)", req.Project, req.From, req.To), nil); err != nil {
+		return agent.GitLogResult{}, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	history := h.f.History[req.Project]
+	from := slices.IndexFunc(history, func(c agent.GitCommit) bool { return c.Hash == req.From })
+	to := slices.IndexFunc(history, func(c agent.GitCommit) bool { return c.Hash == req.To })
+	if from < 0 || to < 0 {
+		return agent.GitLogResult{}, agent.ErrUnknownCommit
+	}
+	res := agent.GitLogResult{Commits: []agent.GitCommit{}}
+	for _, c := range history[min(to, from):from] {
+		if req.Limit > 0 && len(res.Commits) == req.Limit {
+			res.More = true
+			break
+		}
+		res.Commits = append(res.Commits, c)
+	}
+	return res, nil
+}
+
+func (h hostFake) GitRemoteHead(ctx context.Context, req agent.GitRemoteHeadReq) (string, error) {
+	if err := h.f.record(fmt.Sprintf("host.gitremotehead(%s,%s)", req.URL, req.Branch), nil); err != nil {
+		return "", err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	head, ok := h.f.RemoteHeads[req.URL+" "+req.Branch]
+	if !ok {
+		return "", agent.ErrBranchNotFound
+	}
+	return head, nil
 }
 
 func (d dockerFake) CopyVolume(ctx context.Context, from, to string, out agent.LogSink) error {

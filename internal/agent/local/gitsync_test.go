@@ -96,12 +96,22 @@ func TestGitSyncTokenStaysOutOfArgv(t *testing.T) {
 		t.Fatalf("fetch = %+v, %v; clone gave %q", second, err, first.Commit)
 	}
 
+	// The staging card's branch head read goes through the same server.
+	head, err := hostLocal{l}.GitRemoteHead(ctx, agent.GitRemoteHeadReq{URL: req.URL, Branch: "main", Token: token})
+	if err != nil || head != first.Commit {
+		t.Fatalf("remote head = %q, %v; want %q", head, err, first.Commit)
+	}
+	if _, err := (hostLocal{l}).GitRemoteHead(ctx, agent.GitRemoteHeadReq{URL: req.URL, Branch: "main"}); err == nil {
+		t.Fatal("ls-remote without a token succeeded; the server is not checking")
+	}
+
 	logged, err := os.ReadFile(argvLog) //nolint:gosec // G304: a file under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(logged), "clone") || !strings.Contains(string(logged), "fetch") {
-		t.Fatalf("shim did not see clone and fetch:\n%s", logged)
+	if !strings.Contains(string(logged), "clone") || !strings.Contains(string(logged), "fetch") ||
+		!strings.Contains(string(logged), "ls-remote -- "+req.URL+" refs/heads/main") {
+		t.Fatalf("shim did not see clone, fetch and ls-remote:\n%s", logged)
 	}
 	if strings.Contains(string(logged), basicAuth("x-access-token", token)) || strings.Contains(string(logged), "extraheader") {
 		t.Fatalf("token on a git command line:\n%s", logged)

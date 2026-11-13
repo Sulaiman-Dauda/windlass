@@ -24,7 +24,7 @@ async function panel(page: Page, options: { role?: string; eligible?: boolean; h
       : path.endsWith("/staging") ? { live: "app", staging: "app-staging", branch: "preview", auto_promote: true,
         staging_latest: latest, live_current: null, live_latest: null, promotable: null,
         promote_blocked: "staging has no succeeded deployment yet", can_recreate: options.eligible ?? true,
-        recreate_flagged_keys: options.flaggedKeys ?? [], rewrites: [], drift: [] }
+        recreate_flagged_keys: options.flaggedKeys ?? [], rewrites: [], drift: [], env_missing: [] }
       : path.endsWith("/services") ? { services: [] }
       : path.endsWith("/deployments") ? [latest]
       : path.endsWith("/domains") ? [] : {};

@@ -13,6 +13,8 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/dbdetect"
@@ -43,11 +45,33 @@ type Service struct {
 	git      *git.Service
 	proxy    *proxy.Service
 	logger   *slog.Logger
+
+	mu sync.Mutex
+	// commits holds the last list per staging project; a range of commits
+	// never changes, so it is kept until the range does.
+	commits map[string]commitsEntry
+	heads   map[string]headEntry
+	asks    sync.WaitGroup // branch head asks in flight
+	now     func() time.Time
+}
+
+type commitsEntry struct {
+	from, to string
+	res      agent.GitLogResult
+	unknown  bool // the checkout lacks one of the two commits
+}
+
+type headEntry struct {
+	key    string // url and branch, so a change in the Git tab asks again
+	head   string // empty before the first answer and when the ask failed
+	at     time.Time
+	asking bool
 }
 
 func New(q *db.Queries, ag agent.Agent, proj *projects.Service, dep *deploy.Service, gitSvc *git.Service,
 	px *proxy.Service, logger *slog.Logger) *Service {
-	return &Service{q: q, agent: ag, projects: proj, deploy: dep, git: gitSvc, proxy: px, logger: logger}
+	return &Service{q: q, agent: ag, projects: proj, deploy: dep, git: gitSvc, proxy: px, logger: logger,
+		commits: map[string]commitsEntry{}, heads: map[string]headEntry{}, now: time.Now}
 }
 
 // DomainMap pairs one of live's domains with the staging domain that takes
@@ -523,7 +547,7 @@ func (s *Service) stagingEnv(ctx context.Context, live string, rewrites []projec
 	for k, v := range edits {
 		env[k] = v
 	}
-	delete(env, "WINDLASS_ENVIRONMENT")
+	delete(env, projects.EnvironmentKey)
 	return env, nil
 }
 
@@ -649,7 +673,25 @@ type Status struct {
 	RecreateFlaggedKeys []string                   `json:"recreate_flagged_keys,omitempty"`
 	Rewrites            []projects.HostnameRewrite `json:"rewrites"`
 	Drift               []DriftFile                `json:"drift"`
+	// Commits are what Promote brings to live: those staging's verified
+	// commit has and live's running one does not, newest first. Absent when
+	// they cannot be read, as when live's commit is not in staging's history.
+	Commits     []agent.GitCommit `json:"commits,omitempty"`
+	CommitsMore bool              `json:"commits_more,omitempty"`
+	// BranchHead is the commit staging's branch points at on the remote,
+	// absent when the remote cannot be asked.
+	BranchHead string `json:"branch_head,omitempty"`
+	// EnvMissing names keys staging's .env has and live's lacks. Names only;
+	// absent when either .env cannot be read.
+	EnvMissing []string `json:"env_missing,omitempty"`
 }
+
+// MaxPromoteCommits caps the commits Status lists.
+const MaxPromoteCommits = 50
+
+// BranchHeadTTL is how long a remote branch head is reused. The card polls
+// every 15 seconds, and each ask is a round trip to the Git host.
+const BranchHeadTTL = time.Minute
 
 // ErrNoStaging means the project is neither a staging nor has one.
 var ErrNoStaging = errors.New("project has no staging")
@@ -695,7 +737,125 @@ func (s *Service) Status(ctx context.Context, name string) (Status, error) {
 	if st.Drift, err = s.drift(ctx, live.Name, staging.Name, st.Rewrites); err != nil {
 		return Status{}, err
 	}
+	st.EnvMissing = s.envMissing(ctx, live.Name, staging.Name)
+	s.promoteCommits(ctx, staging.Name, &st)
+	st.BranchHead = s.branchHead(staging)
 	return st, nil
+}
+
+// envMissing lists the keys staging's environment has and live's lacks,
+// apart from the one Windlass sets on staging. It is a warning, not a
+// blocker: live can get a key from an env_file or the compose file. A .env
+// that cannot be read leaves the list out. Its error is not logged, as a
+// parse error can quote part of a value.
+func (s *Service) envMissing(ctx context.Context, live, staging string) []string {
+	liveEnv, err := s.projects.ReadEnv(ctx, live)
+	if err != nil {
+		s.logger.Warn("compare staging env keys: cannot read .env", "project", live)
+		return nil
+	}
+	stagingEnv, err := s.projects.ReadEnv(ctx, staging)
+	if err != nil {
+		s.logger.Warn("compare staging env keys: cannot read .env", "project", staging)
+		return nil
+	}
+	missing := []string{}
+	for k := range stagingEnv {
+		if _, ok := liveEnv[k]; !ok && k != projects.EnvironmentKey {
+			missing = append(missing, k)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+// promoteCommits fills in the commits between live's running commit and
+// staging's verified one. Any failure leaves the field out: the card says
+// nothing rather than failing.
+func (s *Service) promoteCommits(ctx context.Context, staging string, st *Status) {
+	if st.LiveCurrent == nil || st.Promotable == nil || st.LiveCurrent.Commit == "" || st.Promotable.Commit == "" {
+		return
+	}
+	from, to := st.LiveCurrent.Commit, st.Promotable.Commit
+	s.mu.Lock()
+	cached, ok := s.commits[staging]
+	s.mu.Unlock()
+	if !ok || cached.from != from || cached.to != to {
+		res, err := s.agent.Host().GitLog(ctx, agent.GitLogReq{Project: staging, From: from, To: to, Limit: MaxPromoteCommits})
+		unknown := errors.Is(err, agent.ErrUnknownCommit)
+		if err != nil && !unknown {
+			s.logger.Warn("list commits to promote", "project", staging, "error", err)
+			return
+		}
+		// An unknown commit is kept too: the answer only changes with the range.
+		cached = commitsEntry{from: from, to: to, res: res, unknown: unknown}
+		s.mu.Lock()
+		s.commits[staging] = cached
+		s.mu.Unlock()
+	}
+	if cached.unknown {
+		return
+	}
+	st.Commits, st.CommitsMore = cached.res.Commits, cached.res.More
+	if st.Commits == nil {
+		st.Commits = []agent.GitCommit{}
+	}
+}
+
+// branchHead returns the last known head of staging's branch, "" when there
+// is none yet or the last ask failed. Once that is BranchHeadTTL old it asks
+// the remote again in the background, one ask per project at a time, so a
+// poll never waits on the Git host or on minting a GitHub App token.
+func (s *Service) branchHead(staging db.Project) string {
+	if staging.Source != "git" || !staging.GitRepo.Valid || staging.GitRepo.String == "" {
+		return ""
+	}
+	branch := staging.GitBranch.String
+	if branch == "" {
+		branch = "main"
+	}
+	key := staging.GitRepo.String + " " + branch
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cached, ok := s.heads[staging.Name]
+	if ok && cached.key != key {
+		// The Git tab changed the repository or branch: the old head is wrong.
+		cached, ok = headEntry{}, false
+	}
+	if (!ok || s.now().Sub(cached.at) >= BranchHeadTTL) && !cached.asking {
+		cached.key, cached.asking = key, true
+		s.heads[staging.Name] = cached
+		s.asks.Add(1)
+		go s.askHead(staging, branch, key)
+	}
+	return cached.head
+}
+
+// askHead reads the branch head and stores it, failed or not, unless the
+// repository or branch changed while it asked.
+func (s *Service) askHead(p db.Project, branch, key string) {
+	defer s.asks.Done()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	head, err := s.remoteHead(ctx, p, branch)
+	if err != nil {
+		s.logger.Info("read staging branch head", "project", p.Name, "error", err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.heads[p.Name].key == key {
+		s.heads[p.Name] = headEntry{key: key, head: head, at: s.now()}
+	}
+}
+
+// remoteHead runs under ctx's deadline, the token included: minting a
+// GitHub App token is an HTTP call of its own.
+func (s *Service) remoteHead(ctx context.Context, p db.Project, branch string) (string, error) {
+	token, err := s.git.Token(ctx, p)
+	if err != nil {
+		return "", err
+	}
+	return s.agent.Host().GitRemoteHead(ctx, agent.GitRemoteHeadReq{URL: p.GitRepo.String, Branch: branch, Token: token})
 }
 
 func promoteBlocked(st Status) string {

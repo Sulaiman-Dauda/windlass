@@ -256,7 +256,7 @@ func (s *Service) fillStagingCopy(ctx context.Context, name string, live db.Proj
 	for k, v := range req.Env {
 		env[k] = v
 	}
-	env["WINDLASS_ENVIRONMENT"] = "staging"
+	env[EnvironmentKey] = "staging"
 	if err := s.writeEnvFile(ctx, name, env); err != nil {
 		return result, fmt.Errorf("write .env: %w", err)
 	}
@@ -308,3 +308,7 @@ func (s *Service) setStagingOf(ctx context.Context, p db.Project, m Manifest) er
 	}
 	return s.q.SetProjectStagingOf(ctx, db.SetProjectStagingOfParams{StagingOf: of, ID: p.ID})
 }
+
+// EnvironmentKey is set to "staging" in a staging's .env, so an app can
+// guard itself with ${WINDLASS_ENVIRONMENT:-production}.
+const EnvironmentKey = "WINDLASS_ENVIRONMENT"
