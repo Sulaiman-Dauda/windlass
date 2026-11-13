@@ -73,7 +73,8 @@ Windlass runs Compose projects on one server. What carries over:
   Windlass never turns on Docker Swarm.
 - **From Portainer:** Portainer manages containers across many hosts and Kubernetes, and
   Windlass does not try to. On one server it adds what Portainer leaves to you: domains with
-  HTTPS, volume backups and a staging copy that promotes what it tested. A Portainer stack is a Compose project, so it
+  HTTPS, scheduled backups with a database dump, and a staging copy that promotes what it
+  tested. A Portainer stack is a Compose project, so it
   moves the same way. Rename `docker-compose.yml` to `compose.yaml`.
 - **Not here yet:** more than one server, and preview deployments for pull requests. If you
   need those today, Coolify and Dokploy have them.
