@@ -187,6 +187,7 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"id": 9, "number": 2, "status": "failed", "created_at": "2026-11-06T10:00:00Z",
 		"finished_at": "2026-11-06T10:01:00Z",
 		"error":       "compose up: invalid value " + plantedSecret,
+		"error_line":  "Error response from daemon: invalid value " + plantedSecret,
 	}
 	switch path {
 	case "/auth/tokens/current":
@@ -246,7 +247,9 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"promotable": map[string]any{"number": 5, "status": "succeeded"}})
 	case "/projects/web/backups":
 		list := []map[string]any{{"id": 1, "kind": "volume", "destination": "local", "status": "failed",
-			"error": "pg_dump: " + plantedSecret}}
+			"error": "pg_dump: " + plantedSecret},
+			{"id": 2, "kind": "manual", "destination": "local", "status": "done", "db_dump": "failed",
+				"db_dump_error": "the dump failed: pg_dump: " + plantedSecret}}
 		if f.madeBackups != nil {
 			f.mu.Lock()
 			list = append(list, *f.madeBackups...)

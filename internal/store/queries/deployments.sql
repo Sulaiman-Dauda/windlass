@@ -44,6 +44,9 @@ UPDATE deployments
 SET status = ?, error = ?, finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?;
 
+-- name: RecordDeploymentFailure :exec
+UPDATE deployments SET failed_step = ?, exit_code = ?, error_line = ? WHERE id = ?;
+
 -- name: SetDeploymentCommit :exec
 UPDATE deployments SET git_commit = ? WHERE id = ?;
 

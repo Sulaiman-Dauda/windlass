@@ -369,12 +369,14 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 		}
 		s.publish(d.ID, pl.Project, "deployment.step", step)
 
-		if err := s.runStep(ctx, step, d, pl); err != nil {
+		lines := &errorLines{}
+		if err := s.runStep(ctx, step, d, pl, lines); err != nil {
 			if ctx.Err() != nil {
 				s.finish(ctx, d, "cancelled", "cancelled")
 				return ctx.Err()
 			}
 			s.event(ctx, d.ID, "error", err.Error())
+			s.recordFailure(ctx, d, step, err, lines)
 			s.finish(ctx, d, "failed", err.Error())
 			return nil // the deployment failed; the job itself is done
 		}
@@ -390,8 +392,8 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 	return nil
 }
 
-func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pl payload) error {
-	sink := s.logSink(ctx, d.ID)
+func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pl payload, lines *errorLines) error {
+	sink := s.logSink(ctx, d.ID, lines)
 	project := pl.Project
 
 	switch step {
@@ -672,9 +674,13 @@ func (s *Service) verify(ctx context.Context, deploymentID int64, project string
 // Event plumbing
 
 // logSink persists compose/git output lines as deployment events and
-// publishes them for live SSE tails.
-func (s *Service) logSink(ctx context.Context, deploymentID int64) agent.LogSink {
+// publishes them for live SSE tails. lines, when set, keeps the step's
+// error lines for the failure record.
+func (s *Service) logSink(ctx context.Context, deploymentID int64, lines *errorLines) agent.LogSink {
 	return func(line agent.LogLine) {
+		if lines != nil {
+			lines.observe(line.Text)
+		}
 		s.event(ctx, deploymentID, "log", line.Text)
 	}
 }

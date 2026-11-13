@@ -4,7 +4,7 @@ RETURNING *;
 
 -- name: FinishBackup :exec
 UPDATE backups
-SET status = ?, path = ?, size = ?, error = ?,
+SET status = ?, path = ?, size = ?, error = ?, db_dump = ?, db_dump_error = ?,
     finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?;
 

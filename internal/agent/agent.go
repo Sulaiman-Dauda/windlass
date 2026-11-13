@@ -13,6 +13,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"regexp"
 	"time"
@@ -336,8 +337,13 @@ type FSAgent interface {
 	RemoveProject(ctx context.Context, project string) error
 	// ArchiveProject writes a tar.gz of the project directory into the
 	// node's backups dir and returns its absolute path and size. Extra files
-	// are injected into the archive without modifying the live project.
-	ArchiveProject(ctx context.Context, project string, extraFiles map[string][]byte) (ArchiveInfo, error)
+	// are injected into the archive without modifying the live project:
+	// extraFiles maps an archive path to a file SpoolFile wrote, which the
+	// archive copies from disk so a large dump never sits in memory.
+	ArchiveProject(ctx context.Context, project string, extraFiles map[string]string) (ArchiveInfo, error)
+	// SpoolFile copies r into a new private file in the backups dir and
+	// returns its path and size. The caller removes it with RemoveArchive.
+	SpoolFile(ctx context.Context, r io.Reader) (path string, size int64, err error)
 	// RestoreProject replaces the project directory contents with the
 	// archive's (which must have been produced by ArchiveProject).
 	RestoreProject(ctx context.Context, project, archivePath string) error
@@ -357,6 +363,10 @@ type FSAgent interface {
 	// FreeSpace reports the bytes free on the projects volume.
 	FreeSpace(ctx context.Context) (uint64, error)
 }
+
+// BackupStagingDir is the project-relative directory a restore extracts a
+// backup's database dump into. ArchiveProject never archives it.
+const BackupStagingDir = ".windlass/backup"
 
 type ArchiveInfo struct {
 	Path string `json:"path"`

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/agent/fake"
@@ -179,6 +180,94 @@ func TestDeployFailurePath(t *testing.T) {
 		t.Errorf("no error event recorded:\n%s", msgs)
 	}
 }
+
+// A failed deploy keeps the step it stopped in, the command's exit code and
+// a line to show first, because its status column then reads "failed".
+func TestDeployFailureRecordsStepAndExitCode(t *testing.T) {
+	e := newEnv(t)
+	e.agent.Fail["compose.up"] = codeErr{code: 17, msg: "exit status 17"}
+
+	d, _ := e.deploy.Deploy(context.Background(), "app", "manual")
+	final := e.runUntilFinished(t, d.ID)
+	if final.Status != "failed" {
+		t.Fatalf("status = %s, want failed", final.Status)
+	}
+	if final.FailedStep.String != "applying" || final.ExitCode.Int64 != 17 || !final.ExitCode.Valid {
+		t.Fatalf("failed_step = %q, exit_code = %v, want applying and 17", final.FailedStep.String, final.ExitCode)
+	}
+	if !strings.Contains(final.ErrorLine.String, "exit status 17") {
+		t.Fatalf("error_line = %q, want the error when the output had no error line", final.ErrorLine.String)
+	}
+}
+
+func TestDeployFailureWithoutExitCode(t *testing.T) {
+	e := newEnv(t)
+	e.agent.Fail["compose.pull"] = errors.New("registry unreachable")
+
+	d, _ := e.deploy.Deploy(context.Background(), "app", "manual")
+	final := e.runUntilFinished(t, d.ID)
+	if final.FailedStep.String != "pulling" || final.ExitCode.Valid {
+		t.Fatalf("failed_step = %q, exit_code = %v, want pulling and none", final.FailedStep.String, final.ExitCode)
+	}
+}
+
+func TestDeploySuccessHasNoFailureRecord(t *testing.T) {
+	e := newEnv(t)
+	d, _ := e.deploy.Deploy(context.Background(), "app", "manual")
+	final := e.runUntilFinished(t, d.ID)
+	if final.Status != "succeeded" || final.FailedStep.Valid || final.ExitCode.Valid || final.ErrorLine.Valid {
+		t.Fatalf("succeeded deploy has a failure record: %+v", final)
+	}
+}
+
+func TestErrorLinesKeepsTheLastErrorLine(t *testing.T) {
+	lines := &errorLines{}
+	for _, l := range []string{
+		"#8 [web 3/5] RUN npm ci",
+		"#8 12.1 npm ERR! code ERESOLVE",
+		"WARNING: the build cache is getting large",
+		"\x1b[31m#8 ERROR: process \"/bin/sh -c npm ci\" did not complete successfully: exit code: 1\x1b[0m",
+		"------",
+		"failed to solve: process \"/bin/sh -c npm ci\" did not complete successfully: exit code: 1",
+		"",
+		" Container app-web-1  Stopped",
+		"warning: deprecated key",
+	} {
+		lines.observe(l)
+	}
+	want := `failed to solve: process "/bin/sh -c npm ci" did not complete successfully: exit code: 1`
+	if got := lines.line(); got != want {
+		t.Fatalf("line = %q, want %q", got, want)
+	}
+
+	rec := failureRecord("building", codeErr{code: 1, msg: "docker compose build: exit status 1"}, lines)
+	if rec.ErrorLine.String != want || rec.ExitCode.Int64 != 1 || rec.FailedStep.String != "building" {
+		t.Fatalf("record = %+v", rec)
+	}
+
+	// npm's marker has no word boundary after the "!", so it needs its own
+	// pattern.
+	npm := &errorLines{}
+	npm.observe("npm ERR! code ERESOLVE")
+	if got := npm.line(); got != "npm ERR! code ERESOLVE" {
+		t.Fatalf("npm line = %q", got)
+	}
+
+	long := strings.Repeat("é", maxErrorLine)
+	rec = failureRecord("verifying", errors.New(long+"\nsecond line"), nil)
+	if len(rec.ErrorLine.String) > maxErrorLine+3 || !utf8.ValidString(rec.ErrorLine.String) || strings.Contains(rec.ErrorLine.String, "second") {
+		t.Fatalf("long error line = %d bytes, valid %v", len(rec.ErrorLine.String), utf8.ValidString(rec.ErrorLine.String))
+	}
+}
+
+// codeErr is an error with an exit code, as *exec.ExitError has.
+type codeErr struct {
+	code int
+	msg  string
+}
+
+func (c codeErr) Error() string { return c.msg }
+func (c codeErr) ExitCode() int { return c.code }
 
 func TestDeployVerifyUnhealthy(t *testing.T) {
 	e := newEnv(t)

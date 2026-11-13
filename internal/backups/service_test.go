@@ -1,6 +1,7 @@
 package backups
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -12,6 +13,9 @@ import (
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/agent/fake"
 	"github.com/windlass-dev/windlass/internal/dbdetect"
+	"github.com/windlass-dev/windlass/internal/events"
+	"github.com/windlass-dev/windlass/internal/projects"
+	"github.com/windlass-dev/windlass/internal/secrets"
 	"github.com/windlass-dev/windlass/internal/store"
 	"github.com/windlass-dev/windlass/internal/store/db"
 	"github.com/windlass-dev/windlass/migrations"
@@ -90,7 +94,7 @@ func TestPruneKeepsDestinationSeparateAndRecordOnDeleteFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { sqlDB.Close() })
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err := store.Migrate(sqlDB, migrations.FS); err != nil {
 		t.Fatal(err)
 	}
@@ -134,5 +138,102 @@ func TestPruneKeepsDestinationSeparateAndRecordOnDeleteFailure(t *testing.T) {
 	}
 	if len(rows) != 2 || rows[0].Destination != "s3" || rows[1].Destination != "local" {
 		t.Fatalf("prune crossed destinations or kept wrong records: %+v", rows)
+	}
+}
+
+// newRunEnv wires a backup service to the fake agent with one project, "shop".
+func newRunEnv(t *testing.T) (*Service, *fake.Fake, *db.Queries) {
+	t.Helper()
+	sqlDB, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := store.Migrate(sqlDB, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(sqlDB)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	box, _ := secrets.New(bytes.Repeat([]byte{1}, 32))
+	ag := fake.New()
+	bus := events.NewBus()
+	proj := projects.New(q, ag, box, bus, logger)
+	if _, err := proj.Create(context.Background(), projects.CreateReq{Name: "shop"}); err != nil {
+		t.Fatal(err)
+	}
+	return New(q, ag, proj, box, bus, logger), ag, q
+}
+
+func TestBackupRecordsWhatHappenedToTheDatabaseDump(t *testing.T) {
+	web := agent.Container{ID: "web", Name: "shop-web-1", ComposeProject: "shop", ComposeService: "web", Image: "nginx", State: "running"}
+	pg := agent.Container{ID: "pg", Name: "shop-db-1", ComposeProject: "shop", ComposeService: "db", Image: "postgres:17", State: "running"}
+	stopped := pg
+	stopped.State = "exited"
+
+	for _, tt := range []struct {
+		name       string
+		containers []agent.Container
+		script     *fake.ExecScript
+		want       string
+		reason     string
+		inArchive  bool
+	}{
+		{"no database", []agent.Container{web}, nil, dumpNone, "", false},
+		{"database service has no container", []agent.Container{web}, nil, dumpFailed, "database service db has no container", false},
+		{"database stopped", []agent.Container{web, stopped}, nil, dumpFailed, "database container shop-db-1 is not running", false},
+		{"dump fails", []agent.Container{web, pg}, &fake.ExecScript{Output: "partial", Exit: 1}, dumpFailed, "the dump failed: exit 1", false},
+		{"dump empty", []agent.Container{web, pg}, &fake.ExecScript{}, dumpFailed, "the dump produced no output", false},
+		{"dump taken", []agent.Container{web, pg}, &fake.ExecScript{Output: "CREATE TABLE marker;"}, dumpIncluded, "", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, ag, q := newRunEnv(t)
+			ag.Containers = tt.containers
+			if tt.name == "database service has no container" {
+				ag.Resolved["shop"] = agent.ResolvedConfig{Services: map[string]agent.ResolvedService{
+					"web": {Image: "nginx"}, "db": {Image: "postgres:17"},
+				}}
+			}
+			if tt.script != nil {
+				ag.ExecScripts["pg"] = *tt.script
+			}
+			rec, err := s.Run(context.Background(), "shop", "manual", "local")
+			if err != nil {
+				t.Fatalf("backup failed: %v", err)
+			}
+			rows, err := q.ListProjectBackups(context.Background(), "shop")
+			if err != nil || len(rows) != 1 {
+				t.Fatalf("rows = %d, %v", len(rows), err)
+			}
+			for _, got := range []db.Backup{rec, rows[0]} {
+				if got.Status != "done" || got.DbDump.String != tt.want || got.DbDumpError.String != tt.reason {
+					t.Fatalf("record = status %q, db_dump %q, reason %q; want done, %q, %q",
+						got.Status, got.DbDump.String, got.DbDumpError.String, tt.want, tt.reason)
+				}
+			}
+			dump, ok := ag.Archives[rec.Path][dumpArchivePath]
+			if ok != tt.inArchive || (ok && string(dump) != tt.script.Output) {
+				t.Fatalf("archive dump = %q (present %v), want present %v", dump, ok, tt.inArchive)
+			}
+			if len(ag.Spools) != 0 {
+				t.Fatalf("spooled dump left behind: %v", ag.Spools)
+			}
+		})
+	}
+}
+
+// A backup taken before migration 0012 has no db_dump, which the API must
+// show as unknown rather than as "no database".
+func TestOlderBackupHasNoDumpRecord(t *testing.T) {
+	s, _, q := newRunEnv(t)
+	p, err := s.projects.Get(context.Background(), "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := q.CreateBackup(context.Background(), db.CreateBackupParams{ProjectID: p.ID, Kind: "manual", Destination: "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.DbDump.Valid || rec.DbDumpError.Valid {
+		t.Fatalf("new row has a dump record before it finished: %+v", rec)
 	}
 }

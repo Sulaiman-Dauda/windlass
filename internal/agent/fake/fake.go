@@ -6,6 +6,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"path"
@@ -83,6 +84,8 @@ type Fake struct {
 
 	// Archives maps archive paths to project-file snapshots.
 	Archives map[string]map[string][]byte
+	// Spools maps SpoolFile paths to their contents until RemoveArchive.
+	Spools map[string][]byte
 
 	Metrics       agent.HostMetrics
 	HTTPResponses map[string]agent.HTTPCheckResult
@@ -105,6 +108,7 @@ func New() *Fake {
 		ProxyAvailable: true,
 		GitCommit:      "0000000000000000000000000000000000000000",
 		Archives:       map[string]map[string][]byte{},
+		Spools:         map[string][]byte{},
 		HTTPResponses:  map[string]agent.HTTPCheckResult{},
 		OffBranch:      map[string]bool{},
 		Volumes:        map[string]int64{},
@@ -433,7 +437,22 @@ func (s fsFake) EnsureProject(ctx context.Context, project string) (string, erro
 	return "/fake/projects/" + project, nil
 }
 
-func (s fsFake) ArchiveProject(ctx context.Context, project string, extraFiles map[string][]byte) (agent.ArchiveInfo, error) {
+func (s fsFake) SpoolFile(ctx context.Context, r io.Reader) (string, int64, error) {
+	if err := s.f.record("fs.spool", nil); err != nil {
+		return "", 0, err
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return "", 0, err
+	}
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	path := fmt.Sprintf("/fake/backups/.windlass-spool-%d", len(s.f.Spools)+len(s.f.Archives))
+	s.f.Spools[path] = data
+	return path, int64(len(data)), nil
+}
+
+func (s fsFake) ArchiveProject(ctx context.Context, project string, extraFiles map[string]string) (agent.ArchiveInfo, error) {
 	if err := s.f.record(fmt.Sprintf("fs.archive(%s)", project), nil); err != nil {
 		return agent.ArchiveInfo{}, err
 	}
@@ -449,7 +468,11 @@ func (s fsFake) ArchiveProject(ctx context.Context, project string, extraFiles m
 		snapshot[name] = append([]byte(nil), data...)
 		size += int64(len(data))
 	}
-	for name, data := range extraFiles {
+	for name, src := range extraFiles {
+		data, ok := s.f.Spools[src]
+		if !ok {
+			return agent.ArchiveInfo{}, fmt.Errorf("extra %s: no spooled file %s", name, src)
+		}
 		snapshot[name] = append([]byte(nil), data...)
 		size += int64(len(data))
 	}
@@ -469,6 +492,7 @@ func (s fsFake) RemoveArchive(ctx context.Context, archivePath string) error {
 	s.f.mu.Lock()
 	defer s.f.mu.Unlock()
 	delete(s.f.Archives, archivePath)
+	delete(s.f.Spools, archivePath)
 	return nil
 }
 

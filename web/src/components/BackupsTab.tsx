@@ -19,8 +19,21 @@ interface Backup {
   size: number;
   status: string;
   error?: string;
+  /** Absent for backups taken before v0.62, which did not record it. */
+  db_dump?: "included" | "failed" | "none";
+  db_dump_error?: string;
   created_at: string;
 }
+
+// What the archive holds besides the project files.
+const dumpNote: Record<NonNullable<Backup["db_dump"]>, string> = {
+  included: "Files and database dump",
+  failed: "Files only",
+  none: "Files; no database container found",
+};
+
+// Backups taken before Windlass recorded the dump have no db_dump.
+const unrecordedDump = "Database dump not recorded";
 
 interface Schedule {
   interval: string;
@@ -108,21 +121,36 @@ export default function BackupsTab({ project }: { project: string }) {
                 {backups.data.map((b) => (
                   <tr key={b.id} className="transition-colors hover:bg-surface2">
                     <td className="px-5 py-3">
-                      <div className="font-semibold text-fg">{formatDateTime(b.created_at)}</div>
+                      <div className="whitespace-nowrap font-semibold text-fg">{formatDateTime(b.created_at)}</div>
                       <div className="text-xs text-fg3">
                         #{b.id} · {timeAgo(b.created_at)}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-fg2">{b.kind}</td>
-                    <td className="px-4 py-3 text-fg2">{b.destination === "s3" ? "S3" : "This server"}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-fg2">{formatBytes(b.size)}</td>
+                    <td className="px-4 py-3 text-fg2">
+                      <div>{b.kind}</div>
+                      {b.status === "done" && (
+                        <div className="whitespace-nowrap text-xs text-fg3">
+                          {b.db_dump ? dumpNote[b.db_dump] : unrecordedDump}
+                        </div>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-fg2">{b.destination === "s3" ? "S3" : "This server"}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-fg2">{formatBytes(b.size)}</td>
                     <td className="px-4 py-3">
-                      {b.status === "done" ? (
+                      {b.status === "done" && b.db_dump === "failed" ? (
+                        <>
+                          <StatusPill tone="warn">No database dump</StatusPill>
+                          {b.db_dump_error && (
+                            <div className="mt-1 max-w-56 text-xs text-fg3">{b.db_dump_error}</div>
+                          )}
+                        </>
+                      ) : b.status === "done" ? (
                         <StatusPill tone="ok">Complete</StatusPill>
                       ) : b.status === "failed" ? (
-                        <span title={b.error}>
+                        <>
                           <StatusPill tone="err">Failed</StatusPill>
-                        </span>
+                          {b.error && <div className="mt-1 max-w-56 break-words text-xs text-fg3">{b.error}</div>}
+                        </>
                       ) : (
                         <StatusPill tone="accent" busy>
                           {b.status}

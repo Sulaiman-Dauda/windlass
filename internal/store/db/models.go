@@ -47,6 +47,8 @@ type Backup struct {
 	Error       sql.NullString
 	CreatedAt   string
 	FinishedAt  sql.NullString
+	DbDump      sql.NullString
+	DbDumpError sql.NullString
 }
 
 type BackupSchedule struct {
@@ -72,6 +74,9 @@ type Deployment struct {
 	FinishedAt   sql.NullString
 	CreatedAt    string
 	PromotedFrom sql.NullInt64
+	FailedStep   sql.NullString
+	ExitCode     sql.NullInt64
+	ErrorLine    sql.NullString
 }
 
 type DeploymentArtifact struct {

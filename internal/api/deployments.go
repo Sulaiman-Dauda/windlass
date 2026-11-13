@@ -23,21 +23,34 @@ type deploymentDTO struct {
 	TriggeredBy string `json:"triggered_by"`
 	GitCommit   string `json:"git_commit,omitempty"`
 	Error       string `json:"error,omitempty"`
-	StartedAt   string `json:"started_at,omitempty"`
-	FinishedAt  string `json:"finished_at,omitempty"`
-	CreatedAt   string `json:"created_at"`
+	// FailedStep, ExitCode and ErrorLine describe a failed deployment: the
+	// step it stopped in, the failing command's exit code, and the line of
+	// output to show first.
+	FailedStep string `json:"failed_step,omitempty"`
+	ExitCode   *int64 `json:"exit_code,omitempty"`
+	ErrorLine  string `json:"error_line,omitempty"`
+	StartedAt  string `json:"started_at,omitempty"`
+	FinishedAt string `json:"finished_at,omitempty"`
+	CreatedAt  string `json:"created_at"`
 	// PromotedFromNumber is the staging deployment this one promoted.
 	PromotedFromNumber int64 `json:"promoted_from_number,omitempty"`
 }
 
 func toDeploymentDTO(d db.Deployment) deploymentDTO {
+	var exitCode *int64
+	if d.ExitCode.Valid {
+		exitCode = &d.ExitCode.Int64
+	}
 	return deploymentDTO{
+		ExitCode:    exitCode,
 		ID:          d.ID,
 		Number:      d.Number,
 		Status:      d.Status,
 		TriggeredBy: d.TriggeredBy,
 		GitCommit:   d.GitCommit.String,
 		Error:       d.Error.String,
+		FailedStep:  d.FailedStep.String,
+		ErrorLine:   d.ErrorLine.String,
 		StartedAt:   d.StartedAt.String,
 		FinishedAt:  d.FinishedAt.String,
 		CreatedAt:   d.CreatedAt,
