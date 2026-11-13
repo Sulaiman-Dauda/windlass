@@ -37,6 +37,13 @@ running or the dump fails, Windlass logs a warning saying the backup has no data
 and still takes the file archive. A backup that captured your compose file and environment
 is worth having even on a day the database was down.
 
+Each row in the Backups tab says what it holds: **Files and database dump**, **Files only**
+when the dump failed, or **Files; no database container found**. Backups taken before
+v0.62 show **Database dump not recorded**, because earlier versions did not record it.
+
+A project with volumes and no backup schedule shows on the dashboard's **Needs you** list
+until you give it one. Staging projects and anonymous volumes are left out.
+
 ## Scheduling
 
 Set an interval of hourly, daily or weekly, a destination, and how many to retain. After

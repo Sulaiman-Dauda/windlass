@@ -117,7 +117,7 @@ is sent back to the panel with a five-minute ticket and finishes at
 
 ## Shape of it
 
-Seventy-nine paths in the OpenAPI spec, grouped roughly as:
+Eighty-eight paths in the OpenAPI spec, grouped roughly as:
 
 | Group | Examples |
 | --- | --- |
@@ -125,8 +125,8 @@ Seventy-nine paths in the OpenAPI spec, grouped roughly as:
 | Deployments | `GET/POST /projects/{name}/deployments`, `POST /projects/{name}/deployments/{number}/rollback` |
 | Domains | `GET/POST /projects/{name}/domains`, `DELETE /projects/{name}/domains/{hostname}` |
 | Backups | `GET/POST /projects/{name}/backups`, `POST /projects/{name}/backups/{id}/restore`, `GET/PUT /projects/{name}/backups/schedule` |
-| Runtime | `GET /projects/{name}/services`, `GET /projects/{name}/logs`, `GET /projects/{name}/terminal` |
-| Platform | `GET /system/metrics`, `GET/POST /system/update`, `GET /proxy/status`, `GET /events` |
+| Runtime | `GET /projects/{name}/services`, `GET /projects/{name}/logs`, `GET /projects/{name}/drift`, `GET /projects/{name}/terminal` |
+| Platform | `GET /system/metrics`, `GET /system/attention`, `GET/PUT /system/docker/cleanup`, `GET /system/preflight`, `GET/POST /system/update`, `GET /proxy/status`, `GET /events` |
 | Access | `GET/POST /users`, `PUT /users/{id}/role`, `POST /auth/totp/setup`, `GET/POST /auth/tokens` |
 | Git | `GET/POST /git/connections`, `PUT /projects/{name}/git`, `POST /webhooks/{provider}/{project}` |
 | Templates | `GET /templates`, `POST /templates/{key}` |
@@ -139,6 +139,12 @@ platform stream; `GET /projects/{name}/deployments/{number}/events` follows one 
 
 An SSE connection stays open, which trips up tooling that waits for a request to finish.
 Consume it as a stream or ask for a bounded read.
+
+`GET /projects/{name}/logs` without `?service=` merges every container of the project into
+one stream, ordered by time, with up to 5000 lines of history (`?tail=N`). `?follow=false`
+sends the history and closes, which is the bounded read. `GET /projects/{name}/drift`
+compares the running containers with the compose file and says which services changed,
+are missing or no longer in it; the panel does not show it yet.
 
 `GET /projects/{name}/terminal` is a WebSocket.
 

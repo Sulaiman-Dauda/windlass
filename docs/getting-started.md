@@ -45,6 +45,11 @@ sudo journalctl -u windlass | grep setup_token
 Once an account exists, setup refuses every request, so the instance cannot be claimed
 twice.
 
+Before you create the account, paste the token and press **Check this server**. It reads
+Docker, Compose, Caddy, ports 80 and 443, and free disk, and says what is missing before
+you deploy anything. It changes nothing. It cannot see a firewall in front of the server,
+such as a cloud provider's, so a port it reports open can still be blocked from outside.
+
 Choose a real password of at least ten characters. This account is an administrator on a
 machine that runs containers as root.
 
@@ -79,6 +84,11 @@ that starts and immediately crash-loops is reported as failed rather than green.
 
 If the panel restarts mid-deployment, the deployment resumes on startup rather than
 leaving the project half-updated.
+
+From here the dashboard's **Needs you** list collects what wants attention across the
+server: a project whose last deployment failed, a disk 85% full, a project with volumes
+and no backup schedule, Caddy not answering while domains depend on it, and, for admins, a
+Windlass update. It is absent when there is nothing to do.
 
 ## 5. Put a domain in front of it
 

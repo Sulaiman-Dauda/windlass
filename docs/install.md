@@ -81,6 +81,9 @@ sudo journalctl -u windlass | grep setup_token
 ```
 
 Open `http://<server-ip>:8080` temporarily, or use an SSH tunnel when port 8080 is firewalled.
+The setup page's **Check this server** button, with the token, reads Docker, Compose,
+Caddy, ports 80 and 443 and free disk before you claim the instance, and changes nothing.
+After claiming, the same checks are `GET /api/v1/system/preflight` for an admin.
 After signing in:
 
 1. create a DNS A/AAAA record such as `windlass.example.com` pointing at the server;

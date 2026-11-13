@@ -52,6 +52,8 @@ them are encrypted with `secret.key`.
 - The GitHub App (Settings, Users and sign-in) and Git connections (Settings, Git)
 - Container registry credentials (Settings, Registries)
 - The S3 backup destination and its keys (Settings, Backups)
+- Docker storage clean-up after each successful deployment (Settings, System); see
+  [Deployments](./deployments.md#cleaning-up-docker-storage)
 
 ## Files on disk
 
