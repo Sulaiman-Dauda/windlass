@@ -302,7 +302,10 @@ port_closed 80 http && CLOSED="80"
 port_closed 443 https && CLOSED="${CLOSED:+$CLOSED and }443"
 if [ "$WANT_CADDY" = "1" ] && [ -n "$CLOSED" ]; then
   echo
-  warn "Port $CLOSED looks closed by $FIREWALL. Domains and HTTPS need 80 and 443 open."
+  case "$CLOSED" in
+    *" and "*) warn "Ports $CLOSED look closed by $FIREWALL. Domains and HTTPS need 80 and 443 open." ;;
+    *) warn "Port $CLOSED looks closed by $FIREWALL. Domains and HTTPS need 80 and 443 open." ;;
+  esac
   if [ "$FIREWALL" = "ufw" ]; then
     echo "    sudo ufw allow 80/tcp && sudo ufw allow 443/tcp"
   else
