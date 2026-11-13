@@ -20,6 +20,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/backups"
+	"github.com/windlass-dev/windlass/internal/cleanup"
 	"github.com/windlass-dev/windlass/internal/config"
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
@@ -122,6 +123,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		// mounts the real server.
 		MCP:       http.NotFoundHandler(),
 		Attention: attention.New(queries, ag, proxySvc, nil, logger),
+		Cleanup:   cleanup.New(runnerCtx, queries, ag.Docker(), logger, nil),
 	}
 	h, err := New(config.Config{Addr: ":0", DataDir: dir}, logger, a)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -477,5 +478,43 @@ func TestPullWithoutCredentialsIsUnchanged(t *testing.T) {
 	}
 	if len(e.agent.RegistryLogins) != 0 {
 		t.Fatalf("logged in with nothing configured: %v", e.agent.RegistryLogins)
+	}
+}
+
+// The disk clean-up hears of a successful deployment and never of a failed
+// one: a failed deployment cleans nothing.
+func TestOnSucceededHook(t *testing.T) {
+	e := newEnv(t)
+	var mu sync.Mutex
+	var heard []string
+	e.deploy.OnSucceeded(func(project string) {
+		mu.Lock()
+		defer mu.Unlock()
+		heard = append(heard, project)
+	})
+
+	d, _ := e.deploy.Deploy(context.Background(), "app", "manual")
+	if final := e.runUntilFinished(t, d.ID); final.Status != "succeeded" {
+		t.Fatalf("status = %s", final.Status)
+	}
+	// The hook runs just after the status is written, so give it a moment.
+	for i := 0; i < 100; i++ {
+		mu.Lock()
+		n := len(heard)
+		mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	e.agent.Fail["compose.pull"] = errors.New("registry unreachable")
+	d, _ = e.deploy.Deploy(context.Background(), "app", "manual")
+	if final := e.runUntilFinished(t, d.ID); final.Status != "failed" {
+		t.Fatalf("status = %s", final.Status)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(heard) != 1 || heard[0] != "app" {
+		t.Fatalf("hook heard %v, want one success for app", heard)
 	}
 }

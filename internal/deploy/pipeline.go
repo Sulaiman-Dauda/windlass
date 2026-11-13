@@ -92,7 +92,14 @@ type Service struct {
 	runner   *jobs.Runner
 	bus      *events.Bus
 	logger   *slog.Logger
+	// succeeded, when set, hears of each successful deployment once it is
+	// recorded. It must not block.
+	succeeded func(project string)
 }
+
+// OnSucceeded sets a hook told of each successful deployment, after any
+// promotion it starts has been queued. The disk clean-up uses it.
+func (s *Service) OnSucceeded(fn func(project string)) { s.succeeded = fn }
 
 func New(q *db.Queries, ag agent.Agent, proj *projects.Service, gitSvc *git.Service, reg *registries.Service, runner *jobs.Runner, bus *events.Bus, logger *slog.Logger) *Service {
 	s := &Service{q: q, agent: ag, projects: proj, git: gitSvc, registry: reg, runner: runner, bus: bus, logger: logger}
@@ -395,6 +402,9 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 	// promoting it would roll live back too, and live has its own Rollback.
 	if !pl.NoPromote && !d.RollbackOf.Valid {
 		s.autoPromote(ctx, d, pl.Project)
+	}
+	if s.succeeded != nil {
+		s.succeeded(pl.Project)
 	}
 	return nil
 }

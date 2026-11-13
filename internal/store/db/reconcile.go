@@ -129,3 +129,29 @@ func (q *Queries) ListProtectedImageDigests(ctx context.Context, deploymentsPerP
 	}
 	return out, rows.Err()
 }
+
+// ActiveDeploymentProjects names the projects with a deployment still
+// running that was queued in the last six hours. The disk clean-up waits for
+// none: an image pulled for a deployment has no container until that
+// deployment brings it up. The age limit keeps a deployment row stuck in a
+// running status, after a crash, from stopping the clean-up for good.
+func (q *Queries) ActiveDeploymentProjects(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, `SELECT DISTINCT p.name FROM deployments d
+		JOIN projects p ON p.id = d.project_id
+		WHERE d.status NOT IN ('succeeded', 'failed', 'cancelled')
+		AND d.created_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-6 hours')
+		ORDER BY p.name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}

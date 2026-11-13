@@ -17,7 +17,7 @@ import { useTheme, type ThemeMode } from "../ui/theme";
 import { useConfirm } from "../ui/Modal";
 import { useToast, errorText } from "../ui/Toast";
 import { cn } from "../ui/cn";
-import { formatBytes, formatDate, timeAgo } from "../ui/format";
+import { formatBytes, formatDate, formatDateTime, plural, timeAgo } from "../ui/format";
 
 interface Connection {
   id: number;
@@ -1272,30 +1272,100 @@ interface ImageDiskUsage {
   reclaimable_bytes: number;
 }
 
+interface SystemDisk {
+  docker?: { build_cache: { bytes: number; reclaimable_bytes: number } };
+}
+
+interface CleanupSettings {
+  auto: boolean;
+  image_days: number;
+  keep_deployments: number;
+  build_cache_gb: number;
+}
+
+interface CleanupRun {
+  trigger: "deploy" | "manual";
+  project?: string;
+  finished_at: string;
+  images: { deleted: number; reclaimed_bytes: number; failed: number; errors?: string[] };
+  build_cache: { reclaimed_bytes: number; errors?: string[] };
+  error?: string;
+  skipped?: string;
+}
+
+interface CleanupState {
+  settings: CleanupSettings;
+  defaults: CleanupSettings;
+  last: CleanupRun | null;
+}
+
+/** One sentence on what a run removed, or why it removed nothing. */
+function describeRun(r: CleanupRun): string {
+  if (r.skipped) return `Skipped, because ${r.skipped}. The next successful deployment runs it.`;
+  const parts = [`removed ${plural(r.images.deleted, "image")} (${formatBytes(r.images.reclaimed_bytes)})`];
+  parts.push(`freed ${formatBytes(r.build_cache.reclaimed_bytes)} of build cache`);
+  let text = parts.join(" and ") + ".";
+  if (r.images.failed > 0) text += ` ${plural(r.images.failed, "image")} could not be removed.`;
+  if (r.error) text += ` Problem: ${r.error}.`;
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function runProblems(r: CleanupRun): string[] {
+  return [...(r.images.errors ?? []), ...(r.build_cache.errors ?? [])];
+}
+
 function DockerStorageSection() {
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
   const usage = useQuery<ImageDiskUsage>({ queryKey: ["system", "docker", "images"], queryFn: () => api("/system/docker/images"), retry: false });
-  const prune = useMutation<{ deleted: number; reclaimed_bytes: number }>({
-    mutationFn: () => api("/system/docker/images/prune", { method: "POST", body: JSON.stringify({ retention_days: 7, keep_deployments: 5 }) }),
+  const disk = useQuery<SystemDisk>({ queryKey: ["system", "disk"], queryFn: () => api("/system/disk"), retry: false });
+  const state = useQuery<CleanupState>({ queryKey: ["system", "docker", "cleanup"], queryFn: () => api("/system/docker/cleanup"), retry: false });
+  const [form, setForm] = useState<CleanupSettings | null>(null);
+  useEffect(() => {
+    if (state.data) setForm(state.data.settings);
+  }, [state.data]);
+
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["system", "docker"] });
+    qc.invalidateQueries({ queryKey: ["system", "disk"] });
+  };
+  const save = useMutation<CleanupState, Error, CleanupSettings>({
+    mutationFn: (value) => api("/system/docker/cleanup", { method: "PUT", body: JSON.stringify(value) }),
+    onSuccess: () => toast.ok("Clean-up settings saved"),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["system", "docker", "cleanup"] }),
+  });
+  const run = useMutation<CleanupRun>({
+    mutationFn: () => api("/system/docker/cleanup/run", { method: "POST" }),
     onSuccess: (r) => {
-      toast.ok(`Removed ${r.deleted} images`, `${formatBytes(r.reclaimed_bytes)} reclaimed.`);
-      qc.invalidateQueries({ queryKey: ["system", "docker", "images"] });
+      if (r.error || runProblems(r).length > 0) toast.err("Clean-up finished with problems", describeRun(r));
+      else toast.ok("Clean-up finished", describeRun(r));
+      refresh();
     },
-    onError: (e) => toast.err("Cleanup failed", errorText(e)),
+    onError: (e) => toast.err("Clean-up failed", errorText(e)),
   });
 
-  if (usage.isError) return null;
+  if (usage.isError || state.isError) return null;
   const u = usage.data;
+  const cache = disk.data?.docker?.build_cache;
+  const saved = state.data?.settings;
+  const dirty = !!form && !!saved && JSON.stringify(form) !== JSON.stringify(saved);
+  const last = state.data?.last;
+  const number = (key: keyof Omit<CleanupSettings, "auto">) => (e: ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => (f ? { ...f, [key]: e.target.value === "" ? 0 : Number(e.target.value) } : f));
+
   return (
     <Card>
-      <CardHeader title="Docker image storage" description="Old images pile up with every build and pull." />
-      <div className="grid grid-cols-2 divide-x divide-hairline border-b border-hairline sm:grid-cols-3">
+      <CardHeader
+        title="Docker storage"
+        description="Every build and pull leaves old images and build cache behind. Windlass clears them after each successful deployment."
+      />
+      <div className="grid grid-cols-2 divide-x divide-hairline border-b border-hairline sm:grid-cols-4">
         {[
           ["Images", u ? `${u.total_count}` : "…", u ? `${u.active_count} in use` : ""],
-          ["Total size", u ? formatBytes(u.total_bytes) : "…", ""],
-          ["Reclaimable", u ? formatBytes(u.reclaimable_bytes) : "…", "potentially"],
+          ["Image size", u ? formatBytes(u.total_bytes) : "…", ""],
+          ["Unused images", u ? formatBytes(u.reclaimable_bytes) : "…", "no container uses them"],
+          ["Build cache", cache ? formatBytes(cache.bytes) : "…", "BuildKit included"],
         ].map(([label, value, sub]) => (
           <div key={label} className="px-5 py-4">
             <div className="text-xs text-fg3">{label}</div>
@@ -1304,22 +1374,75 @@ function DockerStorageSection() {
           </div>
         ))}
       </div>
-      <CardFooter note="Removes unused images older than 7 days, keeping those behind each project's last 5 successful deployments so rollback still works.">
-        <Button
-          size="sm"
-          loading={prune.isPending}
-          onClick={async () => {
-            if (
-              await confirm({
-                title: "Clean unused images?",
-                body: "Unused images older than 7 days are removed. The images behind each project's last 5 successful deployments are kept.",
-                confirmLabel: "Clean images",
-              })
-            )
-              prune.mutate();
+      {form && (
+        <form
+          id="docker-cleanup"
+          className="space-y-4 px-5 py-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save.mutate(form);
           }}
         >
-          Clean unused images
+          <Switch
+            checked={form.auto}
+            onChange={(auto) => setForm({ ...form, auto })}
+            label="Clean up after each successful deployment"
+            description="A failed deployment cleans nothing. While another deployment is running it waits for the next successful one."
+          />
+          <div className="flex flex-wrap gap-4">
+            <Field label="Keep unused images for" hint="days" className="w-44">
+              <Input type="number" min={1} max={3650} required value={form.image_days} onChange={number("image_days")} />
+            </Field>
+            <Field label="Keep images of the last" hint="successful deployments per project" className="w-56">
+              <Input type="number" min={1} max={100} required value={form.keep_deployments} onChange={number("keep_deployments")} />
+            </Field>
+            <Field label="Build cache limit" hint="GB; 0 clears all unused cache" className="w-48">
+              <Input type="number" min={0} max={10000} required value={form.build_cache_gb} onChange={number("build_cache_gb")} />
+            </Field>
+          </div>
+          {last && (
+            <div className="text-xs text-fg3">
+              <span className="text-fg2">
+                Last run {formatDateTime(last.finished_at)}
+                {last.trigger === "deploy" && last.project ? `, after deploying ${last.project}` : ", started by hand"}:
+              </span>{" "}
+              {describeRun(last)}
+              {runProblems(last).length > 0 && (
+                <ul className="mt-1 list-disc pl-4 font-mono">
+                  {runProblems(last).map((p) => (
+                    <li key={p}>{p}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          <div className="empty:hidden">
+            <FormError error={save.error} fallback="Could not save the clean-up settings" />
+          </div>
+        </form>
+      )}
+      <CardFooter note="The images behind each project's recent deployments are always kept, so rollback and promotion still work.">
+        <Button
+          size="sm"
+          loading={run.isPending}
+          disabled={dirty}
+          title={dirty ? "Save the settings first" : undefined}
+          onClick={async () => {
+            if (!saved) return;
+            if (
+              await confirm({
+                title: "Clean up Docker storage now?",
+                body: `Unused images older than ${plural(saved.image_days, "day")} are removed, except those behind each project's last ${plural(saved.keep_deployments, "successful deployment")}. Build cache is trimmed to ${saved.build_cache_gb} GB.`,
+                confirmLabel: "Clean up",
+              })
+            )
+              run.mutate();
+          }}
+        >
+          Clean up now
+        </Button>
+        <Button type="submit" form="docker-cleanup" size="sm" variant="primary" loading={save.isPending} disabled={!dirty}>
+          Save
         </Button>
       </CardFooter>
     </Card>

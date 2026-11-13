@@ -5,5 +5,5 @@
   },
   "shared": [],
   "wiring": [],
-  "ignore": ["api", "bin", "cmd", "docs", "install", "migrations", "plugins-sdk", "web", "internal/agent", "internal/api", "internal/attention", "internal/audit", "internal/auth", "internal/backups", "internal/config", "internal/dbdetect", "internal/dbtemplates", "internal/deploy", "internal/events", "internal/git", "internal/jobs", "internal/plugins", "internal/projects", "internal/proxy", "internal/registries", "internal/secrets", "internal/selfstat", "internal/server", "internal/staging", "internal/store", "internal/update", "internal/version"]
+  "ignore": ["api", "bin", "cmd", "docs", "install", "migrations", "plugins-sdk", "web", "internal/agent", "internal/api", "internal/attention", "internal/audit", "internal/auth", "internal/backups", "internal/cleanup", "internal/config", "internal/dbdetect", "internal/dbtemplates", "internal/deploy", "internal/events", "internal/git", "internal/jobs", "internal/plugins", "internal/projects", "internal/proxy", "internal/registries", "internal/secrets", "internal/selfstat", "internal/server", "internal/staging", "internal/store", "internal/update", "internal/version"]
 }
