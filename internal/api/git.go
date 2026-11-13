@@ -15,6 +15,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/git"
+	"github.com/windlass-dev/windlass/internal/projects"
 )
 
 func (a *API) gitRoutes(r chi.Router) {
@@ -297,6 +298,12 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	d, err := a.Deploy.Deploy(r.Context(), p.Name, "webhook")
 	if errors.Is(err, deploy.ErrDeployInProgress) {
 		writeJSON(w, http.StatusAccepted, map[string]string{"result": "skipped", "reason": "deployment already running"})
+		return
+	}
+	var adoption *projects.AdoptionError
+	if errors.As(err, &adoption) {
+		a.Logger.Warn("webhook deploy refused", "project", p.Name, "reason", adoption.Error())
+		writeError(w, http.StatusConflict, "adoption_conflict", adoption.Error())
 		return
 	}
 	if err != nil {

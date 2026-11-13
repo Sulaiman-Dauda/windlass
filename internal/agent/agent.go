@@ -29,6 +29,43 @@ func ValidProjectName(name string) bool {
 	return projectNameRe.MatchString(name)
 }
 
+// SkippedProject is a directory in the projects root that looks like a
+// Compose project but is not discovered, with the reason in words a person
+// can act on.
+type SkippedProject struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+// SkipReason says why the directory name is not discovered as a project,
+// where has reports whether a file exists in it. It returns "" when the
+// directory is discovered or holds no Compose file at all. Both agents use
+// it so the rule lives in one place.
+func SkipReason(name string, has func(file string) bool) string {
+	if len(name) > 0 && name[0] == '.' {
+		return ""
+	}
+	project := has("compose.yaml") || has("compose.yml")
+	legacy := ""
+	for _, f := range []string{"docker-compose.yml", "docker-compose.yaml"} {
+		if has(f) {
+			legacy = f
+			break
+		}
+	}
+	switch {
+	case !project && legacy == "":
+		return ""
+	case !ValidProjectName(name):
+		return "the name is not a valid project name: rename the directory to lowercase " +
+			"letters, digits, - and _, starting with a letter or digit"
+	case !project:
+		return "it has " + legacy + " but no compose.yaml: rename the file to compose.yaml " +
+			"and scan again"
+	}
+	return ""
+}
+
 type Agent interface {
 	Compose() ComposeAgent
 	Docker() DockerAgent
@@ -251,6 +288,9 @@ type Container struct {
 	RestartCount   int    `json:"restart_count"`
 	ComposeProject string `json:"compose_project,omitempty"`
 	ComposeService string `json:"compose_service,omitempty"`
+	// ComposeWorkingDir is the directory Compose ran in when it created the
+	// container, from the com.docker.compose.project.working_dir label.
+	ComposeWorkingDir string `json:"compose_working_dir,omitempty"`
 	// IPAddress is the container's address on its first network, reachable
 	// from the host on standard bridge networking; used for proxy upstreams.
 	IPAddress string    `json:"ip_address,omitempty"`
@@ -327,6 +367,9 @@ type FSAgent interface {
 	// compose.yaml or compose.yml. It is the basis for rebuilding SQLite's
 	// project index from the filesystem.
 	DiscoverProjects(ctx context.Context) ([]string, error)
+	// SkippedProjects names the directories that hold a Compose file but
+	// are not discovered, so a scan can say why instead of staying silent.
+	SkippedProjects(ctx context.Context) ([]SkippedProject, error)
 	ReadFile(ctx context.Context, project, rel string) ([]byte, error)
 	// WriteFile writes atomically (temp file + rename).
 	WriteFile(ctx context.Context, project, rel string, data []byte, mode fs.FileMode) error

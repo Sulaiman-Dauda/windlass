@@ -119,6 +119,13 @@ func (s *Service) deploy(ctx context.Context, projectName, trigger string, pl pa
 	if active > 0 {
 		return db.Deployment{}, ErrDeployInProgress
 	}
+	// Adoption guard: refused before a row is written, so the project's
+	// history shows nothing ran.
+	if conflict, err := s.projects.FirstDeployConflict(ctx, projectName, p.ID); err != nil {
+		return db.Deployment{}, fmt.Errorf("check for a stack already running: %w", err)
+	} else if conflict != nil {
+		return db.Deployment{}, &projects.AdoptionError{Conflict: *conflict}
+	}
 
 	d, err := s.q.CreateDeployment(ctx, db.CreateDeploymentParams{
 		ProjectID:   p.ID,

@@ -818,7 +818,7 @@ paths:
       operationId: scanProjects
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
-        "200": { description: Number of filesystem projects indexed }
+        "200": { description: "{count, skipped, conflicts}: projects indexed; directories with a Compose file that were not picked up, each {name, reason}; and stacks a first deploy would refuse, each {project, running_as, working_dir, containers, new_volumes, message}" }
 
   /projects/{name}/files:
     get:
@@ -959,7 +959,7 @@ paths:
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "201": { description: Deployment queued }
-        "409": { description: A deployment is already running }
+        "409": { description: "A deployment is already running (code conflict), or this is the first deploy and a stack started from this directory runs under another Compose project name, so deploying would start a second copy with empty volumes (code adoption_conflict, the message says how to fix it)" }
 
   /projects/{name}/deployments/{number}:
     get:

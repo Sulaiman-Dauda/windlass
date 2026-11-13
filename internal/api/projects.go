@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/store/db"
@@ -104,10 +105,41 @@ func (a *API) handleScanProjects(w http.ResponseWriter, r *http.Request) {
 		a.internalError(w, "list projects after scan", err)
 		return
 	}
+	skipped, err := a.Projects.Skipped(r.Context())
+	if err != nil {
+		a.internalError(w, "list skipped directories", err)
+		return
+	}
+	// The deploy itself checks again, so a scan with Docker unreachable
+	// still reports what it found rather than failing.
+	conflicts, err := a.Projects.AdoptionConflicts(r.Context())
+	if err != nil {
+		a.Logger.Warn("scan: adoption check", "error", err)
+		conflicts = nil
+	}
 	user, _ := auth.UserFrom(r.Context())
 	a.Audit.Write(r.Context(), user.ID, "project.scan", "project", "*", remoteIP(r),
-		map[string]any{"count": len(list)})
-	writeJSON(w, http.StatusOK, map[string]int{"count": len(list)})
+		map[string]any{"count": len(list), "skipped": len(skipped), "conflicts": len(conflicts)})
+	writeJSON(w, http.StatusOK, scanResult{Count: len(list), Skipped: skipped, Conflicts: toConflictDTOs(conflicts)})
+}
+
+type scanResult struct {
+	Count     int                    `json:"count"`
+	Skipped   []agent.SkippedProject `json:"skipped"`
+	Conflicts []conflictDTO          `json:"conflicts"`
+}
+
+type conflictDTO struct {
+	projects.AdoptionConflict
+	Message string `json:"message"`
+}
+
+func toConflictDTOs(list []projects.AdoptionConflict) []conflictDTO {
+	out := make([]conflictDTO, 0, len(list))
+	for _, c := range list {
+		out = append(out, conflictDTO{AdoptionConflict: c, Message: c.Message()})
+	}
+	return out
 }
 
 func (a *API) handleListProjects(w http.ResponseWriter, r *http.Request) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -245,5 +246,40 @@ func TestCopyProjectStaysInsideBothProjects(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(staging, "src", "absolute")); !os.IsNotExist(err) {
 		t.Errorf("staging got a file from outside: %v", err)
+	}
+}
+
+func TestSkippedProjectsNamesWhatScanPassesOver(t *testing.T) {
+	f, dir := newFS(t)
+	write := func(rel string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("services: {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("ok/compose.yaml")
+	write("legacy/docker-compose.yml")
+	write("Upper/compose.yaml")
+	write(".hidden/docker-compose.yml")
+	if err := os.MkdirAll(filepath.Join(dir, "notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := f.SkippedProjects(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name != "Upper" || got[1].Name != "legacy" {
+		t.Fatalf("skipped = %+v", got)
+	}
+	if !strings.Contains(got[1].Reason, "docker-compose.yml") {
+		t.Errorf("legacy reason = %q", got[1].Reason)
+	}
+	if !strings.Contains(got[0].Reason, "not a valid project name") {
+		t.Errorf("Upper reason = %q", got[0].Reason)
 	}
 }

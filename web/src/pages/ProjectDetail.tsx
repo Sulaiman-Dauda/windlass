@@ -22,6 +22,8 @@ import OverviewTab from "../components/OverviewTab";
 import FilesTab from "../components/FilesTab";
 import EnvTab from "../components/EnvTab";
 import DeleteProjectDialog from "../components/DeleteProjectDialog";
+import { AdoptionBlocked } from "../components/AdoptionReport";
+import { ApiError } from "../api/client";
 import { repoName } from "../components/ProjectsTable";
 import { Page, MetaItem, EmptyState, Callout } from "../ui/Page";
 import { Segmented } from "../ui/Segmented";
@@ -64,6 +66,7 @@ export default function ProjectDetail() {
   const confirm = useConfirm();
   const toast = useToast();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [blocked, setBlocked] = useState<string | null>(null);
   const pd = project.data;
   const paired = !!(pd?.staging || pd?.staging_of);
   const staging = useStagingStatus(name, paired);
@@ -111,7 +114,10 @@ export default function ProjectDetail() {
         toast.info(`Deployment #${d.number} started`, "Streaming its log now.");
         navigate(`/projects/${name}/deployments?d=${d.number}`);
       },
-      onError: (e) => toast.err("Could not start the deployment", errorText(e)),
+      onError: (e) =>
+        e instanceof ApiError && e.code === "adoption_conflict"
+          ? setBlocked(e.message)
+          : toast.err("Could not start the deployment", errorText(e)),
     });
   };
 
@@ -254,6 +260,7 @@ export default function ProjectDetail() {
         />
       }
     >
+      {blocked && <AdoptionBlocked message={blocked} onClose={() => setBlocked(null)} />}
       {confirmingDelete && (
         <DeleteProjectDialog
           key={name}
