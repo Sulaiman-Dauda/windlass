@@ -105,10 +105,16 @@ function partsLabel(parts: MeterPart[]): string {
   return parts.map((p) => `${p.label} ${formatBytes(p.bytes)}`).join(", ");
 }
 
-/** The panel's memory against its budget: green under 90%, then amber, red over. */
-function panelTone(pct: number): MeterTone {
-  if (pct > 100) return "err";
-  if (pct >= 90) return "warn";
+/**
+ * The panel's memory against its idle budget. The budget is what CI holds an
+ * idle process to; a panel that has just deployed or served the dashboard sits
+ * above it for a while (66 MiB seen on the v0.62 test server, back under 40
+ * within minutes), so only well over it is worth a colour: amber from twice,
+ * red from three times.
+ */
+export function panelTone(pct: number): MeterTone {
+  if (pct >= 300) return "err";
+  if (pct >= 200) return "warn";
   return "ok";
 }
 
@@ -199,8 +205,8 @@ export default function Dashboard() {
             icon="activity"
             value={m ? (rss > 0 ? (rss / 1024 / 1024).toFixed(0) : "–") : undefined}
             unit={rss > 0 ? "MiB" : undefined}
-            meter={rss > 0 && <Meter label="Panel memory against its budget" pct={rssPct} tone={panelTone(rssPct)} />}
-            sub={m && (rss > 0 ? `Panel memory, of a ${Math.round(PANEL_RSS_BUDGET_BYTES / 2 ** 20)} MiB budget` : "Panel memory is not readable here")}
+            meter={rss > 0 && <Meter label="Panel memory against its idle budget" pct={rssPct} tone={panelTone(rssPct)} />}
+            sub={m && (rss > 0 ? `Idle budget ${Math.round(PANEL_RSS_BUDGET_BYTES / 2 ** 20)} MiB` : "Panel memory is not readable here")}
           />
         </div>
 

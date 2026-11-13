@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { rollbackTarget, type Deployment } from "../api/deployments";
 import { commitUrl, failureImpact } from "./OverviewTab";
-import { diskParts } from "../pages/Dashboard";
+import { diskParts, panelTone } from "../pages/Dashboard";
 import { usageTone } from "../ui/Meter";
 import { formatStamp } from "../ui/format";
 
@@ -72,5 +72,14 @@ describe("formatStamp", () => {
   it("writes DD/MM/YYYY HH:MM", () => {
     expect(formatStamp("2026-02-03T04:05:00")).toBe("03/02/2026 04:05");
     expect(formatStamp("")).toBe("");
+  });
+});
+
+describe("panelTone", () => {
+  it("stays green above the idle budget after normal work, and colours only well over it", () => {
+    expect(panelTone(165)).toBe("ok"); // 66 MiB of 40, seen after deploys on the v0.62 test server
+    expect(panelTone(200)).toBe("warn");
+    expect(panelTone(299)).toBe("warn");
+    expect(panelTone(300)).toBe("err");
   });
 });
