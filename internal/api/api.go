@@ -17,6 +17,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/backups"
+	"github.com/windlass-dev/windlass/internal/cleanup"
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
 	"github.com/windlass-dev/windlass/internal/git"
@@ -53,6 +54,9 @@ type API struct {
 	MCP http.Handler
 	// Attention builds the Needs you list.
 	Attention *attention.Service
+	// Cleanup is the image and build-cache clean-up; nil turns its
+	// routes off.
+	Cleanup *cleanup.Service
 	// SelfStat holds the panel's memory over the last hour; nil leaves the
 	// history out of /system/metrics.
 	SelfStat *selfstat.Ring
@@ -132,6 +136,11 @@ func (a *API) Routes(r chi.Router) {
 			r.Get("/system/update", a.handleCheckUpdate)
 			r.Get("/system/docker/images", a.handleImageDiskUsage)
 			r.Post("/system/docker/images/prune", a.handlePruneImages)
+			if a.Cleanup != nil {
+				r.Get("/system/docker/cleanup", a.handleGetCleanup)
+				r.Put("/system/docker/cleanup", a.handleSetCleanup)
+				r.Post("/system/docker/cleanup/run", a.handleRunCleanup)
+			}
 			r.Get("/system/panel-domain", a.handleGetPanelDomain)
 			r.Get("/system/github-app", a.handleGitHubAppStatus)
 			// Browser-only. Each of these can move the panel, replace the

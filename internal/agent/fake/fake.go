@@ -106,6 +106,11 @@ type Fake struct {
 	HTTPResponses map[string]agent.HTTPCheckResult
 	ImageUsage    agent.ImageDiskUsage
 	PruneResult   agent.ImagePruneResult
+	// PruneReqs records each PruneImages request; CacheKeeps the limit of
+	// each PruneBuildCache call.
+	PruneReqs   []agent.ImagePruneReq
+	CacheResult agent.BuildCachePruneResult
+	CacheKeeps  []int64
 }
 
 var _ agent.Agent = (*Fake)(nil)
@@ -363,7 +368,17 @@ func (d dockerFake) ImageDiskUsage(ctx context.Context) (agent.ImageDiskUsage, e
 }
 
 func (d dockerFake) PruneImages(ctx context.Context, req agent.ImagePruneReq) (agent.ImagePruneResult, error) {
+	d.f.mu.Lock()
+	d.f.PruneReqs = append(d.f.PruneReqs, req)
+	d.f.mu.Unlock()
 	return d.f.PruneResult, d.f.record("docker.prune", nil)
+}
+
+func (d dockerFake) PruneBuildCache(ctx context.Context, keepBytes int64) (agent.BuildCachePruneResult, error) {
+	d.f.mu.Lock()
+	d.f.CacheKeeps = append(d.f.CacheKeeps, keepBytes)
+	d.f.mu.Unlock()
+	return d.f.CacheResult, d.f.record("docker.buildcache_prune", nil)
 }
 
 func (d dockerFake) Events(ctx context.Context, out func(agent.DockerEvent)) error {

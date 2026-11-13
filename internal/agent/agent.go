@@ -245,6 +245,13 @@ type DockerAgent interface {
 	ImageDigest(ctx context.Context, ref string) (string, error)
 	ImageDiskUsage(ctx context.Context) (ImageDiskUsage, error)
 	PruneImages(ctx context.Context, req ImagePruneReq) (ImagePruneResult, error)
+	// PruneBuildCache trims unused build cache until at most keepBytes is
+	// left, in Docker's own builder and in the builder Compose builds with.
+	// Behind the installer's socket proxy that is a buildx_buildkit_default
+	// container: the proxy refuses Docker's /grpc endpoint, so buildx falls
+	// back to running BuildKit in a container, out of reach of Docker's own
+	// build prune.
+	PruneBuildCache(ctx context.Context, keepBytes int64) (BuildCachePruneResult, error)
 	// Events streams Docker daemon events (health, restarts) until ctx ends.
 	Events(ctx context.Context, out func(DockerEvent)) error
 	// RegistryLogin authenticates the host to a container registry.
@@ -276,6 +283,12 @@ type DockerAgent interface {
 // DiskUsage is Docker's disk use by kind. Reclaimable is what Docker counts
 // as unused: images no container uses, stopped containers, volumes no
 // container mounts, and build cache not in use.
+//
+// BuildCache includes the state volume of any buildx BuildKit container,
+// which Docker itself counts as a volume and reports a build cache of 0
+// for. Those volumes are taken out of Volumes so nothing counts twice.
+// Docker cannot say how much of such a volume is reclaimable, so its bytes
+// add to Bytes only.
 type DiskUsage struct {
 	Images     DiskUsageKind `json:"images"`
 	Containers DiskUsageKind `json:"containers"`
@@ -305,6 +318,18 @@ type ImagePruneReq struct {
 type ImagePruneResult struct {
 	Deleted        int   `json:"deleted"`
 	ReclaimedBytes int64 `json:"reclaimed_bytes"`
+	// Failed counts images Docker refused to remove, and Errors gives the
+	// first few reasons, so a clean-up that removed nothing says why.
+	Failed int      `json:"failed"`
+	Errors []string `json:"errors,omitempty"`
+}
+
+type BuildCachePruneResult struct {
+	// ReclaimedBytes is exact for Docker's own builder. For a BuildKit
+	// container it is read from buildx's summary, which rounds to three
+	// figures (20.9GB).
+	ReclaimedBytes int64    `json:"reclaimed_bytes"`
+	Errors         []string `json:"errors,omitempty"`
 }
 
 type ContainerFilter struct {

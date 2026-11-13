@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -292,13 +293,15 @@ func (d dockerLocal) DiskUsage(ctx context.Context) (agent.DiskUsage, error) {
 	if err != nil {
 		return agent.DiskUsage{}, err
 	}
+	// Verbose for the volume names: a buildx builder's state volume is
+	// build cache, not application data.
 	du, err := cli.DiskUsage(ctx, client.DiskUsageOptions{
-		Containers: true, Images: true, Volumes: true, BuildCache: true,
+		Containers: true, Images: true, Volumes: true, BuildCache: true, Verbose: true,
 	})
 	if err != nil {
 		return agent.DiskUsage{}, err
 	}
-	return agent.DiskUsage{
+	usage := agent.DiskUsage{
 		Images: agent.DiskUsageKind{Count: du.Images.TotalCount, ActiveCount: du.Images.ActiveCount,
 			Bytes: du.Images.TotalSize, ReclaimableBytes: du.Images.Reclaimable},
 		Containers: agent.DiskUsageKind{Count: du.Containers.TotalCount, ActiveCount: du.Containers.ActiveCount,
@@ -307,8 +310,33 @@ func (d dockerLocal) DiskUsage(ctx context.Context) (agent.DiskUsage, error) {
 			Bytes: du.Volumes.TotalSize, ReclaimableBytes: du.Volumes.Reclaimable},
 		BuildCache: agent.DiskUsageKind{Count: du.BuildCache.TotalCount, ActiveCount: du.BuildCache.ActiveCount,
 			Bytes: du.BuildCache.TotalSize, ReclaimableBytes: du.BuildCache.Reclaimable},
-	}, nil
+	}
+	for _, v := range du.Volumes.Items {
+		if !builderStateVolume(v.Name) || v.UsageData == nil || v.UsageData.Size < 0 {
+			continue
+		}
+		size, inUse := v.UsageData.Size, v.UsageData.RefCount > 0
+		usage.Volumes.Count--
+		usage.Volumes.Bytes -= size
+		if inUse {
+			usage.Volumes.ActiveCount--
+		} else {
+			usage.Volumes.ReclaimableBytes -= size
+		}
+		usage.BuildCache.Bytes += size
+	}
+	return usage, nil
 }
+
+// builderStateVolume reports whether a volume holds a buildx BuildKit
+// container's state, named buildx_buildkit_<node>_state by buildx.
+func builderStateVolume(name string) bool {
+	return strings.HasPrefix(name, builderPrefix) && strings.HasSuffix(name, "_state")
+}
+
+// builderPrefix starts the name of every container and state volume buildx
+// creates for a docker-container builder.
+const builderPrefix = "buildx_buildkit_"
 
 func (d dockerLocal) ImageDiskUsage(ctx context.Context) (agent.ImageDiskUsage, error) {
 	cli, err := d.l.docker()
@@ -329,9 +357,15 @@ func (d dockerLocal) PruneImages(ctx context.Context, req agent.ImagePruneReq) (
 	if err != nil {
 		return agent.ImagePruneResult{}, err
 	}
-	usage, err := cli.DiskUsage(ctx, client.DiskUsageOptions{})
+	// From API 1.52 (Docker 29) /system/df lists the images only when asked
+	// for verbose output. Without it the loop below saw no images and the
+	// clean-up removed nothing, reporting 0 and no error.
+	usage, err := cli.DiskUsage(ctx, client.DiskUsageOptions{Images: true, Verbose: true})
 	if err != nil {
 		return agent.ImagePruneResult{}, err
+	}
+	if usage.Images.TotalCount > 0 && len(usage.Images.Items) == 0 {
+		return agent.ImagePruneResult{}, fmt.Errorf("docker reported %d images but listed none", usage.Images.TotalCount)
 	}
 	protected := make(map[string]bool, len(req.ProtectedDigests))
 	for _, digest := range req.ProtectedDigests {
@@ -345,20 +379,161 @@ func (d dockerLocal) PruneImages(ctx context.Context, req agent.ImagePruneReq) (
 		}
 		keep := protected[image.ID]
 		for _, digest := range image.RepoDigests {
-			if protected[digest] || protected[strings.TrimPrefix(digest[strings.LastIndex(digest, "@")+1:], "@")] {
+			if protected[digest] || protected[digest[strings.LastIndex(digest, "@")+1:]] {
 				keep = true
 			}
 		}
 		if keep {
 			continue
 		}
-		if _, err := cli.ImageRemove(ctx, image.ID, client.ImageRemoveOptions{PruneChildren: true}); err != nil {
-			continue // raced with a deployment or another tag; leave it safely
+		// An image under two or more tags is refused without Force. It
+		// reaches here only with no container, so Force removes the tags
+		// and nothing that runs.
+		opts := client.ImageRemoveOptions{PruneChildren: true, Force: len(image.RepoTags) > 1}
+		if _, err := cli.ImageRemove(ctx, image.ID, opts); err != nil {
+			// Usually a race with a deployment or an image another tag
+			// still needs; the image stays. Counted, so a run that removed
+			// nothing says why.
+			result.Failed++
+			result.Errors = addError(result.Errors, fmt.Sprintf("%s: %v", shortID(image.ID), err))
+			continue
 		}
 		result.Deleted++
 		result.ReclaimedBytes += image.Size
 	}
 	return result, nil
+}
+
+// maxErrors caps the reasons a clean-up keeps; the count says the rest.
+const maxErrors = 5
+
+func addError(errs []string, msg string) []string {
+	if len(errs) >= maxErrors {
+		return errs
+	}
+	return append(errs, msg)
+}
+
+func shortID(id string) string {
+	id = strings.TrimPrefix(id, "sha256:")
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+func (d dockerLocal) PruneBuildCache(ctx context.Context, keepBytes int64) (agent.BuildCachePruneResult, error) {
+	if keepBytes < 0 {
+		return agent.BuildCachePruneResult{}, fmt.Errorf("build cache limit must not be negative")
+	}
+	cli, err := d.l.docker()
+	if err != nil {
+		return agent.BuildCachePruneResult{}, err
+	}
+	var result agent.BuildCachePruneResult
+	// Docker's own builder: what builds use when the daemon's /grpc
+	// endpoint is reachable, and the legacy builder's cache.
+	report, err := cli.BuildCachePrune(ctx, client.BuildCachePruneOptions{ReservedSpace: keepBytes})
+	if err != nil {
+		result.Errors = addError(result.Errors, "docker build cache: "+err.Error())
+	} else {
+		result.ReclaimedBytes += int64(report.Report.SpaceReclaimed) //nolint:gosec // G115: bytes freed fit in int64
+	}
+
+	// The builder Compose uses. Only worth a buildx run when a BuildKit
+	// container is up: buildx reports a missing one as an error, and a
+	// stopped one holds its cache until it is started for the next build.
+	// Either way the cache still counts in DiskUsage, so say why it stayed.
+	builders, err := cli.ContainerList(ctx, client.ContainerListOptions{
+		All:     true,
+		Filters: make(client.Filters).Add("name", builderPrefix),
+	})
+	if err != nil {
+		result.Errors = addError(result.Errors, "list buildx builders: "+err.Error())
+		return result, nil
+	}
+	running := 0
+	for _, c := range builders.Items {
+		name := builderPrefix
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
+		if !strings.HasPrefix(name, builderPrefix) {
+			continue // the name filter matches anywhere in the name
+		}
+		if c.State != "running" {
+			result.Errors = addError(result.Errors, name+" is stopped, so its build cache was not trimmed; the next build starts it")
+			continue
+		}
+		running++
+	}
+	if running == 0 {
+		return result, nil
+	}
+	if running > 1 {
+		result.Errors = addError(result.Errors, fmt.Sprintf("%d BuildKit builders are running; buildx trims only the current one", running))
+	}
+	// The same docker binary and environment as `docker compose build`, so
+	// buildx picks the builder Compose picks. --keep-storage rather than
+	// --reserved-space: older buildx releases know only the first, newer
+	// ones keep it as an alias.
+	cmd := exec.CommandContext(ctx, d.l.cfg.DockerBin, "buildx", "prune", "--force", //nolint:gosec // G204: fixed arguments and a number
+		"--keep-storage", strconv.FormatInt(keepBytes, 10))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		result.Errors = addError(result.Errors, fmt.Sprintf("docker buildx prune: %v: %s", err, lastLine(string(output))))
+		return result, nil
+	}
+	freed, ok := buildxTotal(string(output))
+	if !ok {
+		result.Errors = addError(result.Errors, "docker buildx prune: no total in its output: "+lastLine(string(output)))
+		return result, nil
+	}
+	result.ReclaimedBytes += freed
+	return result, nil
+}
+
+// buildxTotal reads the "Total:" line buildx prune ends with. buildx writes
+// sizes with go-units HumanSize: decimal units, three significant figures.
+func buildxTotal(output string) (int64, bool) {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		rest, found := strings.CutPrefix(strings.TrimSpace(lines[i]), "Total:")
+		if !found {
+			continue
+		}
+		return parseHumanSize(strings.TrimSpace(rest))
+	}
+	return 0, false
+}
+
+func parseHumanSize(s string) (int64, bool) {
+	i := strings.IndexFunc(s, func(r rune) bool { return (r < '0' || r > '9') && r != '.' })
+	if i <= 0 {
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(s[:i], 64)
+	if err != nil {
+		return 0, false
+	}
+	units := map[string]float64{"B": 1, "kB": 1e3, "KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12, "PB": 1e15}
+	mult, ok := units[strings.TrimSpace(s[i:])]
+	if !ok {
+		return 0, false
+	}
+	return int64(n * mult), true
+}
+
+func lastLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndex(s, "\n"); i >= 0 {
+		s = s[i+1:]
+	}
+	const limit = 240
+	if len(s) > limit {
+		s = s[:limit] + "..."
+	}
+	return s
 }
 
 func (d dockerLocal) Events(ctx context.Context, out func(agent.DockerEvent)) error {

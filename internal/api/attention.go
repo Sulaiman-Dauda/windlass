@@ -67,7 +67,9 @@ func (a *API) handleSystemDisk(w http.ResponseWriter, r *http.Request) {
 	}
 	a.disk.mu.Lock()
 	defer a.disk.mu.Unlock()
-	if time.Now().After(a.disk.expiry) {
+	// A clean-up since the last reading makes it stale.
+	stale := a.Cleanup != nil && a.Cleanup.FinishedAt().After(a.disk.at)
+	if stale || time.Now().After(a.disk.expiry) {
 		usage, err := a.Agent.Docker().DiskUsage(r.Context())
 		if err == nil {
 			now := time.Now().UTC()

@@ -18,6 +18,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/backups"
+	"github.com/windlass-dev/windlass/internal/cleanup"
 	"github.com/windlass-dev/windlass/internal/config"
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
@@ -147,6 +148,10 @@ func run() error {
 	defer pluginSvc.StopAll()
 
 	auditLog := audit.New(queries, logger)
+	cleanupSvc := cleanup.New(ctx, queries, ag.Docker(), logger, func(ctx context.Context, action string, detail any) {
+		auditLog.Write(ctx, 0, action, "system", "docker", "", detail)
+	})
+	deploySvc.OnSucceeded(cleanupSvc.AfterDeploy)
 	mcpSrv := mcp.New(mcp.Config{
 		Version:   version.Version,
 		APIPrefix: "/api/v1",
@@ -176,6 +181,7 @@ func run() error {
 		Logger:     logger,
 		MCP:        mcpSrv,
 		Attention:  attention.New(queries, ag, proxySvc, updateSvc, logger),
+		Cleanup:    cleanupSvc,
 		SelfStat:   selfRing,
 	}
 
@@ -214,5 +220,9 @@ func run() error {
 	logger.Info("shutting down")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	err = srv.Shutdown(shutdownCtx)
+	// ctx has ended, so an automatic clean-up stops; wait for it to record
+	// its result before the database closes.
+	cleanupSvc.Wait()
+	return err
 }
