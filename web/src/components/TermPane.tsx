@@ -102,6 +102,12 @@ export const TermPane = forwardRef<
       ref={pane}
       onScroll={(e) => {
         onPaneScroll(scroll.current, e.currentTarget);
+        // A scroll event at the scrollTop the correction above just set is our
+        // own move. Re-measuring then would make the rounded position the new
+        // baseline, and the fraction of a pixel lost each time adds up (#116).
+        // Keeping the anchor lets the next correction take that fraction back.
+        const a = anchor.current;
+        if (a && a.row.parentElement === e.currentTarget && a.scrollTop === e.currentTarget.scrollTop) return;
         anchor.current = firstRowInView(e.currentTarget);
       }}
       className={cn(

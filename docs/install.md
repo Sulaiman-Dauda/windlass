@@ -92,6 +92,26 @@ Caddy certificate automation. It does not modify the Caddyfile or unrelated rout
 the setting deletes only that route. DNS must already resolve to the server and ports 80/443
 must reach Caddy.
 
+### Firewalls
+
+The installer never changes a firewall. When it finds `ufw` or `firewalld` active, it says
+which ports look closed. If 8080 is closed it prints an SSH tunnel in place of the address:
+
+```sh
+ssh -L 8080:127.0.0.1:8080 <user>@<server-ip>   # then open http://localhost:8080
+```
+
+Domains and HTTPS need ports 80 and 443 open. Some images, such as Vultr's Ubuntu, ship with
+`ufw` active and only port 22 open. To open both:
+
+```sh
+sudo ufw allow 80/tcp && sudo ufw allow 443/tcp   # ufw
+sudo firewall-cmd --permanent --add-service=http --add-service=https && sudo firewall-cmd --reload   # firewalld
+```
+
+A cloud provider's own firewall (security groups, Vultr or Hetzner firewalls) cannot be seen
+from the server, so the installer cannot warn about it. Open 80 and 443 there too.
+
 After the HTTPS hostname works, firewall public port 8080 or add a systemd override setting
 `WINDLASS_ADDR=127.0.0.1:8080` and restart Windlass.
 

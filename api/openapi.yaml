@@ -675,6 +675,24 @@ paths:
       responses:
         "200": { description: "{host, node, containers, panel: {rss_bytes, history: [{time, rss_bytes}]}}" }
 
+  /system/preflight:
+    get:
+      summary: First-run checks of this server
+      description: |
+        Read only. Docker through the socket proxy, Docker Compose, Caddy,
+        whether anything answers on local ports 80 and 443, whether the panel
+        was opened over plain HTTP from another machine, and free disk (warns
+        under 5 GiB). It cannot see a firewall in front of the server. Before
+        the instance is claimed, the X-Setup-Token header opens it; afterwards
+        only an admin may read it. Limited to 20 a minute per IP, apart from sign-in.
+      operationId: systemPreflight
+      security: [{}, { session: [] }, { bearerAuth: [] }]
+      parameters:
+        - { name: X-Setup-Token, in: header, required: false, schema: { type: string } }
+      responses:
+        "200": { description: "{version, checks: [{id, status: ok|warn|fail, title, detail}]}" }
+        "403": { description: Neither a valid setup token nor an admin }
+
   /system/attention:
     get:
       summary: What needs a person (Needs you list)
