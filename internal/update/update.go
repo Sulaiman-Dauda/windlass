@@ -1,5 +1,6 @@
 // Package update implements self-update: check GitHub releases, download,
-// verify the checksum, atomically replace the running binary, and exit for
+// verify the checksum and the build provenance, atomically replace the
+// running binary, and exit for
 // systemd to restart into the new version. Application containers are never
 // touched (principle 7).
 package update
@@ -17,7 +18,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/windlass-dev/windlass/internal/version"
@@ -50,6 +53,9 @@ type Service struct {
 	// restart asks the process to shut down gracefully; systemd
 	// (Restart=always) brings the new binary up.
 	restart func()
+	// applying lets one Apply run at a time. A second would download over
+	// the file the first has already verified.
+	applying sync.Mutex
 }
 
 func New(logger *slog.Logger, dataDir string, restart func()) *Service {
@@ -115,8 +121,47 @@ func (s *Service) Check(ctx context.Context) (Release, error) {
 	rel.UpdateReady = rel.Version != "" &&
 		rel.Version != version.Version &&
 		"v"+strings.TrimPrefix(version.Version, "v") != rel.Version &&
+		!olderRelease(rel.Version, version.Version) &&
 		rel.assetURL != ""
 	return rel, nil
+}
+
+// olderRelease reports whether release is a lower version than current. An
+// older release marked as the latest is genuine and carries valid build
+// provenance, so nothing else stops it rolling a server back. A version that
+// is not dotted numbers, a development build for one, is never older.
+func olderRelease(release, current string) bool {
+	r, ok1 := versionParts(release)
+	c, ok2 := versionParts(current)
+	if !ok1 || !ok2 {
+		return false
+	}
+	for i := 0; i < len(r) || i < len(c); i++ {
+		var a, b int
+		if i < len(r) {
+			a = r[i]
+		}
+		if i < len(c) {
+			b = c[i]
+		}
+		if a != b {
+			return a < b
+		}
+	}
+	return false
+}
+
+func versionParts(v string) ([]int, bool) {
+	fields := strings.Split(strings.TrimPrefix(v, "v"), ".")
+	parts := make([]int, 0, len(fields))
+	for _, f := range fields {
+		n, err := strconv.Atoi(f)
+		if err != nil || n < 0 {
+			return nil, false
+		}
+		parts = append(parts, n)
+	}
+	return parts, true
 }
 
 var ErrNotSupported = errors.New("self-update is only supported for the Linux binary install")
@@ -133,6 +178,16 @@ func (s *Service) Apply(ctx context.Context) error {
 	if !supported() {
 		return ErrNotSupported
 	}
+	if !s.applying.TryLock() {
+		return errors.New("an update is already being installed")
+	}
+	// Held for good once the binary is swapped: the restart is on its way.
+	installed := false
+	defer func() {
+		if !installed {
+			s.applying.Unlock()
+		}
+	}()
 	rel, err := s.Check(ctx)
 	if err != nil {
 		return err
@@ -145,41 +200,8 @@ func (s *Service) Apply(ctx context.Context) error {
 	}
 
 	dir := filepath.Join(s.dataDir, "data", "update")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	newBin := filepath.Join(dir, "windlass-"+rel.Version)
-
-	s.logger.Info("downloading update", "version", rel.Version)
-	if err := download(ctx, rel.assetURL, newBin); err != nil {
-		return err
-	}
-
-	// Verify against checksums.txt.
-	sums, err := fetch(ctx, rel.checksumURL)
+	newBin, err := s.fetchVerified(ctx, rel, dir)
 	if err != nil {
-		return err
-	}
-	want := ""
-	assetName := "windlass-linux-" + runtime.GOARCH
-	for _, line := range strings.Split(string(sums), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == assetName {
-			want = fields[0]
-		}
-	}
-	if want == "" {
-		return errors.New("checksum for this platform missing from checksums.txt")
-	}
-	got, err := fileSHA256(newBin)
-	if err != nil {
-		return err
-	}
-	if got != want {
-		os.Remove(newBin)
-		return fmt.Errorf("checksum mismatch: got %s want %s", got, want)
-	}
-	if err := os.Chmod(newBin, 0o755); err != nil {
 		return err
 	}
 
@@ -213,11 +235,69 @@ func (s *Service) Apply(ctx context.Context) error {
 	} else {
 		s.logger.Info("update installed; restarting", "version", rel.Version)
 	}
+	installed = true
 	go func() {
 		time.Sleep(500 * time.Millisecond) // let the HTTP response flush
 		s.restart()
 	}()
 	return nil
+}
+
+// fetchVerified downloads the release binary into dir and returns its path
+// once it matches checksums.txt and carries build provenance from the release
+// workflow. A binary that fails either check is deleted, never left staged.
+func (s *Service) fetchVerified(ctx context.Context, rel Release, dir string) (path string, err error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	newBin := filepath.Join(dir, "windlass-"+rel.Version)
+	defer func() {
+		if err != nil {
+			_ = os.Remove(newBin) // a leftover is never run, and the next download replaces it
+		}
+	}()
+
+	s.logger.Info("downloading update", "version", rel.Version)
+	if err := download(ctx, rel.assetURL, newBin); err != nil {
+		return "", err
+	}
+
+	// checksums.txt catches a broken download.
+	sums, err := fetch(ctx, rel.checksumURL)
+	if err != nil {
+		return "", err
+	}
+	want := ""
+	assetName := "windlass-linux-" + runtime.GOARCH
+	for _, line := range strings.Split(string(sums), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == assetName {
+			want = fields[0]
+		}
+	}
+	if want == "" {
+		return "", errors.New("checksum for this platform missing from checksums.txt")
+	}
+	got, err := fileSHA256(newBin)
+	if err != nil {
+		return "", err
+	}
+	if got != want {
+		return "", fmt.Errorf("checksum mismatch: got %s want %s", got, want)
+	}
+
+	// Build provenance catches a rewritten release. It is checked against
+	// the digest of the file on disk, not the one checksums.txt claims.
+	a := artifact{name: assetName, sha256: got, tag: rel.Version}
+	if err := verifyProvenance(ctx, a, filepath.Join(dir, "sigstore")); err != nil {
+		return "", fmt.Errorf("refusing update %s: %w", rel.Version, err)
+	}
+	s.logger.Info("update verified", "version", rel.Version, "sha256", got)
+
+	if err := os.Chmod(newBin, 0o755); err != nil { //nolint:gosec // G302: it is the executable
+		return "", err
+	}
+	return newBin, nil
 }
 
 // authHeaders makes asset requests work against private repositories: the
