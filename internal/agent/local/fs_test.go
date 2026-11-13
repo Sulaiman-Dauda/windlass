@@ -254,10 +254,10 @@ func TestSkippedProjectsNamesWhatScanPassesOver(t *testing.T) {
 	write := func(rel string) {
 		t.Helper()
 		p := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(p, []byte("services: {}\n"), 0o644); err != nil {
+		if err := os.WriteFile(p, []byte("services: {}\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -265,7 +265,7 @@ func TestSkippedProjectsNamesWhatScanPassesOver(t *testing.T) {
 	write("legacy/docker-compose.yml")
 	write("Upper/compose.yaml")
 	write(".hidden/docker-compose.yml")
-	if err := os.MkdirAll(filepath.Join(dir, "notes"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "notes"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 
