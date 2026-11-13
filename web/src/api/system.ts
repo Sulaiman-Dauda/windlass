@@ -13,6 +13,61 @@ export interface Metrics {
   };
   node: { hostname: string; docker_version: string; compose_version: string; caddy_version: string };
   containers: { running: number; total: number };
+  /** The Windlass process itself; rss_bytes is 0 where it cannot be read. */
+  panel?: { rss_bytes: number };
+}
+
+/** The idle-RSS ceiling CI holds the panel to (CLAUDE.md rule 8). */
+export const PANEL_RSS_BUDGET_BYTES = 40 * 1024 * 1024;
+
+export interface AttentionItem {
+  kind: "deploy_failed" | "disk" | "no_backup" | "proxy" | "update" | string;
+  tone: "error" | "warn" | "info";
+  project?: string;
+  title: string;
+  detail?: string;
+  link?: string;
+  action?: string;
+}
+
+export interface AttentionList {
+  checked_at: string;
+  items: AttentionItem[];
+}
+
+/** The Needs you list. The server caches it, so a 30 second poll is cheap. */
+export function useAttention() {
+  return useQuery<AttentionList>({
+    queryKey: ["system", "attention"],
+    queryFn: () => api<AttentionList>("/system/attention"),
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+    retry: false,
+  });
+}
+
+export interface DiskKind {
+  count: number;
+  active_count: number;
+  bytes: number;
+  reclaimable_bytes: number;
+}
+
+export interface SystemDisk {
+  host: { used_bytes: number; total_bytes: number };
+  /** Absent when Docker cannot be reached. */
+  docker?: { images: DiskKind; containers: DiskKind; volumes: DiskKind; build_cache: DiskKind };
+  checked_at?: string;
+}
+
+/** Host disk and Docker's share of it. Settings reads the same cache entry. */
+export function useSystemDisk() {
+  return useQuery<SystemDisk>({
+    queryKey: ["system", "disk"],
+    queryFn: () => api<SystemDisk>("/system/disk"),
+    refetchInterval: 60_000,
+    retry: false,
+  });
 }
 
 /** Host metrics, refreshed every `poll` milliseconds (or not at all). */

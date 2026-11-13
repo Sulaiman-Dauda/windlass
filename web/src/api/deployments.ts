@@ -31,6 +31,8 @@ export interface ServiceStatus {
   image: string;
   memory_limit?: number;
   cpu_limit?: number;
+  /** Ports compose.yaml declares for the service. */
+  container_ports?: number[];
 }
 
 export const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled"];
@@ -205,6 +207,17 @@ export function deploymentTone(status: string): Tone {
 
 export function isActive(status: string): boolean {
   return !TERMINAL_STATUSES.includes(status);
+}
+
+/**
+ * The deployment Roll back offers: the last success before the one that is
+ * live now. Nothing is offered while a deployment runs, or with fewer than
+ * two successes. The list is newest first.
+ */
+export function rollbackTarget(list: Deployment[] | undefined): Deployment | undefined {
+  if (!list || list.some((d) => isActive(d.status))) return undefined;
+  const ok = list.filter((d) => d.status === "succeeded");
+  return ok[1];
 }
 
 /** The pipeline's stages, in order, keyed by the status a running deployment reports. */

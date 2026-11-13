@@ -2,14 +2,25 @@ import { useState, type ReactNode } from "react";
 import { useCan } from "../api/auth";
 import { Link } from "react-router";
 import { useProject } from "../api/projects";
-import { useDeployments, useServices, deploymentTone, isActive, isCompleted } from "../api/deployments";
+import {
+  useCreateDeployment,
+  useDeployments,
+  useServices,
+  deploymentTone,
+  isActive,
+  isCompleted,
+  stageLabel,
+  type Deployment,
+} from "../api/deployments";
 import { useDomains } from "../api/domains";
 import { Card, CardHeader, CardFooter } from "../ui/Card";
 import { StatusPill, StatusDot, type Tone } from "../ui/Badge";
 import { Callout } from "../ui/Page";
 import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
-import { elapsed, formatBytes, formatDuration, timeAgo } from "../ui/format";
+import { elapsed, formatBytes, formatDuration, formatStamp, timeAgo } from "../ui/format";
+import { btn } from "../ui/Button";
+import { useToast, errorText } from "../ui/Toast";
 import { repoName } from "./ProjectsTable";
 import StagingCard from "./StagingCard";
 import CreateStagingDialog from "./CreateStagingDialog";
@@ -47,6 +58,7 @@ export default function OverviewTab({ project }: { project: string }) {
             <span className="break-words font-mono text-xs">{services.data.note}</span>
           </Callout>
         )}
+        <FailedDeployNotice project={project} />
         <StagingCard project={project} />
         <Card>
           <CardHeader
@@ -112,7 +124,7 @@ export default function OverviewTab({ project }: { project: string }) {
                       </td>
                       <td className="whitespace-nowrap px-5 py-3 text-right text-xs text-fg2">
                         {s.memory_limit ? formatBytes(s.memory_limit) : <span className="text-fg3">No memory cap</span>}
-                        {s.cpu_limit ? ` · ${s.cpu_limit} CPU` : ""}
+                        {s.cpu_limit ? `, ${s.cpu_limit} CPU` : ""}
                       </td>
                     </tr>
                   );
@@ -130,15 +142,12 @@ export default function OverviewTab({ project }: { project: string }) {
           <CardFooter
             note={
               <>
-                Limits come from <code className="font-mono text-fg2">mem_limit</code> and{" "}
-                <code className="font-mono text-fg2">cpus</code>, or{" "}
-                <code className="font-mono text-fg2">deploy.resources.limits</code>, in{" "}
+                Limits and health checks come from{" "}
                 <Link className="text-accent hover:underline" to={`/projects/${project}/files`}>
                   compose.yaml
                 </Link>
-                . Gate readiness with the labels <code className="font-mono text-fg2">windlass.health.url</code>,{" "}
-                <code className="font-mono text-fg2">windlass.health.status</code> and{" "}
-                <code className="font-mono text-fg2">windlass.health.contains</code>.
+                . Without a health check, running is all Windlass can see; the label{" "}
+                <code className="font-mono text-fg2">windlass.health.url</code> gates a deploy on a URL.
               </>
             }
           />
@@ -161,7 +170,7 @@ function SideCard({ title, link, children }: { title: string; link?: { to: strin
       <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
         <h3 className="text-sm font-semibold text-fg">{title}</h3>
         {link && (
-          <Link to={link.to} className="inline-flex items-center gap-0.5 text-xs font-semibold text-fg3 hover:text-fg">
+          <Link to={link.to} className="inline-flex min-h-6 items-center gap-0.5 text-xs font-semibold text-fg3 hover:text-fg">
             {link.label}
             <Icon name="chevronRight" size={13} />
           </Link>
@@ -209,10 +218,11 @@ function LatestDeployment({ project }: { project: string }) {
         </div>
         <div className="flex justify-between gap-3">
           <dt className="text-fg3">When</dt>
-          <dd className="text-fg2">{timeAgo(d.created_at)}</dd>
+          <dd className="text-fg2" title={formatStamp(d.created_at)}>
+            {timeAgo(d.created_at)}
+          </dd>
         </div>
       </dl>
-      {d.status === "failed" && d.error && <p className="mt-3 line-clamp-3 break-words text-xs text-err">{d.error}</p>}
     </SideCard>
   );
 }
@@ -308,5 +318,104 @@ function StagingOffer({ project }: { project: string }) {
       </Button>
       {open && <CreateStagingDialog live={project} onClose={() => setOpen(false)} />}
     </SideCard>
+  );
+}
+
+// Steps that run before any container is touched: a failure in one of them
+// leaves the running containers as they were.
+const BEFORE_APPLY = ["preparing", "syncing", "pulling", "building"];
+
+/** What a failed deploy left running, in one sentence. */
+export function failureImpact(failed: Deployment, live: Deployment | undefined, domain?: string): string {
+  const step = failed.failed_step ?? "";
+  if (!live) return "No deploy of this project has succeeded yet, so nothing earlier is running.";
+  if (BEFORE_APPLY.includes(step)) {
+    return `The running containers did not change. #${live.number} is still running${domain ? ` and serving ${domain}` : ""}.`;
+  }
+  if (step === "applying" || step === "verifying") {
+    return `It failed while starting services, so some may be on the new version. #${live.number} was the last deploy that succeeded.`;
+  }
+  return `#${live.number} was the last deploy that succeeded.`;
+}
+
+/** A GitHub commit page for an https GitHub remote, else nothing. */
+export function commitUrl(repo: string | undefined, sha: string | undefined): string | undefined {
+  if (!repo || !sha) return undefined;
+  const m = repo.match(/^https:\/\/github\.com\/([^/]+\/[^/]+?)(?:\.git)?\/?$/);
+  return m ? `https://github.com/${m[1]}/commit/${sha}` : undefined;
+}
+
+/** Shown while the project's newest deployment is a failure. */
+function FailedDeployNotice({ project }: { project: string }) {
+  const deployments = useDeployments(project);
+  const domains = useDomains(project);
+  const p = useProject(project).data;
+  const deploy = useCreateDeployment(project);
+  const can = useCan();
+  const toast = useToast();
+  const list = deployments.data ?? [];
+  const d = list[0];
+  if (!d || d.status !== "failed") return null;
+
+  const live = list.find((x) => x.status === "succeeded");
+  const step = d.failed_step ? stageLabel(d.failed_step) : "";
+  const line = d.error_line || d.error;
+  const when = d.finished_at || d.created_at;
+  const commit = commitUrl(p?.git_repo, d.git_commit);
+  // A project with a staging confirms before a direct deploy; that dialog
+  // lives on the header's Deploy button, so Retry is not offered here.
+  const canRetry = can("member") && !p?.staging;
+
+  return (
+    <section
+      aria-labelledby="failed-deploy-title"
+      className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3.5 gap-y-1 rounded-card border border-[color-mix(in_oklab,var(--err)_28%,var(--hairline))] bg-surface px-[18px] py-4 shadow-[var(--shadow-xs)] sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+    >
+      <span className="row-span-3 hidden h-8 w-8 place-items-center rounded-control bg-err-soft text-err sm:grid">
+        <Icon name="xCircle" size={17} />
+      </span>
+      <h2 id="failed-deploy-title" className="text-md font-semibold text-fg">
+        Deploy #{d.number} failed{step && ` at the ${step} step`}
+      </h2>
+      <span className="self-center whitespace-nowrap text-xs text-fg3" title={formatStamp(when)}>
+        {timeAgo(when)}
+      </span>
+      <p className="col-span-2 text-sm text-fg2 sm:col-start-2">{failureImpact(d, live, domains.data?.[0]?.hostname)}</p>
+      {line && (
+        <div className="col-span-2 mt-2 flex items-start gap-2.5 rounded-control border border-hairline bg-sunken px-3 py-2 sm:col-start-2">
+          {d.exit_code != null && d.exit_code !== 0 && (
+            <span className="whitespace-nowrap pt-px text-xs text-fg3">exit {d.exit_code}</span>
+          )}
+          <code className="whitespace-pre-wrap break-all font-mono text-xs text-fg">{line}</code>
+        </div>
+      )}
+      <div className="col-span-2 mt-1.5 flex flex-wrap gap-2 sm:col-start-2">
+        <Link to={`/projects/${project}/deployments?d=${d.number}`} className={btn("secondary", "sm")}>
+          <Icon name="logs" size={15} /> Full log
+        </Link>
+        {commit && d.git_commit && (
+          <a href={commit} target="_blank" rel="noreferrer" className={btn("secondary", "sm")}>
+            <Icon name="external" size={15} /> {d.git_commit.slice(0, 7)} on GitHub
+          </a>
+        )}
+        {canRetry && (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon="refresh"
+            title="Deploys again from the current files or branch, not only this commit"
+            loading={deploy.isPending}
+            onClick={() =>
+              deploy.mutate(undefined, {
+                onSuccess: (n) => toast.info(`Deployment #${n.number} started`),
+                onError: (e) => toast.err("Could not start the deployment", errorText(e)),
+              })
+            }
+          >
+            Retry
+          </Button>
+        )}
+      </div>
+    </section>
   );
 }

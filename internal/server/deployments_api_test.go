@@ -70,10 +70,16 @@ func TestDeploymentAPIEndToEnd(t *testing.T) {
 		t.Fatalf("list = %s", rec.Body.String())
 	}
 
-	// Services endpoint reports compose ps.
+	// Services endpoint reports compose ps, with limits and ports from
+	// compose.yaml.
+	e.agent.Resolved["app"] = agent.ResolvedConfig{Services: map[string]agent.ResolvedService{
+		"web": {Image: "nginx", ContainerPorts: []int{8080}, MemoryLimit: 256 << 20},
+	}}
 	rec = e.do(t, http.MethodGet, "/api/v1/projects/app/services", nil, cookie)
-	if !strings.Contains(rec.Body.String(), `"web"`) {
-		t.Fatalf("services = %s", rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, `"web"`) || !strings.Contains(body, `"container_ports":[8080]`) ||
+		!strings.Contains(body, `"memory_limit":268435456`) {
+		t.Fatalf("services = %s", body)
 	}
 
 	// Actions run compose commands.

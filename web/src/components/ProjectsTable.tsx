@@ -5,7 +5,7 @@ import { useDomains } from "../api/domains";
 import { StatusPill, StatusDot, Tag } from "../ui/Badge";
 import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
-import { timeAgo } from "../ui/format";
+import { formatStamp, timeAgo } from "../ui/format";
 import { cn } from "../ui/cn";
 import { Monogram } from "./Layout";
 
@@ -14,15 +14,29 @@ import { Monogram } from "./Layout";
  * first routed domain. Each row reads the same cache entries the project
  * screens use, so opening a project shows data that is already warm.
  */
-export default function ProjectsTable({ projects, loading }: { projects: Project[]; loading?: boolean }) {
+export default function ProjectsTable({
+  projects,
+  loading,
+  embedded,
+}: {
+  projects: Project[];
+  loading?: boolean;
+  /** Inside a card that draws its own border. */
+  embedded?: boolean;
+}) {
   const rows = withStagingNested(projects);
   return (
-    <div className="overflow-x-auto rounded-card border border-hairline bg-surface shadow-[var(--shadow-xs)]">
+    <div
+      className={cn(
+        "overflow-x-auto",
+        embedded ? "rounded-b-card border-t border-hairline" : "rounded-card border border-hairline bg-surface shadow-[var(--shadow-xs)]",
+      )}
+    >
       <table className="w-full min-w-[560px] table-fixed text-sm">
         <colgroup>
           <col />
           <col className="w-[140px]" />
-          <col className="hidden w-[24%] md:table-column" />
+          <col className={cn("hidden w-[24%]", embedded ? "2xl:table-column" : "md:table-column")} />
           <col className="w-[150px]" />
           <col className="w-10" />
         </colgroup>
@@ -30,8 +44,8 @@ export default function ProjectsTable({ projects, loading }: { projects: Project
           <tr className="border-b border-hairline bg-surface2 text-left text-xs text-fg3">
             <th className="h-9 px-4 font-medium">Project</th>
             <th className="h-9 px-4 font-medium">Status</th>
-            <th className="hidden h-9 px-4 font-medium md:table-cell">Domain</th>
-            <th className="h-9 px-4 font-medium">Last deployment</th>
+            <th className={cn("hidden h-9 px-4 font-medium", embedded ? "2xl:table-cell" : "md:table-cell")}>Domain</th>
+            <th className="h-9 px-4 font-medium">Last deploy</th>
             <th className="h-9" aria-hidden="true" />
           </tr>
         </thead>
@@ -45,7 +59,7 @@ export default function ProjectsTable({ projects, loading }: { projects: Project
               </tr>
             ))}
           {rows.map((p) => (
-            <ProjectRow key={p.name} project={p} />
+            <ProjectRow key={p.name} project={p} embedded={embedded} />
           ))}
         </tbody>
       </table>
@@ -53,7 +67,7 @@ export default function ProjectsTable({ projects, loading }: { projects: Project
   );
 }
 
-function ProjectRow({ project }: { project: Project }) {
+function ProjectRow({ project, embedded }: { project: Project; embedded?: boolean }) {
   const navigate = useNavigate();
   const services = useServices(project.name, 15_000);
   const deployments = useDeployments(project.name);
@@ -63,10 +77,10 @@ function ProjectRow({ project }: { project: Project }) {
   const latest = deployments.data?.[0];
   const domain = domains.data?.[0];
   const source = project.git_repo
-    ? `${repoName(project.git_repo)}${project.git_branch ? ` · ${project.git_branch}` : ""}`
+    ? `${repoName(project.git_repo)}${project.git_branch ? ` on ${project.git_branch}` : ""}`
     : project.source === "template"
-      ? "Template"
-      : "Local files";
+      ? "From a template"
+      : "compose.yaml on the server";
 
   return (
     <tr
@@ -81,7 +95,7 @@ function ProjectRow({ project }: { project: Project }) {
               <Link
                 to={`/projects/${project.name}`}
                 onClick={(e) => e.stopPropagation()}
-                className="truncate font-semibold text-fg"
+                className="-my-0.5 truncate py-0.5 font-semibold text-fg"
               >
                 {project.name}
               </Link>
@@ -108,7 +122,7 @@ function ProjectRow({ project }: { project: Project }) {
           <Skeleton className="h-[22px] w-20 rounded-full" />
         )}
       </td>
-      <td className="hidden px-4 py-3 md:table-cell">
+      <td className={cn("hidden px-4 py-3", embedded ? "2xl:table-cell" : "md:table-cell")}>
         {domain ? (
           <a
             href={`https://${domain.hostname}`}
@@ -129,12 +143,18 @@ function ProjectRow({ project }: { project: Project }) {
       </td>
       <td className="px-4 py-3">
         {latest ? (
-          <div className="flex min-w-0 items-center gap-2">
-            <StatusDot tone={deploymentTone(latest.status)} live={isActive(latest.status)} />
-            <span className="truncate text-fg2">
-              <span className="font-medium text-fg">#{latest.number}</span>{" "}
-              {isActive(latest.status) ? latest.status : timeAgo(latest.finished_at || latest.created_at)}
-            </span>
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <StatusDot tone={deploymentTone(latest.status)} live={isActive(latest.status)} />
+              <span className={cn("truncate font-medium", latest.status === "failed" ? "text-err" : "text-fg")}>
+                #{latest.number} {latest.status}
+              </span>
+            </div>
+            {!isActive(latest.status) && (
+              <div className="truncate pl-4 text-xs text-fg3" title={formatStamp(latest.finished_at || latest.created_at)}>
+                {timeAgo(latest.finished_at || latest.created_at)}
+              </div>
+            )}
           </div>
         ) : deployments.data ? (
           <span className="text-fg3">Never deployed</span>

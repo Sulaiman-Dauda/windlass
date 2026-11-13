@@ -41,6 +41,14 @@ export function formatDateTime(value?: string | null): string {
   });
 }
 
+/** "11/11/2026 21:40", DD/MM/YYYY whatever the browser locale: for hover titles beside a relative time. */
+export function formatStamp(value?: string | null): string {
+  const d = parseTime(value);
+  if (!d) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export function formatClock(value?: string | null): string {
   const d = parseTime(value);
   if (!d) return "";

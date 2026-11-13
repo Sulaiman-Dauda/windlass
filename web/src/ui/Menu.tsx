@@ -158,7 +158,7 @@ export function Menu({
 }
 
 const itemClass =
-  "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-sm px-2.5 text-left text-sm font-medium outline-none " +
+  "flex w-full cursor-pointer gap-2.5 rounded-sm px-2.5 text-left text-sm font-medium outline-none " +
   "transition-colors duration-100 focus-visible:outline-none";
 
 export function MenuItem({
@@ -170,6 +170,7 @@ export function MenuItem({
   tone,
   disabled,
   hint,
+  description,
 }: {
   icon?: IconName;
   children: ReactNode;
@@ -179,10 +180,13 @@ export function MenuItem({
   tone?: "danger";
   disabled?: boolean;
   hint?: ReactNode;
+  /** A second line saying what the action does, for actions whose effect is not obvious from the name. */
+  description?: ReactNode;
 }) {
   const close = useContext(MenuCtx);
   const className = cn(
     itemClass,
+    description ? "items-start py-2" : "h-8 items-center",
     disabled
       ? "cursor-not-allowed text-fg3 opacity-60"
       : tone === "danger"
@@ -191,8 +195,15 @@ export function MenuItem({
   );
   const content = (
     <>
-      {icon && <Icon name={icon} size={16} className={tone === "danger" ? "" : "text-fg3"} />}
-      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {icon && <Icon name={icon} size={16} className={cn(tone === "danger" ? "" : "text-fg3", description ? "mt-0.5 flex-none" : undefined)} />}
+      {description ? (
+        <span className="grid min-w-0 flex-1 gap-0.5">
+          <span>{children}</span>
+          <span className={cn("text-xs font-normal", tone === "danger" && !disabled ? "text-err" : "text-fg3")}>{description}</span>
+        </span>
+      ) : (
+        <span className="min-w-0 flex-1 truncate">{children}</span>
+      )}
       {hint && <span className="text-xs text-fg3">{hint}</span>}
     </>
   );

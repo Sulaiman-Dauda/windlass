@@ -155,6 +155,9 @@ type ServiceStatus struct {
 	PublishedPorts []PortBinding `json:"published_ports,omitempty"`
 	MemoryLimit    int64         `json:"memory_limit,omitempty"`
 	CPULimit       float64       `json:"cpu_limit,omitempty"`
+	// ContainerPorts are the ports compose.yaml declares for the service,
+	// so a domain form can offer them instead of guessing.
+	ContainerPorts []int `json:"container_ports,omitempty"`
 }
 
 type PortBinding struct {
