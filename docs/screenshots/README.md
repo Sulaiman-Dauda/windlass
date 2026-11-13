@@ -17,8 +17,11 @@ view is shot in both themes so pages can pair them to the reader's preference.
 
 These are real deployments, not mockups: five Compose projects running nginx, PostgreSQL,
 Uptime Kuma, linkding and n8n, with Caddy in front and three domains routed.
-The AI agents shot is the one exception: taken on an empty instance and cropped to the page,
-with the panel domain answer stubbed to `windlass.example.com` so it shows the HTTPS state.
+The AI agents shot is the one exception: cropped to the page, with the panel domain answer
+stubbed to `windlass.example.com` so it shows the HTTPS state.
+
+The set was last reshot for v0.62, on 13/11/2026. The dashboard shows the Needs you list with
+two real rows: two of the five projects have volumes and no backup schedule.
 
 ## Recordings
 
