@@ -1,0 +1,15 @@
+# The same small app is deployed through each panel: a web server and a database.
+# The password is a throwaway for a scratch server.
+services:
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: bench-only
+    volumes:
+      - db:/var/lib/postgresql/data
+volumes:
+  db:
