@@ -1,10 +1,11 @@
-import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { Link, NavLink, Navigate, useLocation, useParams, useSearchParams } from "react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useMe, useCan } from "../api/auth";
 import { useUpdateCheck } from "../api/system";
 import { SCOPE_LABEL, useTokens, type APIToken, type CreatedToken } from "../api/tokens";
+import { deleteUserToken, userTokensKey } from "../api/userTokens";
 import { Page, Callout, FormError } from "../ui/Page";
 import { Card, CardHeader, CardFooter } from "../ui/Card";
 import { Button, IconButton, btn } from "../ui/Button";
@@ -961,10 +962,50 @@ const scopeCanReadSecrets = (scope: APIToken["scope"]) => scope === "write" || s
 
 const EXPIRY_DAYS = [7, 30, 90, 180, 365];
 
+// One token row, shared by your own tokens and the tokens an admin opens for a user.
+function TokenRow({ t, onRevoke }: { t: APIToken; onRevoke: (id: number) => void }) {
+  const confirm = useConfirm();
+  const active = !t.revoked_at && !t.expired;
+  return (
+    <ListRow
+      removeLabel={`Revoke ${t.name}`}
+      onRemove={
+        active
+          ? async () => {
+              if (
+                await confirm({
+                  title: `Revoke ${t.name}?`,
+                  body: "Anything using it stops working straight away. This cannot be undone.",
+                  confirmLabel: "Revoke token",
+                })
+              )
+                onRevoke(t.id);
+            }
+          : undefined
+      }
+    >
+      <Icon name="key" size={16} className={active ? "text-fg2" : "text-fg3"} />
+      <span className={cn("font-medium", active ? "text-fg" : "text-fg3")}>{t.name}</span>
+      <span className="font-mono text-xs text-fg3">{t.prefix}…</span>
+      <Tag tone={t.scope === "admin" ? "accent" : "idle"}>{SCOPE_LABEL[t.scope]}</Tag>
+      {t.can_read_secrets && <Tag tone="warn">Env values</Tag>}
+      {t.revoked_at ? (
+        <Tag tone="err">Revoked</Tag>
+      ) : t.expired ? (
+        <Tag tone="err">Expired</Tag>
+      ) : (
+        <span className="text-xs text-fg3">Expires {formatDate(t.expires_at)}</span>
+      )}
+      <span className="text-xs text-fg3">
+        {t.last_used_at ? `Used ${timeAgo(t.last_used_at)}${t.last_used_ip ? ` from ${t.last_used_ip}` : ""}` : "Never used"}
+      </span>
+    </ListRow>
+  );
+}
+
 function APITokensSection() {
   const qc = useQueryClient();
   const toast = useToast();
-  const confirm = useConfirm();
   const can = useCan();
   const tokens = useTokens();
 
@@ -1072,45 +1113,9 @@ function APITokensSection() {
 
       {tokens.data && tokens.data.length > 0 ? (
         <ul className="divide-y divide-hairline border-t border-hairline">
-          {tokens.data.map((t) => {
-            const active = !t.revoked_at && !t.expired;
-            return (
-              <ListRow
-                key={t.id}
-                removeLabel={`Revoke ${t.name}`}
-                onRemove={
-                  active
-                    ? async () => {
-                        if (
-                          await confirm({
-                            title: `Revoke ${t.name}?`,
-                            body: "Anything using it stops working straight away. This cannot be undone.",
-                            confirmLabel: "Revoke token",
-                          })
-                        )
-                          revoke.mutate(t.id);
-                      }
-                    : undefined
-                }
-              >
-                <Icon name="key" size={16} className={active ? "text-fg2" : "text-fg3"} />
-                <span className={cn("font-medium", active ? "text-fg" : "text-fg3")}>{t.name}</span>
-                <span className="font-mono text-xs text-fg3">{t.prefix}…</span>
-                <Tag tone={t.scope === "admin" ? "accent" : "idle"}>{SCOPE_LABEL[t.scope]}</Tag>
-                {t.can_read_secrets && <Tag tone="warn">Env values</Tag>}
-                {t.revoked_at ? (
-                  <Tag tone="err">Revoked</Tag>
-                ) : t.expired ? (
-                  <Tag tone="err">Expired</Tag>
-                ) : (
-                  <span className="text-xs text-fg3">Expires {formatDate(t.expires_at)}</span>
-                )}
-                <span className="text-xs text-fg3">
-                  {t.last_used_at ? `Used ${timeAgo(t.last_used_at)}${t.last_used_ip ? ` from ${t.last_used_ip}` : ""}` : "Never used"}
-                </span>
-              </ListRow>
-            );
-          })}
+          {tokens.data.map((t) => (
+            <TokenRow key={t.id} t={t} onRevoke={(id) => revoke.mutate(id)} />
+          ))}
         </ul>
       ) : (
         tokens.data && <CardFooter note="No tokens yet." />
@@ -1163,6 +1168,18 @@ function UsersSection() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
     onError: (e) => toast.err("Could not remove the user", errorText(e)),
   });
+  // One user's tokens are open at a time; the list loads only once it is opened.
+  const [openTokensFor, setOpenTokensFor] = useState<number | null>(null);
+  const userTokens = useQuery<APIToken[]>({
+    queryKey: userTokensKey(openTokensFor),
+    queryFn: () => api(`/users/${openTokensFor}/tokens`),
+    enabled: openTokensFor !== null,
+    retry: false,
+  });
+  const revokeUserToken = useMutation({
+    mutationFn: ({ userId, id }: { userId: number; id: number }) => deleteUserToken(qc, userId, id),
+    onError: (e) => toast.err("Could not revoke the token", errorText(e)),
+  });
 
   if (!can("admin") || users.isError) return null;
 
@@ -1209,8 +1226,8 @@ function UsersSection() {
       {users.data && users.data.length > 0 && (
         <ul className="divide-y divide-hairline border-t border-hairline">
           {users.data.map((u) => (
+            <Fragment key={u.id}>
             <ListRow
-              key={u.id}
               removeLabel={`Remove ${u.email}`}
               onRemove={
                 u.id === me.data?.id
@@ -1255,7 +1272,36 @@ function UsersSection() {
                   Reset 2FA
                 </Button>
               )}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setOpenTokensFor(openTokensFor === u.id ? null : u.id)}
+              >
+                {openTokensFor === u.id ? "Hide tokens" : "Tokens"}
+              </Button>
             </ListRow>
+            {openTokensFor === u.id && (
+              <li className="px-5 pb-4">
+                <div className="overflow-hidden rounded-lg border border-hairline">
+                  {userTokens.isError ? (
+                    <p className="px-4 py-3 text-sm text-err">{errorText(userTokens.error)}</p>
+                  ) : userTokens.data ? (
+                    userTokens.data.length > 0 ? (
+                      <ul className="divide-y divide-hairline">
+                        {userTokens.data.map((t) => (
+                          <TokenRow key={t.id} t={t} onRevoke={(id) => revokeUserToken.mutate({ userId: u.id, id })} />
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="px-4 py-3 text-sm text-fg3">No tokens yet.</p>
+                    )
+                  ) : (
+                    <p className="px-4 py-3 text-sm text-fg3">Loading…</p>
+                  )}
+                </div>
+              </li>
+            )}
+            </Fragment>
           ))}
         </ul>
       )}
