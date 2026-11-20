@@ -100,7 +100,7 @@ function TerminalPane({
       cursorBlink: true,
       fontSize: 13,
       lineHeight: 1.25,
-      fontFamily: '"Red Hat Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+      fontFamily: '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
       theme: {
         background: cssVar("--term", "#0c0e12"),
         foreground: cssVar("--term-fg", "#d5d9e0"),
