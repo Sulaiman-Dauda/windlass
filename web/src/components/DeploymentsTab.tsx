@@ -1,11 +1,9 @@
-import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useCan } from "../api/auth";
 import { useProject } from "../api/projects";
 import { useStagingStatus } from "../api/staging";
 import { usePromoteAction } from "./StagingCard";
 import {
-  PIPELINE,
   useDeploymentEvents,
   paneTick,
   useDeployments,
@@ -15,7 +13,7 @@ import {
   stageLabel,
   stageStates,
   type Deployment,
-  type StageState,
+  type DeployEvent,
 } from "../api/deployments";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -30,6 +28,7 @@ import { useToast, errorText } from "../ui/Toast";
 import { cn } from "../ui/cn";
 import { elapsed, formatClock, formatDateTime, formatDuration, timeAgo } from "../ui/format";
 import { TermPane } from "./TermPane";
+import { Steps } from "./Steps";
 
 export default function DeploymentsTab({ project }: { project: string }) {
   const deployments = useDeployments(project);
@@ -209,14 +208,9 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
         </div>
       </div>
 
-      <ol className="flex items-center gap-1 overflow-x-auto border-b border-hairline bg-surface2 px-5 py-2.5 [scrollbar-width:none]">
-        {PIPELINE.map((s, i) => (
-          <li key={s.key} className="flex flex-none items-center gap-1">
-            <Stage state={stages[s.key]} label={s.label} />
-            {i < PIPELINE.length - 1 && <span aria-hidden="true" className="mx-1.5 h-px w-5 bg-edge" />}
-          </li>
-        ))}
-      </ol>
+      <div className="border-b border-hairline bg-surface2 px-5 py-3">
+        <Steps states={stages} />
+      </div>
 
       {d.status === "failed" && d.error && (
         <Callout tone="err" title={failureTitle(d)} className="mx-5 mt-4">
@@ -227,10 +221,17 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
         </Callout>
       )}
 
-      <TermPane tick={paneTick(eventLog)} className={cn("max-h-[62vh] min-h-[320px]", d.status === "failed" && d.error && "mt-4")}>
+      <TermPane tick={paneTick(eventLog)} className={cn(d.status === "failed" && d.error ? "mt-4 h-[max(320px,calc(100dvh-31rem))]" : "h-[max(320px,calc(100dvh-25rem))]")}>
         {eventLog.map((ev) => (
-          <div key={ev.seq} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4">
-            <span className="select-none text-term-dim">{formatClock(ev.ts)}</span>
+          <div
+            key={ev.seq}
+            className={cn(
+              "grid grid-cols-[auto_minmax(0,1fr)] gap-x-4",
+              failingLine(ev) &&
+                "-mx-4 bg-[color-mix(in_oklch,var(--term-err)_11%,transparent)] px-4 shadow-[inset_2px_0_0_var(--term-err)]",
+            )}
+          >
+            <span className={cn("select-none", failingLine(ev) ? "text-term-err" : "text-term-dim")}>{formatClock(ev.ts)}</span>
             <span className={ev.type === "done" ? doneStyle(ev.message) : (lineStyle[ev.type] ?? "")}>{ev.message}</span>
           </div>
         ))}
@@ -250,28 +251,7 @@ function failureTitle(d: Deployment): string {
   return title;
 }
 
-const stageIcon: Record<StageState, { className: string; node: ReactNode }> = {
-  done: { className: "bg-ok-soft text-ok", node: <Icon name="check" size={12} /> },
-  active: { className: "bg-accent-soft text-accent", node: <Spinner size={10} /> },
-  failed: { className: "bg-err-soft text-err", node: <Icon name="x" size={11} /> },
-  skipped: { className: "border border-dashed border-edge text-fg3", node: <Icon name="minus" size={11} /> },
-  pending: { className: "border border-edge text-fg3", node: null },
-};
-
-function Stage({ state, label }: { state: StageState; label: string }) {
-  const s = stageIcon[state];
-  return (
-    <span className="inline-flex items-center gap-1.5" title={`${label}: ${state}`}>
-      <span className={cn("grid h-[18px] w-[18px] place-items-center rounded-full", s.className)}>{s.node}</span>
-      <span
-        className={cn(
-          "text-xs font-semibold",
-          state === "active" ? "text-accent" : state === "failed" ? "text-err" : state === "done" ? "text-fg" : "text-fg3",
-          state === "skipped" && "line-through decoration-fg3/50",
-        )}
-      >
-        {label}
-      </span>
-    </span>
-  );
+/** The lines that say what broke: the error and the closing "failed". Tinted so the eye lands there. */
+function failingLine(ev: DeployEvent): boolean {
+  return ev.type === "error" || (ev.type === "done" && ev.message === "failed");
 }

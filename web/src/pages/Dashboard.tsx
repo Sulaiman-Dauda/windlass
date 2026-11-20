@@ -30,7 +30,7 @@ function Tile({
   sub?: ReactNode;
 }) {
   return (
-    <Card className="px-[18px] py-4">
+    <div className="min-w-0 px-[18px] py-4">
       <div className="flex items-center gap-2 text-sm font-medium text-fg2">
         <Icon name={icon} size={16} className="text-fg3" />
         {label}
@@ -38,7 +38,7 @@ function Tile({
       {value === undefined ? (
         <>
           <Skeleton className="mt-2.5 h-8 w-20" />
-          <Skeleton className="mt-3 h-[5px] w-full" />
+          <Skeleton className="mt-3 h-[11px] w-full" />
           <Skeleton className="mt-2 h-4 w-28" />
         </>
       ) : (
@@ -51,7 +51,7 @@ function Tile({
           {sub && <div className="mt-2 truncate text-xs tabular-nums text-fg3">{sub}</div>}
         </>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -104,6 +104,9 @@ export function diskParts(disk: SystemDisk): MeterPart[] {
 function partsLabel(parts: MeterPart[]): string {
   return parts.map((p) => `${p.label} ${formatBytes(p.bytes)}`).join(", ");
 }
+
+/** The Windlass meter's scale runs to three times the idle budget, where it turns red. */
+const PANEL_SCALE = 3;
 
 /**
  * The panel's memory against its idle budget. The budget is what CI holds an
@@ -164,7 +167,7 @@ export default function Dashboard() {
 
         {metrics.isError && <p className="text-sm text-fg3">Host metrics are unavailable right now. Projects below are unaffected.</p>}
 
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-5">
+        <Card className="grid grid-cols-2 lg:grid-cols-4 [&>*]:border-hairline [&>*:nth-child(even)]:border-l [&>*:nth-child(n+3)]:border-t lg:[&>*:nth-child(n+2)]:border-l lg:[&>*:nth-child(n+3)]:border-t-0">
           <Tile
             label="CPU"
             icon="cpu"
@@ -205,10 +208,20 @@ export default function Dashboard() {
             icon="activity"
             value={m ? (rss > 0 ? (rss / 1024 / 1024).toFixed(0) : "–") : undefined}
             unit={rss > 0 ? "MiB" : undefined}
-            meter={rss > 0 && <Meter label="Panel memory against its idle budget" pct={rssPct} tone={panelTone(rssPct)} />}
+            meter={
+              rss > 0 && (
+                <Meter
+                  label="Panel memory against its idle budget"
+                  valueText={`${(rss / 1024 / 1024).toFixed(0)} MiB, idle budget ${Math.round(PANEL_RSS_BUDGET_BYTES / 2 ** 20)} MiB`}
+                  pct={rssPct / PANEL_SCALE}
+                  notch={100 / PANEL_SCALE}
+                  tone={panelTone(rssPct)}
+                />
+              )
+            }
             sub={m && (rss > 0 ? `Idle budget ${Math.round(PANEL_RSS_BUDGET_BYTES / 2 ** 20)} MiB` : "Panel memory is not readable here")}
           />
-        </div>
+        </Card>
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
           <section className="min-w-0">

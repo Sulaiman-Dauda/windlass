@@ -25,6 +25,7 @@ import { repoName } from "./ProjectsTable";
 import StagingCard from "./StagingCard";
 import CreateStagingDialog from "./CreateStagingDialog";
 import { Button } from "../ui/Button";
+import { Steps, summaryStates } from "./Steps";
 
 function stateTone(state: string): { tone: Tone; live?: boolean } {
   switch (state) {
@@ -164,9 +165,9 @@ export default function OverviewTab({ project }: { project: string }) {
   );
 }
 
-function SideCard({ title, link, children }: { title: string; link?: { to: string; label: string }; children: ReactNode }) {
+function SideCard({ title, link, className, children }: { title: string; link?: { to: string; label: string }; className?: string; children: ReactNode }) {
   return (
-    <Card>
+    <Card className={className}>
       <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
         <h3 className="text-sm font-semibold text-fg">{title}</h3>
         {link && (
@@ -201,7 +202,8 @@ function LatestDeployment({ project }: { project: string }) {
           {d.status}
         </StatusPill>
       </div>
-      <dl className="mt-3 space-y-1.5 text-sm">
+      <Steps states={summaryStates(d)} numbered={false} className="mt-3" />
+      <dl className="mt-4 space-y-1.5 text-sm">
         <div className="flex justify-between gap-3">
           <dt className="text-fg3">Triggered by</dt>
           <dd className="truncate text-fg2">{d.promoted_from_number ? `promoted from staging #${d.promoted_from_number}` : d.triggered_by}</dd>
@@ -308,7 +310,7 @@ function StagingOffer({ project }: { project: string }) {
   const [open, setOpen] = useState(false);
   if (!p || p.staging || p.staging_of || !can("member")) return null;
   return (
-    <SideCard title="Staging">
+    <SideCard title="Staging" className="border-dashed border-[color-mix(in_oklch,var(--warn)_45%,var(--edge))]">
       <p className="text-sm text-fg3">
         Try changes on a copy of {project} with its own domains and data. Pushes then deploy to the copy, and {project} changes
         only when you promote what passed.
