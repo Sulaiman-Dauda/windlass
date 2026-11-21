@@ -64,7 +64,7 @@ func (d dockerLocal) HubTags(ctx context.Context, repository, contains string) (
 		default:
 			err = json.NewDecoder(io.LimitReader(resp.Body, hubMaxBody)).Decode(&body)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close() // read already finished; a close error changes nothing
 		if err != nil {
 			return nil, err
 		}
