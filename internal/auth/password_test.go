@@ -223,3 +223,14 @@ func TestLoginReportsBusy(t *testing.T) {
 		}
 	}
 }
+
+func TestScheduleReleaseFoldsABurst(t *testing.T) {
+	scheduleRelease()
+	scheduleRelease()
+	release.Lock()
+	pending := release.pending
+	release.Unlock()
+	if !pending {
+		t.Fatal("a hash must leave one release pending")
+	}
+}
