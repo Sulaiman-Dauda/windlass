@@ -344,3 +344,34 @@ func TestCancelledRequestDoesNotCacheAFalseRow(t *testing.T) {
 		t.Fatalf("items = %s", got)
 	}
 }
+
+func TestCaddyResumeRow(t *testing.T) {
+	e := newEnv(t)
+	e.agent.Resume = agent.ResumeOff
+	if items := e.list(t); len(items) != 0 {
+		t.Fatalf("no domains, resume is not a row: %+v", items)
+	}
+	e.panel.host = "panel.example.com"
+	items := e.list(t)
+	if got := kinds(items); got != "caddy_resume:" {
+		t.Fatalf("resume off = %s", got)
+	}
+	if items[0].Command != ResumeCommand || items[0].Tone != ToneWarn {
+		t.Errorf("row = %+v", items[0])
+	}
+	e.agent.ProxyAvailable = false
+	if got := kinds(e.list(t)); got != "proxy:" {
+		t.Fatalf("Caddy down shows only the proxy row: %s", got)
+	}
+	e.agent.ProxyAvailable = true
+	e.agent.Resume = agent.ResumeIgnoresCaddyfile
+	if items := e.list(t); len(items) != 1 || items[0].Command != UndoResumeCommand {
+		t.Fatalf("drop-in over a changed Caddyfile: %+v", items)
+	}
+	for _, state := range []agent.CaddyResume{agent.ResumeOn, agent.ResumeNotOurs} {
+		e.agent.Resume = state
+		if items := e.list(t); len(items) != 0 {
+			t.Fatalf("%s: %+v", state, items)
+		}
+	}
+}

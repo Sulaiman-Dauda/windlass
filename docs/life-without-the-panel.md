@@ -104,8 +104,11 @@ Application routes and the panel route remain in Caddy's active in-memory config
 Windlass stops. A Caddy reload or restart loads the administrator's own config file, which
 drops them. While Windlass runs it checks for its routes every 30 seconds and puts them back,
 so a reload costs at most that long. If Caddy restarts while Windlass is stopped, the sites
-it routes are offline until Windlass starts again. If Windlass has been permanently removed,
-add any routes that must survive Caddy restarts to the Caddyfile.
+it routes are offline until Windlass starts again, unless Caddy runs with the installer's
+resume drop-in, which keeps them. If Windlass has been permanently removed, remove that
+drop-in first (see [Caddy restarts and reboots](install.md#caddy-restarts-and-reboots)),
+because while it exists Caddy ignores edits to the Caddyfile; then add any routes that must
+survive Caddy restarts to the Caddyfile.
 
 To remove only Windlass-owned routes manually:
 

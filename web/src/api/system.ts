@@ -21,13 +21,15 @@ export interface Metrics {
 export const PANEL_RSS_BUDGET_BYTES = 40 * 1024 * 1024;
 
 export interface AttentionItem {
-  kind: "deploy_failed" | "disk" | "no_backup" | "proxy" | "update" | string;
+  kind: "deploy_failed" | "disk" | "no_backup" | "proxy" | "update" | "caddy_resume" | string;
   tone: "error" | "warn" | "info";
   project?: string;
   title: string;
   detail?: string;
   link?: string;
   action?: string;
+  /** A shell command that fixes the item, run on the server. */
+  command?: string;
 }
 
 export interface AttentionList {

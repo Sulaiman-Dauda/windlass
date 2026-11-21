@@ -114,7 +114,10 @@ Certificate automation names are merged with existing names and never removed. U
 and unrelated Caddy configuration remain untouched. Routes are reconciled at startup and
 after relevant Docker, deployment, project, or domain events. Every 30 seconds Windlass
 also checks that `windlass_routes` still exists, and syncs when it does not, because a
-Caddy reload loads the Caddyfile and drops every route the admin API added.
+Caddy reload loads the Caddyfile and drops every route the admin API added. Where the
+installer set up Caddy, a systemd drop-in starts Caddy with `--resume` and makes reload a
+no-op, so a restart keeps the routes; Windlass still syncs at startup, because containers
+can come back on new addresses after a reboot.
 
 ## Events and UI safety
 

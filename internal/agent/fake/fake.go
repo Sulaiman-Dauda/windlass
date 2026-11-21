@@ -54,6 +54,8 @@ type Fake struct {
 	// RoutesInstalled controls Proxy().RoutesInstalled. ApplyRoutes sets it;
 	// clear it to stand for a Caddy reload.
 	RoutesInstalled bool
+	// Resume is what Proxy().ResumeState returns; empty means ResumeOn.
+	Resume agent.CaddyResume
 
 	// GitCommit is returned by Host().GitSync.
 	GitCommit string
@@ -427,6 +429,18 @@ func (p proxyFake) RoutesInstalled(ctx context.Context) (bool, error) {
 	p.f.mu.Lock()
 	defer p.f.mu.Unlock()
 	return p.f.RoutesInstalled, nil
+}
+
+func (p proxyFake) ResumeState(ctx context.Context) (agent.CaddyResume, error) {
+	if err := p.f.record("proxy.resume", nil); err != nil {
+		return "", err
+	}
+	p.f.mu.Lock()
+	defer p.f.mu.Unlock()
+	if p.f.Resume == "" {
+		return agent.ResumeOn, nil
+	}
+	return p.f.Resume, nil
 }
 
 func (p proxyFake) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {

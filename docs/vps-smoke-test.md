@@ -99,7 +99,9 @@ sudo systemctl stop windlass
 Restart Caddy while Windlass remains stopped.
 
 - [ ] Administrator-owned Caddyfile routes return.
-- [ ] Windlass runtime-only routes do not return until Windlass starts and reconciles them.
+- [ ] With the installer's resume drop-in (`/etc/systemd/system/caddy.service.d/windlass-resume.conf`),
+  Windlass routes keep serving. Without it, they do not return until Windlass starts and
+  reconciles them.
 
 ## 9. Image cleanup and resource budget
 

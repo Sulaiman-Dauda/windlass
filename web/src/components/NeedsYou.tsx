@@ -4,6 +4,7 @@ import { Card } from "../ui/Card";
 import { Icon, type IconName } from "../ui/Icon";
 import { btn } from "../ui/Button";
 import { cn } from "../ui/cn";
+import { CopyField } from "../ui/Copy";
 import { formatStamp, timeAgo } from "../ui/format";
 
 const kindIcon: Record<string, IconName> = {
@@ -12,6 +13,7 @@ const kindIcon: Record<string, IconName> = {
   no_backup: "database",
   proxy: "warning",
   update: "download",
+  caddy_resume: "server",
 };
 
 const toneClass: Record<AttentionItem["tone"], string> = {
@@ -56,6 +58,7 @@ export default function NeedsYou() {
             <div className="grid min-w-0 gap-px">
               <span className="text-sm font-semibold text-fg">{item.title}</span>
               {item.detail && <span className="text-xs text-fg3">{item.detail}</span>}
+              {item.command && <CopyField value={item.command} className="mt-1.5" />}
             </div>
             {item.link && (
               <Link to={item.link} className={btn("secondary", "sm", "col-start-2 justify-self-start sm:col-start-3")}>
