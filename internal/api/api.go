@@ -150,6 +150,8 @@ func (a *API) Routes(r chi.Router) {
 				r.Get("/system/attention/settings", a.handleGetAttentionSettings)
 				r.Put("/system/attention/settings", a.handleSetAttentionSettings)
 			}
+			r.Get("/system/deploy/settings", a.handleGetDeploySettings)
+			r.Put("/system/deploy/settings", a.handleSetDeploySettings)
 			r.Get("/system/panel-domain", a.handleGetPanelDomain)
 			r.Get("/system/github-app", a.handleGitHubAppStatus)
 			// Browser-only. Each of these can move the panel, replace the

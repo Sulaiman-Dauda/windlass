@@ -38,6 +38,11 @@ running containers did not change; if it failed at Start or Verify, some service
 on the new version. Either way it names the last deployment that succeeded, which is the one
 to roll back to.
 
+When Pull fails because an image tag does not exist on Docker Hub, the failure lists up to
+five of the image's tags nearest to the one asked for, ready to copy into `compose.yaml`.
+Windlass sends only the image name to Docker Hub's public API, and asks nothing of other
+registries. An admin can turn this off in **Settings > System**.
+
 A project whose latest deployment failed is also listed on the dashboard under **Needs
 you**, until a deployment of it succeeds.
 

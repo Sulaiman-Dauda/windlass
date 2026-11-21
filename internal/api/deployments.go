@@ -73,6 +73,7 @@ func (a *API) deploymentRoutes(r chi.Router) {
 	r.Get("/", a.handleListDeployments)
 	r.Get("/{number}", a.handleGetDeployment)
 	r.Get("/{number}/events", a.handleDeploymentEvents)
+	r.Get("/{number}/tag-suggestion", a.handleTagSuggestion)
 	// RequireDeployer, not RequireRole("member"): a deploy token may use
 	// these three, and nothing else that writes.
 	r.Group(func(r chi.Router) {
@@ -81,6 +82,24 @@ func (a *API) deploymentRoutes(r chi.Router) {
 		r.Post("/{number}/rollback", a.handleRollback)
 		r.Post("/{number}/promote", a.handlePromote)
 	})
+}
+
+// handleTagSuggestion offers the nearest existing tags when a deployment
+// failed on an image tag Docker Hub does not have. Read-only.
+func (a *API) handleTagSuggestion(w http.ResponseWriter, r *http.Request) {
+	d, ok := a.resolveDeployment(w, r)
+	if !ok {
+		return
+	}
+	sug, err := a.Deploy.TagSuggestions(r.Context(), d)
+	switch {
+	case errors.Is(err, deploy.ErrNoTagSuggestion):
+		writeError(w, http.StatusNotFound, "no_suggestion", err.Error())
+	case err != nil:
+		writeError(w, http.StatusBadGateway, "docker_hub_unavailable", err.Error())
+	default:
+		writeJSON(w, http.StatusOK, map[string]any{"images": sug})
+	}
 }
 
 func (a *API) handleCreateDeployment(w http.ResponseWriter, r *http.Request) {

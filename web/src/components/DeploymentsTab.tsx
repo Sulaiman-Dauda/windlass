@@ -8,6 +8,7 @@ import {
   paneTick,
   useDeployments,
   useRollback,
+  useTagSuggestion,
   deploymentTone,
   isActive,
   stageLabel,
@@ -218,6 +219,7 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
           {d.error_line && d.error_line !== d.error && (
             <span className="mt-1.5 block break-words font-mono text-xs text-fg2">{d.error}</span>
           )}
+          <TagHint project={project} d={d} />
         </Callout>
       )}
 
@@ -240,6 +242,42 @@ function DeploymentDetail({ project, d, latest }: { project: string; d: Deployme
         )}
       </TermPane>
     </Card>
+  );
+}
+
+// TagHint offers the nearest existing tags when the deploy failed on an
+// image tag Docker Hub does not have. The fix stays in compose.yaml: the
+// panel shows the tags, the user edits the file.
+function TagHint({ project, d }: { project: string; d: Deployment }) {
+  const sug = useTagSuggestion(project, d);
+  if (!sug.data?.length) return null;
+  return (
+    <div className="mt-3 space-y-3 border-t border-hairline pt-3 text-sm text-fg">
+      {sug.data.map(({ image, tag, tags }) => {
+        const name = image.slice(0, image.length - tag.length - 1);
+        return tags.length === 0 ? (
+          <p key={image}>
+            Docker Hub has no tag <code className="font-mono text-xs">{tag}</code> for {name}, and none close to it.
+          </p>
+        ) : (
+          <div key={image}>
+            <p>
+              Docker Hub has no tag <code className="font-mono text-xs">{tag}</code> for {name}. The nearest{" "}
+              {tags.length === 1 ? "tag is" : "tags are"}:
+            </p>
+            <ul className="mt-2 flex flex-wrap gap-1.5">
+              {tags.map((t) => (
+                <li key={t} className="inline-flex items-center gap-0.5 rounded-control border border-hairline bg-surface pl-2 font-mono text-xs">
+                  {t}
+                  <CopyButton value={`${name}:${t}`} label={`Copy ${name}:${t}`} />
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+      <p className="text-xs text-fg2">Change the image in compose.yaml, then deploy again.</p>
+    </div>
   );
 }
 

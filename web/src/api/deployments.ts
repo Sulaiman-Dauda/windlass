@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, ApiError } from "./client";
 
 export interface Deployment {
   id: number;
@@ -35,6 +35,45 @@ export interface ServiceStatus {
   container_ports?: number[];
   /** Memory in use, only when asked for with stats and the container runs. */
   memory_bytes?: number;
+}
+
+/** The nearest existing tags for a deploy that failed on a missing Docker Hub tag. */
+export interface TagSuggestion {
+  image: string;
+  tag: string;
+  /** Docker Hub namespace/name, "library/nginx" for an official image. */
+  repository: string;
+  /** Nearest first; empty when nothing on Docker Hub is close. */
+  tags: string[];
+}
+
+// missingTag matches the error a missing image tag leaves in the failure
+// summary, in Compose v5 ("manifest unknown"), the daemon and containerd.
+// The server reads the log for the image itself.
+const missingTag = /manifest unknown|manifest for \S+ not found|failed to resolve reference "[^"]+": [^"]*\bnot found/;
+
+/**
+ * Asks once for nearby tags when a failed deployment's error names a
+ * missing tag. Resolves to null when there is no suggestion: another
+ * registry, a digest, or the setting is off.
+ */
+export function useTagSuggestion(project: string, d: Deployment) {
+  const text = `${d.error_line ?? ""}\n${d.error ?? ""}`;
+  return useQuery<TagSuggestion[] | null>({
+    queryKey: ["projects", project, "deployments", d.number, "tag-suggestion"],
+    queryFn: async () => {
+      try {
+        const res = await api<{ images: TagSuggestion[] }>(`/projects/${project}/deployments/${d.number}/tag-suggestion`);
+        return res.images;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+    enabled: d.status === "failed" && missingTag.test(text),
+    staleTime: Infinity,
+    retry: false,
+  });
 }
 
 export const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled"];
