@@ -8,6 +8,8 @@ import {
   paneTick,
   useDeployments,
   useRollback,
+  useWaitingDeploy,
+  useCancelWaiting,
   useTagSuggestion,
   deploymentTone,
   isActive,
@@ -15,6 +17,7 @@ import {
   stageStates,
   type Deployment,
   type DeployEvent,
+  type WaitingDeploy,
 } from "../api/deployments";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -37,6 +40,8 @@ export default function DeploymentsTab({ project }: { project: string }) {
   const list = deployments.data ?? [];
   const requested = Number(params.get("d"));
   const selected = list.find((d) => d.number === requested) ?? list[0];
+  const running = list.some((d) => isActive(d.status));
+  const waiting = useWaitingDeploy(project, running).data;
 
   // Keep the selection in the URL so a deployment's log can be linked to.
   const select = (n: number) => setParams({ d: String(n) }, { replace: true });
@@ -61,6 +66,7 @@ export default function DeploymentsTab({ project }: { project: string }) {
           <h3 className="text-sm font-semibold text-fg">History</h3>
         </div>
         <ul className="max-h-[70vh] divide-y divide-hairline overflow-y-auto">
+          {waiting && <WaitingRow project={project} w={waiting} after={list[0]?.number} />}
           {list.map((d) => (
             <li key={d.id}>
               <button
@@ -118,6 +124,46 @@ function doneStyle(message: string): string {
   if (message === "succeeded") return "text-term-ok font-medium";
   if (message === "failed") return "text-term-err font-medium";
   return "text-term-dim font-medium";
+}
+
+// WaitingRow is a deploy held until the running one finishes. It has no
+// number yet, so it is not selectable.
+function WaitingRow({ project, w, after }: { project: string; w: WaitingDeploy; after?: number }) {
+  const cancel = useCancelWaiting(project);
+  const can = useCan();
+  const toast = useToast();
+  return (
+    <li className="px-4 py-2.5">
+      <div className="flex items-center gap-2">
+        <StatusDot tone="idle" />
+        <span className="text-sm font-semibold text-fg">Waiting</span>
+        <span className="ml-auto text-xs text-fg3">{timeAgo(w.queued_at)}</span>
+      </div>
+      <div className="mt-0.5 flex items-center gap-1.5 pl-5 text-xs text-fg3">
+        <span className="truncate">
+          {w.trigger}
+          {w.requests > 1 && ` · ${w.requests} requests`} · starts after {after ? `#${after}` : "the running deploy"}
+        </span>
+        {can("member") && (
+          <Button
+            size="xs"
+            variant="ghost"
+            className="ml-auto"
+            loading={cancel.isPending}
+            title="Drops this deploy. The running deployment carries on."
+            onClick={() =>
+              cancel.mutate(undefined, {
+                onSuccess: () => toast.info("Waiting deploy cancelled"),
+                onError: (e) => toast.err("Could not cancel the waiting deploy", errorText(e)),
+              })
+            }
+          >
+            Cancel
+          </Button>
+        )}
+      </div>
+    </li>
+  );
 }
 
 function DeploymentDetail({ project, d, latest }: { project: string; d: Deployment; latest: number }) {

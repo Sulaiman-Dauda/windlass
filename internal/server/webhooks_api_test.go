@@ -80,19 +80,20 @@ func TestWebhookTriggersDeploy(t *testing.T) {
 		t.Errorf("git sync not executed: %s", calls)
 	}
 
-	// While nothing is running, a second push deploys again; but during an
-	// active deployment it's skipped with 202, simulate by hanging the
-	// project's deployment in queued state via a direct second call race:
-	// simpler: fire two pushes back-to-back.
+	// While nothing is running, a second push deploys again; during an
+	// active deployment it waits with 202. Fire two pushes back-to-back.
 	rec = postWebhook(e, "app", githubSign(secret, body), body)
 	rec2 := postWebhook(e, "app", githubSign(secret, body), body)
 	if rec.Code == http.StatusCreated && rec2.Code == http.StatusCreated {
 		// Both created only if the first finished before the second landed,
-		// acceptable; otherwise the second must be 202 skipped.
+		// acceptable; otherwise the second must be 202 waiting.
 		return
 	}
 	if rec2.Code != http.StatusAccepted && rec2.Code != http.StatusCreated {
 		t.Fatalf("concurrent webhook = %d: %s", rec2.Code, rec2.Body.String())
+	}
+	if rec2.Code == http.StatusAccepted && !strings.Contains(rec2.Body.String(), `"result":"waiting"`) {
+		t.Errorf("concurrent webhook body = %s", rec2.Body.String())
 	}
 }
 

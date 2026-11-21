@@ -71,14 +71,16 @@ func (a *API) deploymentDTO(ctx context.Context, d db.Deployment) deploymentDTO 
 
 func (a *API) deploymentRoutes(r chi.Router) {
 	r.Get("/", a.handleListDeployments)
+	r.Get("/waiting", a.handleGetWaiting)
 	r.Get("/{number}", a.handleGetDeployment)
 	r.Get("/{number}/events", a.handleDeploymentEvents)
 	r.Get("/{number}/tag-suggestion", a.handleTagSuggestion)
 	// RequireDeployer, not RequireRole("member"): a deploy token may use
-	// these three, and nothing else that writes.
+	// these, and nothing else that writes.
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireDeployer)
 		r.Post("/", a.handleCreateDeployment)
+		r.Delete("/waiting", a.handleCancelWaiting)
 		r.Post("/{number}/rollback", a.handleRollback)
 		r.Post("/{number}/promote", a.handlePromote)
 	})
@@ -104,7 +106,7 @@ func (a *API) handleTagSuggestion(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) handleCreateDeployment(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	d, err := a.Deploy.Deploy(r.Context(), name, "manual")
+	d, waiting, err := a.Deploy.DeployOrQueue(r.Context(), name, "manual")
 	var adoption *projects.AdoptionError
 	switch {
 	case errors.As(err, &adoption):
@@ -113,17 +115,48 @@ func (a *API) handleCreateDeployment(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, projects.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "project not found")
 		return
-	case errors.Is(err, deploy.ErrDeployInProgress):
-		writeError(w, http.StatusConflict, "conflict", err.Error())
-		return
 	case err != nil:
 		a.internalError(w, "create deployment", err)
 		return
 	}
 	user, _ := auth.UserFrom(r.Context())
+	if waiting != nil {
+		a.Audit.Write(r.Context(), user.ID, "deployment.queue", "project", name, remoteIP(r),
+			map[string]int{"requests": waiting.Requests})
+		writeJSON(w, http.StatusAccepted, map[string]any{"waiting": waiting})
+		return
+	}
 	a.Audit.Write(r.Context(), user.ID, "deployment.create", "project", name, remoteIP(r),
 		map[string]int64{"number": d.Number})
 	writeJSON(w, http.StatusCreated, toDeploymentDTO(d))
+}
+
+// handleGetWaiting answers {"waiting": null} when nothing waits.
+func (a *API) handleGetWaiting(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if _, err := a.Projects.Get(r.Context(), name); errors.Is(err, projects.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "project not found")
+		return
+	} else if err != nil {
+		a.internalError(w, "get project", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"waiting": a.Deploy.WaitingFor(name)})
+}
+
+// handleCancelWaiting drops the waiting deploy. A running deployment is
+// never cancelled here.
+func (a *API) handleCancelWaiting(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	dropped, err := a.Deploy.CancelWaiting(name)
+	if errors.Is(err, deploy.ErrNothingWaiting) {
+		writeError(w, http.StatusNotFound, "nothing_waiting", err.Error())
+		return
+	}
+	user, _ := auth.UserFrom(r.Context())
+	a.Audit.Write(r.Context(), user.ID, "deployment.queue_cancel", "project", name, remoteIP(r),
+		map[string]int{"requests": dropped.Requests})
+	writeJSON(w, http.StatusOK, map[string]any{"cancelled": dropped})
 }
 
 func (a *API) handleListDeployments(w http.ResponseWriter, r *http.Request) {

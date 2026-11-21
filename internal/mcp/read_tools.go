@@ -155,6 +155,18 @@ func getProject(t *toolCtx) (any, error) {
 	} else {
 		out["last_deployment"] = nil
 	}
+	raw, err = t.getJSON(projectPath(name, "deployments", "waiting"), nil)
+	if err != nil {
+		return nil, err
+	}
+	var queue struct {
+		Waiting json.RawMessage `json:"waiting"`
+	}
+	if err := json.Unmarshal(raw, &queue); err != nil {
+		return nil, fmt.Errorf("unexpected answer from Windlass: %v", err)
+	}
+	// waiting is null when no deploy waits.
+	out["waiting_deploy"] = queue.Waiting
 	return out, nil
 }
 

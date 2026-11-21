@@ -5,6 +5,7 @@ import { useProject } from "../api/projects";
 import { shortCommit, useStagingStatus } from "../api/staging";
 import {
   useCreateDeployment,
+  isWaiting,
   useDeployments,
   useProjectAction,
   useRollback,
@@ -117,6 +118,11 @@ export default function ProjectDetail() {
       return;
     deploy.mutate(undefined, {
       onSuccess: (d) => {
+        if (isWaiting(d)) {
+          toast.info("Deploy waiting", "A deployment is already running. This one starts when it finishes.");
+          navigate(`/projects/${name}/deployments`);
+          return;
+        }
         toast.info(`Deployment #${d.number} started`, "Streaming its log now.");
         navigate(`/projects/${name}/deployments?d=${d.number}`);
       },

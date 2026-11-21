@@ -164,14 +164,15 @@ curl -sS https://panel.example/api/v1/mcp \
 | Tool | Needs | What it does |
 | --- | --- | --- |
 | `list_projects` | any | The projects the token can see |
-| `get_project` | any | Services with container state and exit code, health, domains, last deployment |
+| `get_project` | any | Services with container state and exit code, health, domains, last deployment, any deploy waiting |
 | `list_deployments` | any | Deployments newest first: number, status, trigger, commit |
 | `get_deployment` | any | One deployment and its event log, where a failure's reason is |
 | `get_logs` | any | The newest log lines of one service, scrubbed (below) |
 | `get_staging` | any | Which deployment staging and live are on, and whether a promote is possible |
 | `list_backups` | any | Backups newest first: kind, destination, size, status |
 | `check_domains` | any | DNS, ports 80 and 443, certificate expiry, Caddy route and container for each domain |
-| `deploy` | deploy | Deploys now, as the panel's Deploy button does; a Git project pulls its branch first |
+| `deploy` | deploy | Deploys now, as the panel's Deploy button does; a Git project pulls its branch first. While a deployment runs, the deploy waits and starts after it |
+| `cancel_deployment` | deploy | Cancels the deploy waiting for the running one; never stops a running deployment |
 | `restart` | deploy | Restarts the project's containers |
 | `rollback` | deploy | Redeploys an earlier deployment, images pinned to its digests |
 | `promote` | deploy | Promotes a staging deployment to live |

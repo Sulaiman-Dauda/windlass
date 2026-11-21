@@ -214,6 +214,14 @@ func (t *toolCtx) deploymentAnswer(project string, res writeResult, action strin
 	if err := json.Unmarshal(res.raw, &d); err != nil {
 		return nil, fmt.Errorf("unexpected answer from Windlass: %v", err)
 	}
+	if w, ok := d["waiting"]; ok {
+		return map[string]any{
+			"project": project, "status": "waiting", "waiting": w,
+			"next": "A deployment of " + project + " is already running. This deploy starts when it finishes " +
+				"and has no number until then. Call get_project to see it waiting, or list_deployments later " +
+				"for its number. cancel_deployment drops it.",
+		}, nil
+	}
 	scrubError(d, t.s.scrubberOrWithhold(t, project))
 	var number int64
 	_ = json.Unmarshal(d["number"], &number)
@@ -231,6 +239,24 @@ func deployProject(t *toolCtx) (any, error) {
 		return nil, err
 	}
 	return t.deploymentAnswer(name, res, "deploying")
+}
+
+func cancelDeployment(t *toolCtx) (any, error) {
+	name := t.str("project")
+	res, err := t.sendWrite(http.MethodDelete, projectPath(name, "deployments", "waiting"), nil, queueWait, queueLimit, name)
+	if err != nil {
+		return nil, err
+	}
+	if res.running {
+		return map[string]any{
+			"project": name, "status": stillRunning,
+			"next": "Windlass has not answered yet. Call get_project for " + name + " to see whether a deploy still waits.",
+		}, nil
+	}
+	return map[string]any{
+		"project": name, "result": "cancelled",
+		"next": "The waiting deploy is dropped. A deployment that was already running carries on.",
+	}, nil
 }
 
 func rollbackProject(t *toolCtx) (any, error) {

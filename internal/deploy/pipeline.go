@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/windlass-dev/windlass/internal/agent"
@@ -95,6 +96,12 @@ type Service struct {
 	// succeeded, when set, hears of each successful deployment once it is
 	// recorded. It must not block.
 	succeeded func(project string)
+
+	// queueMu guards waiting and serialises the active check with the
+	// creation of a deployment, so a waiting deploy cannot miss the end of
+	// the run it waits for.
+	queueMu sync.Mutex
+	waiting map[string]*Waiting
 }
 
 // OnSucceeded sets a hook told of each successful deployment, after any
@@ -102,7 +109,8 @@ type Service struct {
 func (s *Service) OnSucceeded(fn func(project string)) { s.succeeded = fn }
 
 func New(q *db.Queries, ag agent.Agent, proj *projects.Service, gitSvc *git.Service, reg *registries.Service, runner *jobs.Runner, bus *events.Bus, logger *slog.Logger) *Service {
-	s := &Service{q: q, agent: ag, projects: proj, git: gitSvc, registry: reg, runner: runner, bus: bus, logger: logger}
+	s := &Service{q: q, agent: ag, projects: proj, git: gitSvc, registry: reg, runner: runner, bus: bus, logger: logger,
+		waiting: map[string]*Waiting{}}
 	runner.Register(JobType, s.runJob)
 	return s
 }
@@ -110,6 +118,8 @@ func New(q *db.Queries, ag agent.Agent, proj *projects.Service, gitSvc *git.Serv
 // Deploy creates a deployment and enqueues its job. One active deployment
 // per project.
 func (s *Service) Deploy(ctx context.Context, projectName, trigger string) (db.Deployment, error) {
+	s.queueMu.Lock()
+	defer s.queueMu.Unlock()
 	return s.deploy(ctx, projectName, trigger, payload{Project: projectName})
 }
 
@@ -156,6 +166,10 @@ func (s *Service) deploy(ctx context.Context, projectName, trigger string, pl pa
 // Rollback creates a new deployment that re-applies the image digests
 // recorded by deployment `number`, and for a Git project its commit.
 func (s *Service) Rollback(ctx context.Context, projectName string, number int64) (db.Deployment, error) {
+	// queueMu: a waiting deploy starting at the same moment must not
+	// create a second active row that supersedes this one.
+	s.queueMu.Lock()
+	defer s.queueMu.Unlock()
 	p, err := s.projects.Get(ctx, projectName)
 	if err != nil {
 		return db.Deployment{}, err
@@ -314,6 +328,8 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 	if err := json.Unmarshal(raw, &pl); err != nil {
 		return fmt.Errorf("bad payload: %w", err)
 	}
+	// Whatever way this job ends, a deploy waiting on it may start.
+	defer s.startWaiting(ctx, pl.Project)
 
 	d, err := s.q.GetDeploymentByID(ctx, pl.DeploymentID)
 	if err != nil {

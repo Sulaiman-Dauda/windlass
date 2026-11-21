@@ -50,6 +50,10 @@ type fakeAPI struct {
 	// madeBackups, when set, makes each backup POST add a manual backup to
 	// the list, as the real route does.
 	madeBackups *[]map[string]any
+	// busy makes a deploy answer 202 waiting, and the waiting route show it.
+	busy bool
+	// nothingWaiting makes the cancel route answer 404.
+	nothingWaiting bool
 }
 
 func newFakeAPI() *fakeAPI {
@@ -70,6 +74,8 @@ func newFakeAPI() *fakeAPI {
 }
 
 // deployFake is a fake whose token can deploy.
+var fakeWaiting = map[string]any{"project": "web", "trigger": "webhook", "queued_at": "2026-11-21T10:00:00Z", "requests": 2, "position": 1}
+
 func deployFake() *fakeAPI {
 	f := newFakeAPI()
 	f.scope, f.canDeploy = "deploy", true
@@ -95,6 +101,7 @@ var writeRoutes = map[string]bool{
 	"/projects/web-staging/deployments/5/promote": true,
 	"/projects/web-staging/deployments/4/promote": true,
 	"/projects/web/backups":                       true,
+	"/projects/web/deployments/waiting":           true,
 }
 
 func (f *fakeAPI) serveWrite(w http.ResponseWriter, r *http.Request, path string) {
@@ -103,6 +110,14 @@ func (f *fakeAPI) serveWrite(w http.ResponseWriter, r *http.Request, path string
 		return
 	}
 	switch {
+	case path == "/projects/web/deployments/waiting":
+		if r.Method != http.MethodDelete || f.nothingWaiting {
+			writeTestJSON(w, 404, map[string]any{"error": map[string]string{"code": "nothing_waiting", "message": "no deploy is waiting for this project"}})
+			return
+		}
+		writeTestJSON(w, 200, map[string]any{"cancelled": fakeWaiting})
+	case path == "/projects/web/deployments" && f.busy:
+		writeTestJSON(w, 202, map[string]any{"waiting": fakeWaiting})
 	case path == "/projects/web/deployments":
 		writeTestJSON(w, 201, map[string]any{"id": 10, "number": 3, "status": "queued", "trigger": "manual"})
 	case path == "/projects/web/deployments/2/rollback":
@@ -171,7 +186,7 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1")
-	if r.Method == http.MethodPost && writeRoutes[path] {
+	if (r.Method == http.MethodPost || r.Method == http.MethodDelete) && writeRoutes[path] {
 		f.serveWrite(w, r, path)
 		return
 	}
@@ -215,6 +230,12 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeTestJSON(w, 200, []map[string]any{{"hostname": "web.example.com", "service": "app", "status": "active"}})
 	case "/projects/web/deployments":
 		writeTestJSON(w, 200, []map[string]any{deployment})
+	case "/projects/web/deployments/waiting":
+		if f.busy {
+			writeTestJSON(w, 200, map[string]any{"waiting": fakeWaiting})
+		} else {
+			writeTestJSON(w, 200, map[string]any{"waiting": nil})
+		}
 	case "/projects/web/deployments/2":
 		writeTestJSON(w, 200, deployment)
 	case "/projects/web/deployments/2/events":
@@ -634,25 +655,26 @@ var readTools = map[string]bool{
 }
 
 // destructiveTools change what is running and need confirm.
-var destructiveTools = map[string]bool{"deploy": true, "restart": true, "rollback": true, "promote": true, "create_backup": true}
+var destructiveTools = map[string]bool{"deploy": true, "cancel_deployment": true, "restart": true, "rollback": true, "promote": true, "create_backup": true}
 
 func TestNoToolReturnsEnv(t *testing.T) {
 	api := deployFake()
 	s := newTestServer(t, api)
 	calls := map[string]map[string]any{
-		"list_projects":    {},
-		"get_project":      {"project": "web"},
-		"list_deployments": {"project": "web"},
-		"get_deployment":   {"project": "web", "number": 2},
-		"get_logs":         {"project": "web"},
-		"get_staging":      {"project": "web"},
-		"list_backups":     {"project": "web"},
-		"check_domains":    {"project": "web"},
-		"deploy":           {"project": "web", "confirm": true},
-		"restart":          {"project": "web", "confirm": true},
-		"rollback":         {"project": "web", "number": 2, "confirm": true},
-		"promote":          {"project": "web", "confirm": true},
-		"create_backup":    {"project": "web", "confirm": true},
+		"list_projects":     {},
+		"get_project":       {"project": "web"},
+		"list_deployments":  {"project": "web"},
+		"get_deployment":    {"project": "web", "number": 2},
+		"get_logs":          {"project": "web"},
+		"get_staging":       {"project": "web"},
+		"list_backups":      {"project": "web"},
+		"check_domains":     {"project": "web"},
+		"deploy":            {"project": "web", "confirm": true},
+		"cancel_deployment": {"project": "web", "confirm": true},
+		"restart":           {"project": "web", "confirm": true},
+		"rollback":          {"project": "web", "number": 2, "confirm": true},
+		"promote":           {"project": "web", "confirm": true},
+		"create_backup":     {"project": "web", "confirm": true},
 	}
 	if len(calls) != len(Tools()) {
 		t.Fatalf("test covers %d tools, catalogue has %d", len(calls), len(Tools()))
@@ -675,11 +697,11 @@ func TestNoToolReturnsEnv(t *testing.T) {
 			t.Errorf("a tool called %s", p)
 		}
 		method, path, _ := strings.Cut(p, " ")
-		if method != http.MethodGet && (method != http.MethodPost || !writeRoutes[strings.TrimPrefix(path, "/api/v1")]) {
+		if method != http.MethodGet && (method != http.MethodPost && method != http.MethodDelete || !writeRoutes[strings.TrimPrefix(path, "/api/v1")]) {
 			t.Errorf("a tool sent %s", p)
 		}
 	}
-	if got := len(api.posts()); got != 5 {
+	if got := len(api.posts()); got != 6 {
 		t.Errorf("%d writes sent, want one per write tool: %v", got, api.posts())
 	}
 	for _, tool := range Tools() {
@@ -824,8 +846,8 @@ func TestLimitsAreReported(t *testing.T) {
 
 func TestEveryToolHasAllAnnotations(t *testing.T) {
 	tools := Tools()
-	if len(tools) != 13 {
-		t.Fatalf("%d tools, want 13", len(tools))
+	if len(tools) != 14 {
+		t.Fatalf("%d tools, want 14", len(tools))
 	}
 	b, _ := json.Marshal(tools)
 	var raw []map[string]json.RawMessage
@@ -1288,5 +1310,43 @@ func TestParallelBackupsTakeOne(t *testing.T) {
 	defer api.mu.Unlock()
 	if n := len(*api.madeBackups); n != 1 {
 		t.Errorf("%d backups taken, want 1", n)
+	}
+}
+
+// A deploy asked for while one runs waits: deploy says so without a
+// number, get_project shows it, and cancel_deployment sends the DELETE.
+func TestDeployWaitsAndCancels(t *testing.T) {
+	api := deployFake()
+	api.busy = true
+	s := newTestServer(t, api)
+
+	out, text, isError := callTool(t, s, "deploy", map[string]any{"project": "web", "confirm": true})
+	if isError || out["status"] != "waiting" || !strings.Contains(text, "cancel_deployment") {
+		t.Fatalf("deploy while busy = %s", text)
+	}
+	if _, ok := out["deployment"]; ok {
+		t.Errorf("a waiting deploy has no deployment yet: %v", out)
+	}
+	out, text, _ = callTool(t, s, "get_project", map[string]any{"project": "web"})
+	w, _ := out["waiting_deploy"].(map[string]any)
+	if w["position"] != float64(1) || w["requests"] != float64(2) {
+		t.Errorf("get_project waiting_deploy = %s", text)
+	}
+	out, text, isError = callTool(t, s, "cancel_deployment", map[string]any{"project": "web", "confirm": true})
+	if isError || out["result"] != "cancelled" {
+		t.Errorf("cancel_deployment = %s", text)
+	}
+	posts := api.posts()
+	if last := posts[len(posts)-1]; last != "DELETE /api/v1/projects/web/deployments/waiting" {
+		t.Errorf("last write = %q", last)
+	}
+
+	api.busy, api.nothingWaiting = false, true
+	out, text, _ = callTool(t, s, "get_project", map[string]any{"project": "web"})
+	if v, ok := out["waiting_deploy"]; !ok || v != nil {
+		t.Errorf("idle get_project waiting_deploy = %s", text)
+	}
+	if _, text, isError = callTool(t, s, "cancel_deployment", map[string]any{"project": "web", "confirm": true}); !isError || !strings.Contains(text, "no deploy is waiting") {
+		t.Errorf("cancel with nothing waiting = %s", text)
 	}
 }

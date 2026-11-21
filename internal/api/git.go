@@ -295,11 +295,7 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	d, err := a.Deploy.Deploy(r.Context(), p.Name, "webhook")
-	if errors.Is(err, deploy.ErrDeployInProgress) {
-		writeJSON(w, http.StatusAccepted, map[string]string{"result": "skipped", "reason": "deployment already running"})
-		return
-	}
+	d, waiting, err := a.Deploy.DeployOrQueue(r.Context(), p.Name, "webhook")
 	var adoption *projects.AdoptionError
 	if errors.As(err, &adoption) {
 		a.Logger.Warn("webhook deploy refused", "project", p.Name, "reason", adoption.Error())
@@ -308,6 +304,12 @@ func (a *API) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		a.internalError(w, "webhook deploy", err)
+		return
+	}
+	if waiting != nil {
+		a.Audit.Write(r.Context(), 0, "webhook.queue", "project", p.Name, remoteIP(r),
+			map[string]any{"provider": provider, "requests": waiting.Requests})
+		writeJSON(w, http.StatusAccepted, map[string]any{"result": "waiting", "reason": "deployment already running", "position": waiting.Position})
 		return
 	}
 	a.Audit.Write(r.Context(), 0, "webhook.deploy", "project", p.Name, remoteIP(r),

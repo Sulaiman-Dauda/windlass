@@ -22,6 +22,10 @@ var ErrNotPromotable = errors.New("cannot promote")
 // service live does not define is left out, since a pin for it would make
 // Compose start a service with nothing but an image.
 func (s *Service) Promote(ctx context.Context, stagingName string, number int64, trigger string) (db.Deployment, error) {
+	// queueMu: a waiting deploy starting at the same moment must not
+	// create a second active row that supersedes this one.
+	s.queueMu.Lock()
+	defer s.queueMu.Unlock()
 	live, _, ok, err := s.projects.LiveFor(ctx, stagingName)
 	if err != nil {
 		return db.Deployment{}, err
@@ -128,6 +132,10 @@ func (s *Service) Promote(ctx context.Context, stagingName string, number int64,
 // copies that project's data in before anything starts. It never promotes
 // itself, whatever auto-promote says.
 func (s *Service) DeployFirst(ctx context.Context, stagingName, seedFrom string) (db.Deployment, error) {
+	// queueMu: a waiting deploy starting at the same moment must not
+	// create a second active row that supersedes this one.
+	s.queueMu.Lock()
+	defer s.queueMu.Unlock()
 	return s.deploy(ctx, stagingName, "manual", payload{Seed: seedFrom, NoPromote: true})
 }
 

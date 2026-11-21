@@ -39,7 +39,7 @@ type Annotations struct {
 // Tools returns the catalogue in a stable order: the read-only tools
 // list_projects, get_project, list_deployments, get_deployment, get_logs,
 // get_staging, list_backups and check_domains, then the deploy-scope tools deploy,
-// restart, rollback, promote and create_backup. No tool returns env values
+// cancel_deployment, restart, rollback, promote and create_backup. No tool returns env values
 // or files under a project's env path, none writes files or env, and none
 // exists for routes that refuse tokens.
 func Tools() []Tool {
@@ -152,7 +152,7 @@ func catalogue() []toolDef {
 				Name:  "get_project",
 				Title: "Get a project",
 				Description: "Get one project's current state: its Compose services with container state, " +
-					"health, image, ports and limits; its domains; and its latest deployment. " +
+					"health, image, ports and limits; its domains; its latest deployment; and any deploy waiting for it to finish. " +
 					"Use this first when asked whether something is up or healthy.",
 				Annotations: readOnly,
 			},
@@ -259,13 +259,26 @@ func catalogue() []toolDef {
 				Title: "Deploy a project",
 				Description: "Deploy a project now, as the panel's Deploy button does: a Git project pulls the newest " +
 					"commit of its branch, then docker compose up runs. Returns the new deployment's number at once; " +
-					"the deployment carries on in the background, so follow it with get_deployment. Fails if a " +
-					"deployment is already running. To change what is deployed, change the code or Compose file in " +
+					"the deployment carries on in the background, so follow it with get_deployment. If a deployment " +
+					"is already running, the deploy waits and starts when it finishes: the answer says waiting, with " +
+					"no number yet, and cancel_deployment drops it. To change what is deployed, change the code or Compose file in " +
 					"Git first; this server cannot edit files or env. " + stagingHint,
 				Annotations: destructive,
 			},
 			params:   []param{projectParam, confirmParam},
 			run:      deployProject,
+			minScope: scopeDeploy,
+		},
+		{
+			Tool: Tool{
+				Name:  "cancel_deployment",
+				Title: "Cancel a waiting deploy",
+				Description: "Cancel a project's deploy that is waiting for the running deployment to finish. " +
+					"It never stops a deployment already running. get_project shows whether one is waiting.",
+				Annotations: destructive,
+			},
+			params:   []param{projectParam, confirmParam},
+			run:      cancelDeployment,
 			minScope: scopeDeploy,
 		},
 		{
