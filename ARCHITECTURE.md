@@ -58,4 +58,22 @@ rollback. The endpoint itself is removed by unmounting one route; it holds no da
 Same binary, no new dependencies, idle RSS under the 40 MiB CI budget. Built and tested on a
 local scratch instance; the live host only after a unit passes there and Pablo says go.
 
+## Additions in v0.63 (agreed 21/11/2026)
+
+Two tools and one field, each shipped in its feature's PR with its `docs/mcp.md` row and the
+`Tools()` comment updated. No locked line changes, so no relock.
+
+- `check_domains` (U9 domain checks): read-only. It calls a GET route that read tokens can use,
+  and sets `OpenWorldHint` true, because it does DNS lookups and TLS dials to outside hosts.
+- `cancel_deployment` (U11 deploy queue): deploy scope, required `confirm`. It takes a project
+  and cancels only that project's waiting deploy, never one already running. Its route sits in
+  the `RequireDeployer` group. A deploy held in the in-memory queue has the state `waiting` and
+  no deployment number: `deploy` answers `waiting` with the queue position, and `get_project`
+  shows the queue. `rollback` and `promote` keep their 409.
+- `get_staging` gains `password_protected` (U12 staging password). The bcrypt hash is never
+  returned: the project file route masks it in `.windlass.json` for anyone who cannot read
+  secrets, with a test.
+- The audit page (U10) and notification channels (U13) get no tool. Audit is admin-only, and
+  channel settings hold webhook secrets and SMTP passwords.
+
 ## Open questions
