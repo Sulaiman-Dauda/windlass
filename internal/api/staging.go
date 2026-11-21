@@ -103,7 +103,8 @@ func (a *API) handleCreateStaging(w http.ResponseWriter, r *http.Request) {
 	a.Audit.Write(r.Context(), user.ID, "project.staging_create", "project", name, remoteIP(r),
 		map[string]any{"staging": res.Project.Name, "branch": req.Branch, "copy_data": req.CopyData,
 			"auto_promote": req.AutoPromote, "deployment": res.Deployment,
-			"env_edited": sortedKeys(req.Env), "webhook_registered": res.WebhookRegistered})
+			"env_edited": sortedKeys(req.Env), "webhook_registered": res.WebhookRegistered,
+			"password_protected": !req.NoPassword})
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"project": toProjectDTO(res.Project), "result": res,
 	})
@@ -206,6 +207,55 @@ func (a *API) handleSetStaging(w http.ResponseWriter, r *http.Request) {
 	a.Audit.Write(r.Context(), user.ID, "project.staging_update", "project", name, remoteIP(r),
 		map[string]bool{"auto_promote": *req.AutoPromote})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleSetStagingPassword turns the password on staging's domains on,
+// with a new or chosen password, or off. The password is returned once.
+func (a *API) handleSetStagingPassword(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	var req struct {
+		Enabled  *bool  `json:"enabled"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "enabled is required")
+		return
+	}
+	var protect *projects.StagingProtect
+	password := ""
+	if *req.Enabled {
+		password = req.Password
+		if password == "" {
+			var err error
+			if password, err = projects.GenerateStagingPassword(); err != nil {
+				a.internalError(w, "generate staging password", err)
+				return
+			}
+		}
+		var err error
+		if protect, err = projects.NewStagingProtect(password); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	}
+	err := a.Projects.SetStagingProtect(r.Context(), name, protect)
+	switch {
+	case errors.Is(err, projects.ErrNotStaging), errors.Is(err, projects.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "project is not a staging")
+		return
+	case err != nil:
+		a.internalError(w, "set staging password", err)
+		return
+	}
+	user, _ := auth.UserFrom(r.Context())
+	a.Audit.Write(r.Context(), user.ID, "project.staging_password", "project", name, remoteIP(r),
+		map[string]bool{"enabled": *req.Enabled, "chosen": *req.Enabled && req.Password != ""})
+	if protect == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"password_protected": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"password_protected": true,
+		"password_user": protect.User, "password": password})
 }
 
 func (a *API) handlePromote(w http.ResponseWriter, r *http.Request) {

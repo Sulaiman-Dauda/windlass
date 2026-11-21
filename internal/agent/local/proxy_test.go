@@ -3,6 +3,7 @@ package local
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -422,5 +423,48 @@ func TestBuildPanelRouteRedirectsHTTP(t *testing.T) {
 	}
 	if len(proxy.Match) != 0 || proxy.Handle[0].Handler != "reverse_proxy" || proxy.Handle[0].Upstreams[0].Dial != "127.0.0.1:8080" {
 		t.Fatalf("proxy child = %+v", proxy)
+	}
+}
+
+func TestBuildRoutesObjectBasicAuthFirst(t *testing.T) {
+	hash := "$2a$12$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234"
+	obj := buildRoutesObject([]agent.Route{
+		{ID: "windlass_route_s", Hostname: "staging.example.com", Upstream: "10.0.0.2:80", TLS: true,
+			NoIndex: true, BasicAuth: &agent.RouteAuth{User: "staging", Hash: hash}},
+		{ID: "windlass_route_l", Hostname: "example.com", Upstream: "10.0.0.3:80", TLS: true},
+	})
+	data, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back caddyRoute
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	inner := back.Handle[0].Routes
+	staging, live := inner[1], inner[2]
+	if got := staging.Handle[0].Handler; got != "authentication" {
+		t.Fatalf("first handler = %s, want authentication: %s", got, data)
+	}
+	basic := staging.Handle[0].Providers.HTTPBasic
+	if basic.Hash.Algorithm != "bcrypt" || basic.HashCache == nil || len(basic.Accounts) != 1 ||
+		basic.Accounts[0].Username != "staging" ||
+		basic.Accounts[0].Password != base64.StdEncoding.EncodeToString([]byte(hash)) {
+		t.Errorf("http_basic = %+v", basic)
+	}
+	if !strings.Contains(string(data), `"hash_cache":{}`) {
+		t.Errorf("hash_cache missing: %s", data)
+	}
+	for _, h := range live.Handle {
+		if h.Handler == "authentication" {
+			t.Errorf("live route got the password: %s", data)
+		}
+	}
+	got := readAuth(staging.Handle[0])
+	if got == nil || got.User != "staging" || got.Hash != hash {
+		t.Errorf("readAuth = %+v", got)
+	}
+	if readAuth(live.Handle[0]) != nil {
+		t.Error("readAuth found auth on the live route")
 	}
 }

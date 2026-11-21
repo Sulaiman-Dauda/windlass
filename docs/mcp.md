@@ -168,7 +168,7 @@ curl -sS https://panel.example/api/v1/mcp \
 | `list_deployments` | any | Deployments newest first: number, status, trigger, commit |
 | `get_deployment` | any | One deployment and its event log, where a failure's reason is |
 | `get_logs` | any | The newest log lines of one service, scrubbed (below) |
-| `get_staging` | any | Which deployment staging and live are on, and whether a promote is possible |
+| `get_staging` | any | Which deployment staging and live are on, whether a promote is possible, and whether staging's domains have a password |
 | `list_backups` | any | Backups newest first: kind, destination, size, status |
 | `check_domains` | any | DNS, ports 80 and 443, certificate expiry, Caddy route and container for each domain |
 | `deploy` | deploy | Deploys now, as the panel's Deploy button does; a Git project pulls its branch first. While a deployment runs, the deploy waits and starts after it |

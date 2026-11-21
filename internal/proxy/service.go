@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/events"
 	"github.com/windlass-dev/windlass/internal/projects"
@@ -367,6 +369,7 @@ func (s *Service) Sync(ctx context.Context) error {
 	}
 
 	var routes []agent.Route
+	protect := map[string]stagingAuthResult{}
 	for _, d := range domains {
 		// Rows also arrive from .windlass.json, which is indexed as written,
 		// so nothing below trusts that Add saw them. Caddy matches hosts in
@@ -399,14 +402,27 @@ func (s *Service) Sync(ctx context.Context) error {
 			s.logger.Info("domain has no live upstream yet", "hostname", d.Hostname, "reason", err)
 			continue
 		}
-		routes = append(routes, agent.Route{
+		route := agent.Route{
 			ID:       "windlass_route_" + d.Hostname,
 			Hostname: d.Hostname,
 			Upstream: upstream,
 			TLS:      true,
 			// A staging site is a copy of a live one; keep it out of search.
 			NoIndex: d.StagingOf.Valid,
-		})
+		}
+		if d.StagingOf.Valid {
+			auth, err := s.stagingAuth(ctx, protect, d.ProjectName)
+			if err != nil {
+				// Fail closed: a staging whose password cannot be read is
+				// not served open. Its other routes and everyone else's
+				// still apply.
+				s.logger.Warn("staging domain not routed: its password setting could not be read",
+					"hostname", d.Hostname, "project", d.ProjectName, "error", err)
+				continue
+			}
+			route.BasicAuth = auth
+		}
+		routes = append(routes, route)
 	}
 
 	if err := s.agent.Proxy().ApplyRoutes(ctx, routes); err != nil {
@@ -414,6 +430,39 @@ func (s *Service) Sync(ctx context.Context) error {
 	}
 	s.logger.Debug("proxy routes synced", "count", len(routes))
 	return nil
+}
+
+type stagingAuthResult struct {
+	auth *agent.RouteAuth
+	err  error
+}
+
+// stagingAuth reads a staging's password from its files once per Sync.
+func (s *Service) stagingAuth(ctx context.Context, cache map[string]stagingAuthResult, project string) (*agent.RouteAuth, error) {
+	if r, ok := cache[project]; ok {
+		return r.auth, r.err
+	}
+	var r stagingAuthResult
+	p, err := s.projects.StagingProtection(ctx, project)
+	switch {
+	case err != nil:
+		r.err = err
+	case p != nil && (p.User == "" || p.Hash == ""):
+		r.err = errors.New("protect needs both user and hash")
+	case p != nil && !validBcrypt(p.Hash):
+		// Caddy refuses a bad hash and with it the whole routes object,
+		// which would hold back every project's routes, not just this one.
+		r.err = errors.New("protect hash is not a bcrypt hash")
+	case p != nil:
+		r.auth = &agent.RouteAuth{User: p.User, Hash: p.Hash}
+	}
+	cache[project] = r
+	return r.auth, r.err
+}
+
+func validBcrypt(hash string) bool {
+	_, err := bcrypt.Cost([]byte(hash))
+	return err == nil
 }
 
 // errNoRunningContainer marks the legitimate "nothing deployed yet" case, as

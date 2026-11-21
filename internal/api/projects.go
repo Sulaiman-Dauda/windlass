@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -76,6 +77,9 @@ func (a *API) projectRoutes(r chi.Router) {
 		r.Post("/{name}/staging", a.handleCreateStaging)
 		r.With(auth.RejectToken).Post("/{name}/staging/recreate", a.limitAuth(a.handleRecreateStaging))
 		r.Put("/{name}/staging", a.handleSetStaging)
+		// RejectToken: the response holds the new password, which belongs
+		// with a person at the panel, not in a token's logs.
+		r.With(auth.RejectToken).Put("/{name}/staging/password", a.handleSetStagingPassword)
 		// Member only. A token without the secrets flag gets both files
 		// masked, and Copy to live then refuses the masked content.
 		r.Get("/{name}/staging/diff/{file}", a.handleStagingDiff)
@@ -293,6 +297,8 @@ func (a *API) handleReadProjectFile(w http.ResponseWriter, r *http.Request) {
 			content = maskEnvFile(content)
 		case isYAMLFile(rel):
 			content = maskComposeFile(content)
+		case isManifestFile(rel):
+			content = maskManifestFile(content)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"path": rel, "content": content})
@@ -316,6 +322,21 @@ func (a *API) handleWriteProjectFile(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	// A caller who read this file masked would write the mask back over
 	// every secret in it. Send them to PUT /env, which keeps masked values.
+	if isManifestFile(rel) && !auth.CanReadSecrets(r.Context()) && strings.Contains(req.Content, maskedEnvValue) {
+		writeError(w, http.StatusBadRequest, "masked_values",
+			"this file contains a masked staging password hash ("+maskedEnvValue+"); "+
+				"set the staging password from the staging card instead")
+		return
+	}
+	// Tokens cannot set or turn off the staging password (the password route
+	// refuses them), so they cannot change it through the manifest either.
+	if _, isToken := auth.TokenFrom(r.Context()); isToken && isManifestFile(rel) {
+		if changed, err := a.stagingProtectChanged(r.Context(), name, req.Content); err != nil || changed {
+			writeError(w, http.StatusForbidden, "forbidden",
+				"an API token cannot change the staging password; set it from the staging card")
+			return
+		}
+	}
 	if (isEnvFile(rel) || isYAMLFile(rel)) && !auth.CanReadSecrets(r.Context()) && strings.Contains(req.Content, maskedEnvValue) {
 		writeError(w, http.StatusBadRequest, "masked_values",
 			"this file contains masked values ("+maskedEnvValue+"); set variables with PUT /env instead, which keeps them, "+
@@ -474,4 +495,49 @@ func (a *API) handleSetProjectEnv(w http.ResponseWriter, r *http.Request) {
 func (a *API) internalError(w http.ResponseWriter, op string, err error) {
 	a.Logger.Error(op, "error", err)
 	writeError(w, http.StatusInternalServerError, "internal", "internal error")
+}
+
+// isManifestFile matches the project's .windlass.json, which holds the
+// staging password hash.
+func isManifestFile(rel string) bool {
+	// The local filesystem treats a backslash as a separator, so this must too.
+	clean := path.Clean("/" + strings.ReplaceAll(rel, `\`, "/"))
+	return strings.ToLower(clean) == "/.windlass.json"
+}
+
+// bcryptRe matches a bcrypt hash anywhere, so a file that no longer parses
+// is masked too.
+var bcryptRe = regexp.MustCompile(`\$2[abxy]?\$\d{2}\$[./A-Za-z0-9]{53}`)
+
+// maskManifestFile hides the staging password hash. It is only a hash of a
+// random password, but it is the one thing in the file a person without the
+// secrets flag has no use for.
+func maskManifestFile(content string) string {
+	return bcryptRe.ReplaceAllString(content, maskedEnvValue)
+}
+
+// stagingProtectChanged reports whether content, a new .windlass.json, would
+// change the staging password the project has now. Content that does not
+// parse changes nothing here; the write itself rejects it.
+func (a *API) stagingProtectChanged(ctx context.Context, name, content string) (bool, error) {
+	current, err := a.Projects.StagingProtection(ctx, name)
+	if err != nil {
+		return false, err
+	}
+	var next struct {
+		Staging *struct {
+			Protect *projects.StagingProtect `json:"protect"`
+		} `json:"staging"`
+	}
+	if json.Unmarshal([]byte(content), &next) != nil {
+		return current != nil, nil
+	}
+	var proposed *projects.StagingProtect
+	if next.Staging != nil {
+		proposed = next.Staging.Protect
+	}
+	if current == nil || proposed == nil {
+		return current != proposed, nil
+	}
+	return *current != *proposed, nil
 }
