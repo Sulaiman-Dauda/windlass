@@ -83,10 +83,15 @@ Windlass checks every 30 seconds that its routes are still there, and puts them 
 they are not, so an outage from a reload lasts about half a minute. Restarting Windlass
 restores them at once.
 
+On a server where the installer set up Caddy, it also makes Caddy resume the routes it had,
+so a restart keeps every domain serving and a reload does nothing. See
+[Caddy restarts and reboots](./install.md#caddy-restarts-and-reboots).
+
 ## If Windlass stops
 
 Caddy keeps serving every route it already has, including yours. Certificates continue to
 renew, because Caddy renews them, not Windlass. What stops is the ability to add or change
 routes from the panel until it is running again, and the restore after a Caddy reload: if
 Caddy reloads or restarts while Windlass is stopped, application domains and the panel's
-hostname stay down until Windlass starts.
+hostname stay down until Windlass starts, unless Caddy resumes its routes (the installer's
+default, see above).

@@ -62,7 +62,9 @@ the Windlass container joins, rather than on host loopback. Self-update is off i
 Windlass talks to Caddy's admin API on `127.0.0.1:2019`. On a server without Caddy, the
 installer replaces the package's welcome site with a Caddyfile that only sets that admin
 address, keeping the original as `/etc/caddy/Caddyfile.default.bak`. A Caddy that was already
-installed is left as it was.
+installed keeps its own Caddyfile. When the Caddyfile is the admin-only one, the installer
+also adds a systemd drop-in so Caddy resumes its routes after a restart, on a fresh install, a
+rerun, or `--caddy-resume`.
 
 Windlass changes only the objects it owns, by `@id`: `windlass_routes`, `windlass_panel_route`
 and their `windlass_route_*` children. It never loads or replaces the whole configuration, so

@@ -429,6 +429,10 @@ const (
 	// systemd service, or cannot be read from here (container installs).
 	// Windlass leaves its restart behaviour alone.
 	ResumeNotOurs CaddyResume = "not_ours"
+	// ResumeIgnoresCaddyfile: the drop-in is there but the Caddyfile is no
+	// longer the admin-only one, so Caddy ignores its edits on reload and
+	// restart. Removing the drop-in hands Caddy back to the Caddyfile.
+	ResumeIgnoresCaddyfile CaddyResume = "ignores_caddyfile"
 )
 
 type ProxyInfo struct {

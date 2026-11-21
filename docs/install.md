@@ -119,7 +119,9 @@ curl -fsSL https://get.windlass.run | sudo sh -s -- --caddy-resume
 ```
 
 A Caddy with its own Caddyfile is left alone, because resuming would ignore later edits to that
-file. Windlass still puts its routes back as soon as it sees them gone. To undo the drop-in:
+file. Windlass still puts its routes back as soon as it sees them gone. The same holds the
+other way: while the drop-in exists, Caddy ignores edits to the Caddyfile, and if the file
+stops being the admin-only one, Needs you says so with the undo command. To undo the drop-in:
 
 ```sh
 sudo rm /etc/systemd/system/caddy.service.d/windlass-resume.conf

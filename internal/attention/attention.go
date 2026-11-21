@@ -336,6 +336,10 @@ func (s *Service) proxyItem(ctx context.Context, haveDomains bool) (Item, bool) 
 // ResumeCommand reruns the installer for its Caddy step only.
 const ResumeCommand = "curl -fsSL https://get.windlass.run | sudo sh -s -- --caddy-resume"
 
+// UndoResumeCommand removes the installer's drop-in.
+const UndoResumeCommand = "sudo rm /etc/systemd/system/caddy.service.d/windlass-resume.conf && " +
+	"sudo systemctl daemon-reload && sudo systemctl restart caddy"
+
 // resumeItem reports a Caddy the installer set up that still starts from
 // its admin-only Caddyfile, so every domain goes offline on a Caddy restart
 // until Windlass puts the routes back. Servers that update themselves never
@@ -345,7 +349,17 @@ func (s *Service) resumeItem(ctx context.Context, haveDomains bool) (Item, bool)
 		return Item{}, false
 	}
 	state, err := s.agent.Proxy().ResumeState(ctx)
-	if err != nil || state != agent.ResumeOff {
+	if err != nil {
+		return Item{}, false
+	}
+	if state == agent.ResumeIgnoresCaddyfile {
+		return Item{Kind: KindCaddyResume, Tone: ToneWarn,
+			Title: "Caddy ignores edits to its Caddyfile",
+			Detail: "The Windlass resume drop-in makes Caddy start from the routes it last had, and this server's " +
+				"Caddyfile has changed since it was added. Run this on the server to hand Caddy back to the Caddyfile.",
+			Command: UndoResumeCommand}, true
+	}
+	if state != agent.ResumeOff {
 		return Item{}, false
 	}
 	return Item{Kind: KindCaddyResume, Tone: ToneWarn,

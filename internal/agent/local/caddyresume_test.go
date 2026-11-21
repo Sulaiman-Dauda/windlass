@@ -33,6 +33,7 @@ func TestCaddyResumeState(t *testing.T) {
 		{"user caddyfile", true, "example.com {\n\treverse_proxy :3000\n}\n", "", agent.ResumeNotOurs},
 		{"ours, no drop-in", true, ours, "", agent.ResumeOff},
 		{"ours, drop-in without resume", true, ours, "[Service]\n", agent.ResumeOff},
+		{"user caddyfile, drop-in", true, "example.com {\n\treverse_proxy :3000\n}\n", "ExecStart=caddy run --resume\n", agent.ResumeIgnoresCaddyfile},
 		{"ours, drop-in", true, ours, "[Service]\nExecStart=\nExecStart=/usr/bin/caddy run --environ --resume --config /etc/caddy/Caddyfile\n", agent.ResumeOn},
 	}
 	for _, c := range cases {

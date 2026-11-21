@@ -70,11 +70,13 @@ caddy_resume() {
     log "Caddy has its own Caddyfile; leaving its restart behaviour alone"
     return 0
   fi
-  CADDY_BIN=$(command -v caddy) || { warn "caddy not found"; return 0; }
-  mkdir -p "$(dirname "$CADDY_DROPIN")"
-  cat > "$CADDY_DROPIN" <<DROPIN
+  # The packaged unit runs /usr/bin/caddy; keep that build when it is there.
+  CADDY_BIN=/usr/bin/caddy
+  [ -x "$CADDY_BIN" ] || CADDY_BIN=$(command -v caddy) || { warn "caddy not found"; return 0; }
+  WANT=$(cat <<DROPIN
 # Written by the Windlass installer. Caddy starts from the config Windlass last
-# applied, so domains keep serving across a Caddy restart. A reload is a no-op.
+# applied, so domains keep serving across a Caddy restart. A reload is a no-op,
+# and Caddy ignores later edits to /etc/caddy/Caddyfile while this file exists.
 # Undo: rm $CADDY_DROPIN && systemctl daemon-reload && systemctl restart caddy
 [Service]
 ExecStart=
@@ -82,10 +84,34 @@ ExecStart=$CADDY_BIN run --environ --resume --config /etc/caddy/Caddyfile
 ExecReload=
 ExecReload=/bin/true
 DROPIN
+)
+  if [ -f "$CADDY_DROPIN" ] && [ "$(cat "$CADDY_DROPIN")" = "$WANT" ]; then
+    ok "Caddy already resumes its routes after a restart"
+    return 0
+  fi
+  [ -f "$CADDY_DROPIN" ] && cp "$CADDY_DROPIN" "$CADDY_DROPIN.bak"
+  mkdir -p "$(dirname "$CADDY_DROPIN")"
+  printf '%s\n' "$WANT" > "$CADDY_DROPIN"
   systemctl daemon-reload
-  # A restart now resumes the running config, so no route is lost.
-  systemctl restart caddy 2>/dev/null || warn "restart caddy by hand: systemctl restart caddy"
-  ok "Caddy resumes its routes after a restart"
+  # Only restart a Caddy that was running; a restart resumes the running
+  # config, so no route is lost.
+  if ! systemctl is-active --quiet caddy; then
+    rm -f "$CADDY_DROPIN.bak"
+    ok "Caddy will resume its routes after a restart (it is not running now)"
+    return 0
+  fi
+  if systemctl restart caddy; then
+    rm -f "$CADDY_DROPIN.bak"
+    ok "Caddy resumes its routes after a restart"
+    return 0
+  fi
+  # Put Caddy back as it was rather than leave every domain offline.
+  warn "Caddy did not start with --resume; removing the drop-in"
+  if [ -f "$CADDY_DROPIN.bak" ]; then mv -f "$CADDY_DROPIN.bak" "$CADDY_DROPIN"; else rm -f "$CADDY_DROPIN"; fi
+  systemctl daemon-reload
+  systemctl restart caddy || warn "Caddy is not running: check journalctl -u caddy"
+  [ "$ONLY_CADDY_RESUME" = "1" ] && fail "Caddy resume not applied"
+  return 0
 }
 
 if [ "$ONLY_CADDY_RESUME" = "1" ]; then

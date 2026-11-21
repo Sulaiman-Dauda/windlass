@@ -364,6 +364,10 @@ func TestCaddyResumeRow(t *testing.T) {
 		t.Fatalf("Caddy down shows only the proxy row: %s", got)
 	}
 	e.agent.ProxyAvailable = true
+	e.agent.Resume = agent.ResumeIgnoresCaddyfile
+	if items := e.list(t); len(items) != 1 || items[0].Command != UndoResumeCommand {
+		t.Fatalf("drop-in over a changed Caddyfile: %+v", items)
+	}
 	for _, state := range []agent.CaddyResume{agent.ResumeOn, agent.ResumeNotOurs} {
 		e.agent.Resume = state
 		if items := e.list(t); len(items) != 0 {
