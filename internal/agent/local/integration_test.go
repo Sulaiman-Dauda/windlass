@@ -77,10 +77,13 @@ func TestListContainersRealDocker(t *testing.T) {
 		t.Errorf("Logs: %v", err)
 	}
 
-	// Stats returns one sample for the running container.
-	stats, err := l.Docker().Stats(ctx, []string{c.ID})
-	if err != nil || len(stats) != 1 {
-		t.Errorf("Stats = %+v, %v", stats, err)
+	// Stats returns one sample for the running container, with memory in
+	// use, both one-shot and with the CPU sample.
+	for _, withCPU := range []bool{false, true} {
+		stats, err := l.Docker().Stats(ctx, []string{c.ID}, withCPU)
+		if err != nil || len(stats) != 1 || stats[0].MemoryBytes == 0 {
+			t.Errorf("Stats(withCPU=%v) = %+v, %v", withCPU, stats, err)
+		}
 	}
 }
 
