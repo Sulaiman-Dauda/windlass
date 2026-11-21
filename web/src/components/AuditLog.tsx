@@ -9,7 +9,7 @@ import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
 import { formatDateTime, timeAgo } from "../ui/format";
 
-export interface AuditEntry {
+interface AuditEntry {
   id: number;
   ts: string;
   user_id: number | null;
