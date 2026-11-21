@@ -111,7 +111,9 @@ services:
 ```
 
 The project overview shows the limit each service gets, from either form. When both are
-set, `mem_limit` and `cpus` are the ones shown.
+set, `mem_limit` and `cpus` are the ones shown. Beside the limit it shows the memory each
+running container uses now, the same figure as `docker stats`, refreshed every 5 seconds
+while the overview is open.
 
 ## Application health
 

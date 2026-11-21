@@ -48,7 +48,7 @@ function healthTone(health: string): Tone {
 }
 
 export default function OverviewTab({ project }: { project: string }) {
-  const services = useServices(project);
+  const services = useServices(project, 5000, true);
   const list = services.data?.services ?? [];
 
   return (
@@ -79,7 +79,7 @@ export default function OverviewTab({ project }: { project: string }) {
                   <th className="h-9 px-5 font-medium">Service</th>
                   <th className="h-9 px-4 font-medium">Status</th>
                   <th className="h-9 px-4 font-medium">Image</th>
-                  <th className="h-9 px-5 text-right font-medium">Limits</th>
+                  <th className="h-9 px-5 text-right font-medium">Memory</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
@@ -124,8 +124,22 @@ export default function OverviewTab({ project }: { project: string }) {
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-5 py-3 text-right text-xs text-fg2">
-                        {s.memory_limit ? formatBytes(s.memory_limit) : <span className="text-fg3">No memory cap</span>}
-                        {s.cpu_limit ? `, ${s.cpu_limit} CPU` : ""}
+                        <div>
+                          {s.memory_bytes ? (
+                            <span className="font-medium text-fg">{formatBytes(s.memory_bytes)}</span>
+                          ) : (
+                            <span className="text-fg3">
+                              {s.state === "running" ? "No reading" : "Not running"}
+                            </span>
+                          )}
+                          {s.memory_limit ? (
+                            <span> of {formatBytes(s.memory_limit)}</span>
+                          ) : null}
+                        </div>
+                        <div className="mt-1 text-fg3">
+                          {s.memory_limit ? "Capped" : "No memory cap"}
+                          {s.cpu_limit ? `, ${s.cpu_limit} CPU` : ""}
+                        </div>
                       </td>
                     </tr>
                   );

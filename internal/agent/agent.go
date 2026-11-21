@@ -158,6 +158,9 @@ type ServiceStatus struct {
 	// ContainerPorts are the ports compose.yaml declares for the service,
 	// so a domain form can offer them instead of guessing.
 	ContainerPorts []int `json:"container_ports,omitempty"`
+	// MemoryBytes is the container's memory in use, as docker stats shows
+	// it. Set only when the caller asks for stats and the container runs.
+	MemoryBytes uint64 `json:"memory_bytes,omitempty"`
 }
 
 type PortBinding struct {
@@ -241,7 +244,11 @@ type DockerAgent interface {
 	ListContainers(ctx context.Context, filter ContainerFilter) ([]Container, error)
 	// Logs streams container output; follow=false returns the tail and ends.
 	Logs(ctx context.Context, containerID string, opts LogOpts, out LogSink) error
-	Stats(ctx context.Context, containerIDs []string) ([]ContainerStats, error)
+	// Stats reads one sample per container, in parallel. withCPU makes the
+	// daemon take a second sample a second later so CPUPercent is set;
+	// without it the read returns at once and CPUPercent is 0. A container
+	// that has gone away is left out rather than failing the call.
+	Stats(ctx context.Context, containerIDs []string, withCPU bool) ([]ContainerStats, error)
 	// ImageTag applies a tag to an existing image (rollback bookkeeping).
 	ImageTag(ctx context.Context, source, target string) error
 	// ImageDigest resolves an image reference to its content digest.

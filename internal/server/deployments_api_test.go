@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -80,6 +81,12 @@ func TestDeploymentAPIEndToEnd(t *testing.T) {
 	if !strings.Contains(body, `"web"`) || !strings.Contains(body, `"container_ports":[8080]`) ||
 		!strings.Contains(body, `"memory_limit":268435456`) {
 		t.Fatalf("services = %s", body)
+	}
+
+	// Without ?stats=1 the endpoint never asks Docker for stats, so the
+	// tabs that poll it stay cheap.
+	if strings.Contains(strings.Join(e.agent.Calls, "|"), "docker.stats") {
+		t.Fatalf("services read stats unasked: %v", e.agent.Calls)
 	}
 
 	// Actions run compose commands.
@@ -169,5 +176,39 @@ func TestDeploymentSSEReplay(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(500 * time.Millisecond):
+	}
+}
+
+// TestServicesMemory checks ?stats=1 adds memory in use for running
+// containers only, and that a stats failure still returns the services.
+func TestServicesMemory(t *testing.T) {
+	e := newTestEnv(t)
+	cookie := e.login(t)
+	e.prepareDeployableProject(t, cookie, "app")
+	e.agent.Statuses["app"] = []agent.ServiceStatus{
+		{Service: "web", Name: "app-web-1", State: "running"},
+		{Service: "job", Name: "app-job-1", State: "exited"},
+	}
+	e.agent.Stats = map[string]agent.ContainerStats{
+		"app-web-1": {MemoryBytes: 42 << 20},
+		"app-job-1": {MemoryBytes: 7},
+	}
+
+	rec := e.do(t, http.MethodGet, "/api/v1/projects/app/services?stats=1", nil, cookie)
+	var got struct {
+		Services []agent.ServiceStatus `json:"services"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got.Services) != 2 {
+		t.Fatalf("services = %d %s", rec.Code, rec.Body.String())
+	}
+	if got.Services[0].MemoryBytes != 42<<20 || got.Services[1].MemoryBytes != 0 {
+		t.Fatalf("memory = %d, %d", got.Services[0].MemoryBytes, got.Services[1].MemoryBytes)
+	}
+
+	e.agent.Fail["docker.stats"] = errors.New("proxy down")
+	rec = e.do(t, http.MethodGet, "/api/v1/projects/app/services?stats=1", nil, cookie)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"app-web-1"`) ||
+		strings.Contains(rec.Body.String(), "memory_bytes") {
+		t.Fatalf("stats failure = %d %s", rec.Code, rec.Body.String())
 	}
 }

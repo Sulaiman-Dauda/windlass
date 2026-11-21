@@ -231,5 +231,34 @@ func (a *API) handleProjectServices(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if r.URL.Query().Get("stats") == "1" {
+		a.addServiceMemory(r.Context(), statuses)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"services": statuses})
+}
+
+// addServiceMemory fills MemoryBytes for running containers. Stats are an
+// extra, so a failed read leaves the services list as it was.
+func (a *API) addServiceMemory(ctx context.Context, statuses []agent.ServiceStatus) {
+	var names []string
+	for _, s := range statuses {
+		if s.State == "running" {
+			names = append(names, s.Name)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	stats, err := a.Agent.Docker().Stats(ctx, names, false)
+	if err != nil {
+		a.Logger.Warn("services: container stats", "error", err)
+		return
+	}
+	byName := make(map[string]uint64, len(stats))
+	for _, st := range stats {
+		byName[st.ContainerID] = st.MemoryBytes
+	}
+	for i := range statuses {
+		statuses[i].MemoryBytes = byName[statuses[i].Name]
+	}
 }
