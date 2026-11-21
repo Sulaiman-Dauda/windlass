@@ -124,9 +124,12 @@ func TestCleanupRealDocker(t *testing.T) {
 		t.Error("the image a running container uses was touched")
 	}
 
-	// Other packages build on the same daemon while this test runs, so the
-	// daemon-wide total can grow during the trim. Compare only the records
-	// that were there before it.
+	// Other packages build on the same daemon while this test runs, so
+	// daemon-wide totals can grow during the trim. Behind the installer's
+	// proxy the cache lives in a running buildx container's state volume,
+	// which only the total counts, so that part is the total less the
+	// daemon builder's records.
+	proxied := runningBuilder(ctx, t)
 	recordsBefore := cacheRecords(ctx, t, l)
 	cache, err := l.Docker().PruneBuildCache(ctx, 0)
 	if err != nil {
@@ -140,22 +143,26 @@ func TestCleanupRealDocker(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("build cache %d -> %d bytes daemon-wide, %d reported freed", before.BuildCache.Bytes, after.BuildCache.Bytes, cache.ReclaimedBytes)
-	if len(recordsBefore) > 0 {
-		// Docker's own builder: its records list every cache entry.
-		recordsAfter := cacheRecords(ctx, t, l)
-		var was, kept int64
-		for id, size := range recordsBefore {
-			was += size
-			kept += recordsAfter[id]
-		}
-		t.Logf("records present before the trim: %d -> %d bytes", was, kept)
+	recordsAfter := cacheRecords(ctx, t, l)
+	if proxied {
+		was := before.BuildCache.Bytes - sumSizes(recordsBefore)
+		kept := after.BuildCache.Bytes - sumSizes(recordsAfter)
+		t.Logf("buildx builder state: %d -> %d bytes", was, kept)
 		if kept >= was {
-			t.Errorf("no build cache record present before the trim was removed: %d -> %d bytes", was, kept)
+			t.Errorf("the buildx builder's cache did not shrink: %d -> %d bytes", was, kept)
 		}
-	} else if after.BuildCache.Bytes >= before.BuildCache.Bytes {
-		// A buildx container builder keeps its cache in its state volume,
-		// which only the total counts.
-		t.Errorf("build cache did not shrink: %d -> %d", before.BuildCache.Bytes, after.BuildCache.Bytes)
+	} else {
+		// By ID, not bytes: another build's record can grow meanwhile.
+		removed := 0
+		for id := range recordsBefore {
+			if _, ok := recordsAfter[id]; !ok {
+				removed++
+			}
+		}
+		t.Logf("%d of %d build cache records present before the trim removed", removed, len(recordsBefore))
+		if removed == 0 {
+			t.Errorf("no build cache record present before the trim was removed (%d records)", len(recordsBefore))
+		}
 	}
 
 	// Behind the proxy: a stopped builder keeps its cache, and the run
@@ -193,4 +200,23 @@ func cacheRecords(ctx context.Context, t *testing.T, l *Local) map[string]int64 
 		records[r.ID] = r.Size
 	}
 	return records
+}
+
+func sumSizes(records map[string]int64) int64 {
+	var n int64
+	for _, size := range records {
+		n += size
+	}
+	return n
+}
+
+// runningBuilder reports whether a buildx docker-container builder is up,
+// which is where builds go behind the installer's socket proxy.
+func runningBuilder(ctx context.Context, t *testing.T) bool {
+	t.Helper()
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-q", "--filter", "name=^"+builderPrefix).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out)) != ""
 }

@@ -1525,9 +1525,10 @@ function DiskWarningSection() {
     onSettled: () => qc.invalidateQueries({ queryKey: ["system", "attention"] }),
   });
 
-  if (state.isError || !state.data) return null;
+  // Cached data stays on screen if a background refetch fails.
+  if (!state.data) return null;
   const { min, max, defaults, settings } = state.data;
-  const dirty = value !== String(settings.disk_percent);
+  const dirty = value === "" || Number(value) !== settings.disk_percent;
 
   return (
     <Card>
