@@ -105,6 +105,7 @@ export default function Settings() {
               <UpdateSection />
               <DockerStorageSection />
               <DiskWarningSection />
+              <TagSuggestionSection />
             </>
           )}
         </div>
@@ -1564,6 +1565,47 @@ function DiskWarningSection() {
           Save
         </Button>
       </CardFooter>
+    </Card>
+  );
+}
+
+interface DeploySettings {
+  tag_suggestions: boolean;
+}
+
+function TagSuggestionSection() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const state = useQuery<DeploySettings>({
+    queryKey: ["system", "deploy", "settings"],
+    queryFn: () => api("/system/deploy/settings"),
+    retry: false,
+  });
+  const save = useMutation<DeploySettings, Error, boolean>({
+    mutationFn: (tag_suggestions) =>
+      api("/system/deploy/settings", { method: "PUT", body: JSON.stringify({ tag_suggestions }) }),
+    onSuccess: (data) => {
+      qc.setQueryData(["system", "deploy", "settings"], data);
+      toast.ok(data.tag_suggestions ? "Tag suggestions on" : "Tag suggestions off");
+    },
+  });
+
+  if (!state.data) return null;
+  return (
+    <Card>
+      <CardHeader title="Missing image tags" />
+      <div className="space-y-3 px-5 py-4">
+        <Switch
+          checked={save.isPending ? save.variables : state.data.tag_suggestions}
+          disabled={save.isPending}
+          onChange={(next) => save.mutate(next)}
+          label="Suggest the nearest tag"
+          description="When a deploy fails because a Docker Hub image tag does not exist, Windlass asks Docker Hub for the image's tags and shows the closest ones. Only the image name is sent. Other registries are not asked."
+        />
+        <div className="empty:hidden">
+          <FormError error={save.error} fallback="Could not save the setting" />
+        </div>
+      </div>
     </Card>
   );
 }

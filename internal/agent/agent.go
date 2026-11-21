@@ -288,6 +288,12 @@ type DockerAgent interface {
 	// a container created from it reports. A reference with no local image
 	// is an error.
 	ImageID(ctx context.Context, ref string) (string, error)
+	// HubTags lists the tags of a public Docker Hub repository, given as
+	// namespace/name ("library/nginx"), most recently pushed first. A
+	// non-empty contains keeps only tags with that text in them. It reads at
+	// most a few hundred tags. A repository Docker Hub does not serve
+	// publicly is an error.
+	HubTags(ctx context.Context, repository, contains string) ([]string, error)
 }
 
 // DiskUsage is Docker's disk use by kind. Reclaimable is what Docker counts

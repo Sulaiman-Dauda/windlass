@@ -37,6 +37,9 @@ type Fake struct {
 	// Files is the in-memory project filesystem: project → relpath → content.
 	Files map[string]map[string][]byte
 
+	// HubTags returned by Docker().HubTags, keyed by namespace/name.
+	HubTags map[string][]string
+
 	// Containers returned by Docker().ListContainers.
 	Containers []agent.Container
 	// Statuses returned by Compose().PS, keyed by project.
@@ -350,6 +353,25 @@ func (d dockerFake) ImageID(ctx context.Context, ref string) (string, error) {
 		return "", fmt.Errorf("no such image: %s", ref)
 	}
 	return id, nil
+}
+
+func (d dockerFake) HubTags(ctx context.Context, repository, contains string) ([]string, error) {
+	if err := d.f.record(fmt.Sprintf("docker.hubtags(%s)", repository), nil); err != nil {
+		return nil, err
+	}
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	tags, ok := d.f.HubTags[repository]
+	if !ok {
+		return nil, fmt.Errorf("docker hub: repository not found or not public")
+	}
+	var out []string
+	for _, t := range tags {
+		if strings.Contains(t, contains) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func (d dockerFake) DiskUsage(ctx context.Context) (agent.DiskUsage, error) {
