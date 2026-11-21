@@ -136,6 +136,18 @@ func TestCleanupRealDocker(t *testing.T) {
 	t.Logf("build cache %d -> %d bytes, buildx reported %d freed", before.BuildCache.Bytes, after.BuildCache.Bytes, cache.ReclaimedBytes)
 	if after.BuildCache.Bytes >= before.BuildCache.Bytes {
 		t.Errorf("build cache did not shrink: %d -> %d", before.BuildCache.Bytes, after.BuildCache.Bytes)
+		// Runner images change Docker and buildx without notice: record
+		// what this one runs and what the cache still holds.
+		for _, args := range [][]string{
+			{"version", "--format", "engine {{.Server.Version}}, client {{.Client.Version}}"},
+			{"buildx", "version"},
+			{"buildx", "ls"},
+			{"system", "df", "-v"},
+			{"buildx", "du", "--verbose"},
+		} {
+			out, _ := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
+			t.Logf("docker %s:\n%s", strings.Join(args, " "), out)
+		}
 	}
 
 	// Behind the proxy: a stopped builder keeps its cache, and the run
