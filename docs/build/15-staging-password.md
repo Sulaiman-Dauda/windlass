@@ -33,7 +33,8 @@ Windlass stops.
 ## Touches
 
 - `internal/projects/`, `internal/staging/`, `internal/proxy/`, `internal/deploy/`,
-  `internal/agent/`, `internal/api/`, `internal/mcp/tools.go` (description only),
+  `internal/agent/`, `internal/api/`, `internal/server/` (tests), `internal/mcp/tools.go`
+  (description only),
   `api/openapi.yaml`, `docs/`, `web/src/`
 
 ## Leaves alone
