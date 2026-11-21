@@ -170,6 +170,7 @@ curl -sS https://panel.example/api/v1/mcp \
 | `get_logs` | any | The newest log lines of one service, scrubbed (below) |
 | `get_staging` | any | Which deployment staging and live are on, and whether a promote is possible |
 | `list_backups` | any | Backups newest first: kind, destination, size, status |
+| `check_domains` | any | DNS, ports 80 and 443, certificate expiry, Caddy route and container for each domain |
 | `deploy` | deploy | Deploys now, as the panel's Deploy button does; a Git project pulls its branch first |
 | `restart` | deploy | Restarts the project's containers |
 | `rollback` | deploy | Redeploys an earlier deployment, images pinned to its digests |

@@ -124,7 +124,7 @@ Eighty-eight paths in the OpenAPI spec, grouped roughly as:
 | --- | --- |
 | Projects | `GET/POST /projects`, `GET/PUT /projects/{name}/files/{path}`, `GET/PUT /projects/{name}/env` |
 | Deployments | `GET/POST /projects/{name}/deployments`, `POST /projects/{name}/deployments/{number}/rollback` |
-| Domains | `GET/POST /projects/{name}/domains`, `DELETE /projects/{name}/domains/{hostname}` |
+| Domains | `GET/POST /projects/{name}/domains`, `GET /projects/{name}/domains/check`, `DELETE /projects/{name}/domains/{hostname}` |
 | Backups | `GET/POST /projects/{name}/backups`, `POST /projects/{name}/backups/{id}/restore`, `GET/PUT /projects/{name}/backups/schedule` |
 | Runtime | `GET /projects/{name}/services`, `GET /projects/{name}/logs`, `GET /projects/{name}/drift`, `GET /projects/{name}/terminal` |
 | Platform | `GET /system/metrics`, `GET /system/attention`, `GET/PUT /system/docker/cleanup`, `GET /system/preflight`, `GET/POST /system/update`, `GET /proxy/status`, `GET /events` |

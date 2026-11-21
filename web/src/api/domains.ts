@@ -39,3 +39,23 @@ export function useRemoveDomain(project: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects", project, "domains"] }),
   });
 }
+
+export type CheckResult = "ok" | "unknown" | "warn" | "fail";
+
+export interface DomainCheck {
+  hostname: string;
+  service: string;
+  result: CheckResult;
+  addresses: string[];
+  cert_expiry?: string;
+  checked_at: string;
+  checks: { name: "dns" | "ports" | "certificate" | "route" | "container"; result: CheckResult; detail: string }[];
+}
+
+// useCheckDomains runs the domain check on demand: it does DNS lookups and
+// TLS dials, so it never polls.
+export function useCheckDomains(project: string) {
+  return useMutation({
+    mutationFn: () => api<DomainCheck[]>(`/projects/${project}/domains/check`),
+  });
+}

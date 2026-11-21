@@ -38,7 +38,7 @@ type Annotations struct {
 
 // Tools returns the catalogue in a stable order: the read-only tools
 // list_projects, get_project, list_deployments, get_deployment, get_logs,
-// get_staging and list_backups, then the deploy-scope tools deploy,
+// get_staging, list_backups and check_domains, then the deploy-scope tools deploy,
 // restart, rollback, promote and create_backup. No tool returns env values
 // or files under a project's env path, none writes files or env, and none
 // exists for routes that refuse tokens.
@@ -108,6 +108,13 @@ var projectParam = param{
 }
 
 var readOnly = Annotations{ReadOnlyHint: true, DestructiveHint: false, IdempotentHint: true, OpenWorldHint: false}
+
+// readOnlyOpenWorld is for read tools that reach outside hosts, as DNS
+// lookups and TLS dials do.
+var readOnlyOpenWorld = Annotations{ReadOnlyHint: true, DestructiveHint: false, IdempotentHint: true, OpenWorldHint: true}
+
+// hostnameRE is a lower-case DNS name of two labels or more.
+var hostnameRE = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // destructive is for tools that change what is running: Claude and other
 // clients ask the user before each call.
@@ -227,6 +234,24 @@ func catalogue() []toolDef {
 				description: fmt.Sprintf("How many backups to return, newest first. Default 50, at most %d.", MaxListItems),
 			}},
 			run: listBackups,
+		},
+		{
+			Tool: Tool{
+				Name:  "check_domains",
+				Title: "Check domains",
+				Description: "Check a project's domains from the server: whether DNS points at this server " +
+					"(Cloudflare-proxied records named as such), whether Caddy accepts connections on 80 and 443, " +
+					"the certificate Caddy serves and when it expires, whether Caddy has the route, and whether " +
+					"the service's container is running. Each check is ok, warn, fail or unknown with a reason. " +
+					"It runs on the server, so it proves the listener, not an outside firewall. Use it when a " +
+					"domain does not load or HTTPS fails.",
+				Annotations: readOnlyOpenWorld,
+			},
+			params: []param{projectParam, {
+				name: "hostname", kind: kindString, pattern: hostnameRE, maxLen: 253,
+				description: "Check only this domain. Default: every domain of the project.",
+			}},
+			run: checkDomains,
 		},
 		{
 			Tool: Tool{

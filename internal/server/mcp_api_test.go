@@ -133,6 +133,7 @@ func TestMCPThroughTheRouter(t *testing.T) {
 		"get_logs":         {"project": "app"},
 		"get_staging":      {"project": "app"},
 		"list_backups":     {"project": "app"},
+		"check_domains":    {"project": "app"},
 	}
 	// A read token sees exactly the read tools, and the test calls each.
 	if listed := e.mcpList(t, read.Token); len(listed) != len(calls) {

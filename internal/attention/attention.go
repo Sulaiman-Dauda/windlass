@@ -1,7 +1,7 @@
 // Package attention lists what on the server needs a person: a project whose
 // last deploy failed, a disk nearly full, a project with volumes and no
-// backup schedule, a project whose containers differ from its files, Caddy
-// not answering, a panel update. The dashboard shows the list; alerts send
+// backup schedule, a project whose containers differ from its files, a
+// domain whose DNS points elsewhere, Caddy not answering, a panel update. The dashboard shows the list; alerts send
 // the same conditions when they change.
 //
 // It only reads. One check costs a handful of SQLite queries, one container
@@ -114,6 +114,11 @@ type Service struct {
 	driftRows    []Item
 	driftExpiry  time.Time
 	driftRunning bool
+
+	dnsMu      sync.Mutex
+	dnsRows    []Item
+	dnsExpiry  time.Time
+	dnsRunning bool
 }
 
 // New returns a Service. update may be nil, which leaves the update row out.
@@ -191,6 +196,7 @@ func (s *Service) build(ctx context.Context) (List, error) {
 	} else {
 		s.logger.Debug("attention: list containers", "error", err)
 	}
+	list.Items = append(list.Items, s.dnsItems(domains)...)
 	haveDomains := s.haveDomains(ctx, len(domains) > 0)
 	if item, ok := s.proxyItem(ctx, haveDomains); ok {
 		list.Items = append(list.Items, item)

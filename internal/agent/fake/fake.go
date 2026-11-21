@@ -117,8 +117,11 @@ type Fake struct {
 
 	Metrics       agent.HostMetrics
 	HTTPResponses map[string]agent.HTTPCheckResult
-	ImageUsage    agent.ImageDiskUsage
-	PruneResult   agent.ImagePruneResult
+	// Probes is what Host().ProbeDomain returns, keyed by hostname; a
+	// hostname not in it gets HealthyProbe, so domains read as working.
+	Probes      map[string]agent.DomainProbe
+	ImageUsage  agent.ImageDiskUsage
+	PruneResult agent.ImagePruneResult
 	// PruneReqs records each PruneImages request; CacheKeeps the limit of
 	// each PruneBuildCache call.
 	PruneReqs   []agent.ImagePruneReq
@@ -908,6 +911,28 @@ func (h hostFake) HTTPCheck(ctx context.Context, req agent.HTTPCheckReq) (agent.
 		return agent.HTTPCheckResult{StatusCode: 200}, nil
 	}
 	return response, nil
+}
+
+func (h hostFake) ProbeDomain(ctx context.Context, hostname string) (agent.DomainProbe, error) {
+	if err := h.f.record("host.probedomain("+hostname+")", nil); err != nil {
+		return agent.DomainProbe{}, err
+	}
+	h.f.mu.Lock()
+	defer h.f.mu.Unlock()
+	if p, ok := h.f.Probes[hostname]; ok {
+		return p, nil
+	}
+	return HealthyProbe(time.Now()), nil
+}
+
+// HealthyProbe is a domain whose DNS points at the server, with Caddy
+// listening and a trusted certificate 60 days from expiry.
+func HealthyProbe(now time.Time) agent.DomainProbe {
+	return agent.DomainProbe{
+		Addresses: []string{"203.0.113.10"}, Local: []string{"203.0.113.10"}, Outbound: "203.0.113.10",
+		Listen80: true, Listen443: true,
+		Cert: &agent.CertInfo{Issuer: "Let's Encrypt R11", NotAfter: now.Add(60 * 24 * time.Hour).UTC(), Trusted: true},
+	}
 }
 
 func (h hostFake) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.LogSink) (agent.GitSyncResult, error) {
