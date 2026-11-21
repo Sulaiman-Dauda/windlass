@@ -77,7 +77,7 @@ export function Page({
       <div className="mx-auto w-full max-w-[100rem]">
         <header className={cn("px-4 pt-7 sm:px-6 lg:px-8", tabs ? "border-b border-hairline" : "pb-2")}>
           <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-[1_1_16rem]">
               <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
                 <h1 className="min-w-0 truncate text-2xl font-semibold tracking-[-0.022em] text-fg">{title}</h1>
                 {titleAdornment}

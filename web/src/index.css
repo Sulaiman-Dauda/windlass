@@ -88,6 +88,7 @@
   --color-err: var(--err);
   --color-err-hi: var(--err-hi);
   --color-err-soft: var(--err-soft);
+  --color-onerr: var(--onerr);
 
   --radius-sm: 5px;
   --radius-control: 7px;
@@ -160,6 +161,7 @@
   --err: oklch(53% 0.17 29);
   --err-hi: oklch(47% 0.17 29);
   --err-soft: oklch(95.5% 0.03 29);
+  --onerr: #ffffff;
 
   --shadow-xs: 0 1px 0 oklch(20% 0.02 250 / 0.04);
   --shadow-sm: 0 1px 2px rgba(14, 17, 22, 0.05);
@@ -206,6 +208,7 @@
     --err: oklch(70% 0.17 27);
     --err-hi: oklch(76% 0.15 27);
     --err-soft: oklch(28% 0.06 27);
+    --onerr: oklch(20% 0.04 27);
 
     --shadow-xs: none;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -251,6 +254,7 @@
   --err: oklch(70% 0.17 27);
   --err-hi: oklch(76% 0.15 27);
   --err-soft: oklch(28% 0.06 27);
+  --onerr: oklch(20% 0.04 27);
 
   --shadow-xs: none;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
