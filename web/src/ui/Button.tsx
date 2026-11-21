@@ -31,7 +31,7 @@ const variants: Record<Variant, string> = {
     "border-edge bg-surface text-err shadow-[var(--shadow-xs)] " +
     "hover:border-[color-mix(in_oklab,var(--err)_40%,transparent)] hover:bg-err-soft",
   dangerSolid:
-    "border-transparent bg-err text-white hover:bg-err-hi shadow-[inset_0_1px_0_rgba(255,255,255,0.14),var(--shadow-sm)]",
+    "border-transparent bg-err text-onerr hover:bg-err-hi shadow-[inset_0_1px_0_rgba(255,255,255,0.14),var(--shadow-sm)]",
 };
 
 /** Class string for anything that should look like a button (links included). */
