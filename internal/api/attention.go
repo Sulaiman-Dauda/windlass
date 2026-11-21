@@ -15,7 +15,8 @@ import (
 )
 
 // handleAttention serves the Needs you list. Any signed-in user reads it;
-// the update row is for admins, the only role that can act on it.
+// the update and binary owner rows are for admins, the only role that can
+// act on them.
 func (a *API) handleAttention(w http.ResponseWriter, r *http.Request) {
 	list, err := a.Attention.List(r.Context())
 	if err != nil {
@@ -25,7 +26,7 @@ func (a *API) handleAttention(w http.ResponseWriter, r *http.Request) {
 	if !auth.HasRole(r.Context(), "admin") {
 		items := make([]attention.Item, 0, len(list.Items))
 		for _, item := range list.Items {
-			if item.Kind != attention.KindUpdate {
+			if item.Kind != attention.KindUpdate && item.Kind != attention.KindBinaryOwner {
 				items = append(items, item)
 			}
 		}

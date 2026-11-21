@@ -14,6 +14,7 @@ const kindIcon: Record<string, IconName> = {
   proxy: "warning",
   update: "download",
   caddy_resume: "server",
+  binary_owner: "server",
 };
 
 const toneClass: Record<AttentionItem["tone"], string> = {

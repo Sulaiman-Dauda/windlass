@@ -32,6 +32,7 @@ const (
 	KindProxy        = "proxy"
 	KindUpdate       = "update"
 	KindCaddyResume  = "caddy_resume"
+	KindBinaryOwner  = "binary_owner"
 )
 
 // Tones, most urgent first. The list is sorted by them.
@@ -93,6 +94,9 @@ type Service struct {
 	TTL         time.Duration
 	UpdateTTL   time.Duration
 	UpdateRetry time.Duration
+	// ServiceOwnsBinary reports the binary owner problem binaryOwnerItem
+	// shows; tests replace it.
+	ServiceOwnsBinary func() bool
 
 	mu     sync.Mutex
 	cached List
@@ -107,7 +111,8 @@ type Service struct {
 // New returns a Service. update may be nil, which leaves the update row out.
 func New(q *db.Queries, a agent.Agent, panel PanelDomainer, up UpdateChecker, logger *slog.Logger) *Service {
 	return &Service{q: q, agent: a, panel: panel, update: up, logger: logger,
-		TTL: 30 * time.Second, UpdateTTL: 6 * time.Hour, UpdateRetry: time.Hour}
+		TTL: 30 * time.Second, UpdateTTL: 6 * time.Hour, UpdateRetry: time.Hour,
+		ServiceOwnsBinary: update.ServiceOwnsBinary}
 }
 
 // buildTimeout bounds one check of every source.
@@ -184,6 +189,9 @@ func (s *Service) build(ctx context.Context) (List, error) {
 		list.Items = append(list.Items, item)
 	}
 	if item, ok := s.updateItem(); ok {
+		list.Items = append(list.Items, item)
+	}
+	if item, ok := s.binaryOwnerItem(); ok {
 		list.Items = append(list.Items, item)
 	}
 
@@ -367,6 +375,27 @@ func (s *Service) resumeItem(ctx context.Context, haveDomains bool) (Item, bool)
 		Detail: "Caddy starts from its own config file, so after a restart every domain stops answering " +
 			"until Windlass puts the routes back. Run this on the server once and Caddy keeps them.",
 		Command: ResumeCommand}, true
+}
+
+// BinaryOwnerCommand reruns the installer, which installs a root-owned
+// binary and the start hook that keeps it root-owned.
+const BinaryOwnerCommand = "curl -fsSL https://get.windlass.run | sudo sh"
+
+// binaryOwnerItem reports a panel binary the service user owns. The unit's
+// sandbox keeps /usr/local/bin read-only for the panel itself, but anything
+// else running as that user could replace the file, and the change would
+// last through restarts. The installer's swap hook before v0.63 left
+// updated binaries this way.
+func (s *Service) binaryOwnerItem() (Item, bool) {
+	if s.ServiceOwnsBinary == nil || !s.ServiceOwnsBinary() {
+		return Item{}, false
+	}
+	return Item{Kind: KindBinaryOwner, Tone: ToneWarn,
+		Title: "The Windlass binary is not owned by root",
+		Detail: "The Windlass binary belongs to the windlass user, so a process running as that user could " +
+			"replace it. Run this on the server once: it reinstalls the latest release owned by root and keeps " +
+			"later updates that way. Deployed apps keep running.",
+		Command: BinaryOwnerCommand}, true
 }
 
 // updateItem reads the cached update check and starts a new one in the

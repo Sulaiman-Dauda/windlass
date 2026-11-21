@@ -21,7 +21,7 @@ export interface Metrics {
 export const PANEL_RSS_BUDGET_BYTES = 40 * 1024 * 1024;
 
 export interface AttentionItem {
-  kind: "deploy_failed" | "disk" | "no_backup" | "proxy" | "update" | "caddy_resume" | string;
+  kind: "deploy_failed" | "disk" | "no_backup" | "proxy" | "update" | "caddy_resume" | "binary_owner" | string;
   tone: "error" | "warn" | "info";
   project?: string;
   title: string;
