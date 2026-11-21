@@ -101,6 +101,9 @@ type Fake struct {
 	// ImageIDs maps an image reference to its local ID for Docker().ImageID;
 	// a reference not in it is an error, as an image not pulled is.
 	ImageIDs map[string]string
+	// Stats, keyed by container ID or name, is what Docker().Stats reports;
+	// an ID not in it is left out, as a container that has gone is.
+	Stats map[string]agent.ContainerStats
 	// Disk is what Docker().DiskUsage reports.
 	Disk agent.DiskUsage
 	// LogLines, keyed by container ID, replace the single default line
@@ -255,7 +258,8 @@ func (c composeFake) PS(ctx context.Context, project string) ([]agent.ServiceSta
 	}
 	c.f.mu.Lock()
 	defer c.f.mu.Unlock()
-	return c.f.Statuses[project], nil
+	// A copy, as compose ps returns a fresh list each call.
+	return slices.Clone(c.f.Statuses[project]), nil
 }
 
 func (c composeFake) Config(ctx context.Context, project string) (agent.ResolvedConfig, error) {
@@ -357,8 +361,23 @@ func (d dockerFake) DiskUsage(ctx context.Context) (agent.DiskUsage, error) {
 	return d.f.Disk, nil
 }
 
-func (d dockerFake) Stats(ctx context.Context, ids []string) ([]agent.ContainerStats, error) {
-	return nil, d.f.record("docker.stats", nil)
+func (d dockerFake) Stats(ctx context.Context, ids []string, withCPU bool) ([]agent.ContainerStats, error) {
+	if err := d.f.record("docker.stats", nil); err != nil {
+		return nil, err
+	}
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	out := make([]agent.ContainerStats, 0, len(ids))
+	for _, id := range ids {
+		if s, ok := d.f.Stats[id]; ok {
+			s.ContainerID = id
+			if !withCPU {
+				s.CPUPercent = 0
+			}
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 func (d dockerFake) ImageTag(ctx context.Context, source, target string) error {

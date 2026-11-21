@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -204,32 +205,59 @@ func (w *lineWriter) flush() {
 	}
 }
 
-func (d dockerLocal) Stats(ctx context.Context, containerIDs []string) ([]agent.ContainerStats, error) {
+// statsWorkers bounds how many stats reads run at once, so a large project
+// does not open a connection per container to the socket proxy.
+const statsWorkers = 8
+
+func (d dockerLocal) Stats(ctx context.Context, containerIDs []string, withCPU bool) ([]agent.ContainerStats, error) {
 	cli, err := d.l.docker()
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]agent.ContainerStats, 0, len(containerIDs))
-	for _, id := range containerIDs {
-		resp, err := cli.ContainerStats(ctx, id, client.ContainerStatsOptions{
-			Stream: false, IncludePreviousSample: true,
-		})
-		if err != nil {
-			continue // container may have exited between list and stats
-		}
-		var s container.StatsResponse
-		if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
-			resp.Body.Close()
-			continue
-		}
-		resp.Body.Close()
+	results := make([]*agent.ContainerStats, len(containerIDs))
+	sem := make(chan struct{}, statsWorkers)
+	var wg sync.WaitGroup
+	for i, id := range containerIDs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			results[i] = readStats(ctx, cli, id, withCPU)
+		}()
+	}
+	wg.Wait()
 
-		stat := agent.ContainerStats{
-			ContainerID: id,
-			MemoryBytes: s.MemoryStats.Usage,
-			MemoryLimit: s.MemoryStats.Limit,
+	out := make([]agent.ContainerStats, 0, len(containerIDs))
+	for _, r := range results {
+		if r != nil {
+			out = append(out, *r)
 		}
+	}
+	return out, nil
+}
+
+// readStats returns nil when the container has gone between list and read.
+func readStats(ctx context.Context, cli *client.Client, id string, withCPU bool) *agent.ContainerStats {
+	resp, err := cli.ContainerStats(ctx, id, client.ContainerStatsOptions{
+		Stream: false, IncludePreviousSample: withCPU,
+	})
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	var s container.StatsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
+		return nil
+	}
+
+	stat := agent.ContainerStats{
+		ContainerID: id,
+		MemoryBytes: memoryInUse(s.MemoryStats),
+		MemoryLimit: s.MemoryStats.Limit,
+	}
+	if withCPU {
 		// CPU percent relative to the previous sample the daemon includes.
 		cpuDelta := float64(s.CPUStats.CPUUsage.TotalUsage) - float64(s.PreCPUStats.CPUUsage.TotalUsage)
 		sysDelta := float64(s.CPUStats.SystemUsage) - float64(s.PreCPUStats.SystemUsage)
@@ -240,13 +268,25 @@ func (d dockerLocal) Stats(ctx context.Context, containerIDs []string) ([]agent.
 			}
 			stat.CPUPercent = cpuDelta / sysDelta * online * 100
 		}
-		for _, nw := range s.Networks {
-			stat.NetRxBytes += nw.RxBytes
-			stat.NetTxBytes += nw.TxBytes
-		}
-		out = append(out, stat)
 	}
-	return out, nil
+	for _, nw := range s.Networks {
+		stat.NetRxBytes += nw.RxBytes
+		stat.NetTxBytes += nw.TxBytes
+	}
+	return &stat
+}
+
+// memoryInUse matches what docker stats shows: usage less the reclaimable
+// page cache (inactive_file on cgroup v2, total_inactive_file on v1).
+func memoryInUse(m container.MemoryStats) uint64 {
+	cache, ok := m.Stats["inactive_file"]
+	if !ok {
+		cache = m.Stats["total_inactive_file"]
+	}
+	if cache < m.Usage {
+		return m.Usage - cache
+	}
+	return m.Usage
 }
 
 func (d dockerLocal) ImageTag(ctx context.Context, source, target string) error {

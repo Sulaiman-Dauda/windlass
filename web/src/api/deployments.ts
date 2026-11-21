@@ -33,6 +33,8 @@ export interface ServiceStatus {
   cpu_limit?: number;
   /** Ports compose.yaml declares for the service. */
   container_ports?: number[];
+  /** Memory in use, only when asked for with stats and the container runs. */
+  memory_bytes?: number;
 }
 
 export const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled"];
@@ -69,14 +71,22 @@ export function useCreateDeployment(project: string) {
   });
 }
 
-export function useServices(project: string, poll: number | false = 5000) {
+// stats adds memory in use per running container. Only the Services table
+// asks for it, so the other tabs polling this list do not read Docker stats.
+export function useServices(
+  project: string,
+  poll: number | false = 5000,
+  stats = false,
+) {
   return useQuery<{ services: ServiceStatus[]; note?: string }>({
-    queryKey: ["projects", project, "services"],
+    queryKey: stats
+      ? ["projects", project, "services", "stats"]
+      : ["projects", project, "services"],
     queryFn: async () => {
       const result = await api<{
         services: ServiceStatus[] | null;
         note?: string;
-      }>(`/projects/${project}/services`);
+      }>(`/projects/${project}/services${stats ? "?stats=1" : ""}`);
       return { ...result, services: result.services ?? [] };
     },
     refetchInterval: poll,

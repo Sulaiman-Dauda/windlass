@@ -141,6 +141,10 @@ platform stream; `GET /projects/{name}/deployments/{number}/events` follows one 
 An SSE connection stays open, which trips up tooling that waits for a request to finish.
 Consume it as a stream or ask for a bounded read.
 
+`GET /projects/{name}/services?stats=1` adds `memory_bytes` to each running container: memory
+in use less reclaimable page cache, the figure `docker stats` shows. Without `?stats=1` the
+endpoint does not read container stats. A failed stats read leaves the field out.
+
 `GET /projects/{name}/logs` without `?service=` merges every container of the project into
 one stream, ordered by time, with up to 5000 lines of history (`?tail=N`). `?follow=false`
 sends the history and closes, which is the bounded read. `GET /projects/{name}/drift`
