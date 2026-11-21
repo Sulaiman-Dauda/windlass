@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useMe, useCan } from "../api/auth";
 import { useUpdateCheck } from "../api/system";
+import { AuditLogSection } from "../components/AuditLog";
 import { SCOPE_LABEL, useTokens, type APIToken, type CreatedToken } from "../api/tokens";
 import { deleteUserToken, userTokensKey } from "../api/userTokens";
 import { Page, Callout, FormError } from "../ui/Page";
@@ -37,6 +38,7 @@ const TABS: { value: string; label: string; icon: IconName; admin?: boolean }[] 
   { value: "registries", label: "Registries", icon: "package", admin: true },
   { value: "backups", label: "Backups", icon: "archive", admin: true },
   { value: "system", label: "System", icon: "server", admin: true },
+  { value: "audit", label: "Audit log", icon: "shield", admin: true },
 ];
 
 export default function Settings() {
@@ -100,6 +102,7 @@ export default function Settings() {
           {tab === "git" && <GitConnections />}
           {tab === "registries" && <RegistryCredentials />}
           {tab === "backups" && <S3DestinationSection />}
+          {tab === "audit" && <AuditLogSection />}
           {tab === "system" && (
             <>
               <UpdateSection />

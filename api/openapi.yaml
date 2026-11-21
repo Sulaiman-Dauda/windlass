@@ -826,6 +826,43 @@ paths:
         "200": { description: The saved settings; the Needs you list is rebuilt on its next read }
         "400": { description: disk_percent is missing, not a whole number, or outside 50 to 99 }
 
+  /system/audit:
+    get:
+      summary: Audit log, newest first (admin)
+      description: Every filter is optional. Pass next_before_id back as before_id for the next page.
+      operationId: listAudit
+      security: [{ session: [] }, { bearerAuth: [] }]
+      parameters:
+        - { name: action, in: query, schema: { type: string }, description: "An exact action, or a prefix ending in * such as project.*" }
+        - { name: user_id, in: query, schema: { type: integer } }
+        - { name: resource_type, in: query, schema: { type: string } }
+        - { name: resource_id, in: query, schema: { type: string } }
+        - { name: since, in: query, schema: { type: string }, description: "YYYY-MM-DD (UTC) or RFC 3339, inclusive" }
+        - { name: until, in: query, schema: { type: string }, description: "YYYY-MM-DD (the whole day, UTC) or RFC 3339, exclusive" }
+        - { name: before_id, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        "200": { description: "{entries, next_before_id}" }
+        "400": { description: A filter is malformed }
+
+  /system/audit/actions:
+    get:
+      summary: Every action the audit log holds (admin)
+      operationId: listAuditActions
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: "{actions}" }
+
+  /system/audit/export:
+    get:
+      summary: Every matching audit entry as CSV (admin)
+      description: Takes the filters of /system/audit except before_id and limit. The export is itself audited.
+      operationId: exportAudit
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: text/csv }
+        "400": { description: A filter is malformed }
+
   /system/deploy/settings:
     get:
       summary: Deploy settings (admin)

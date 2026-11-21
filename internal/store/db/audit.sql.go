@@ -79,3 +79,121 @@ func (q *Queries) ListAudit(ctx context.Context, arg ListAuditParams) ([]AuditLo
 	}
 	return items, nil
 }
+
+const listAuditActions = `-- name: ListAuditActions :many
+SELECT DISTINCT action FROM audit_log ORDER BY action
+`
+
+func (q *Queries) ListAuditActions(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listAuditActions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var action string
+		if err := rows.Scan(&action); err != nil {
+			return nil, err
+		}
+		items = append(items, action)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchAudit = `-- name: SearchAudit :many
+SELECT a.id, a.ts, a.user_id, a.token_id, a.action, a.resource_type, a.resource_id, a.ip, a.detail,
+       COALESCE(u.email, '') AS user_email, COALESCE(t.name, '') AS token_name
+FROM audit_log a
+LEFT JOIN users u ON u.id = a.user_id
+LEFT JOIN api_tokens t ON t.id = a.token_id
+WHERE (?1 IS NULL OR a.action = ?1)
+  AND (?2 IS NULL OR substr(a.action, 1, length(?2)) = ?2)
+  AND (?3 IS NULL OR a.user_id = ?3)
+  AND (?4 IS NULL OR a.resource_type = ?4)
+  AND (?5 IS NULL OR a.resource_id = ?5)
+  AND (?6 IS NULL OR a.ts >= ?6)
+  AND (?7 IS NULL OR a.ts < ?7)
+  AND (?8 IS NULL OR a.id < ?8)
+ORDER BY a.id DESC
+LIMIT ?9
+`
+
+type SearchAuditParams struct {
+	Action       interface{}
+	ActionPrefix interface{}
+	UserID       interface{}
+	ResourceType interface{}
+	ResourceID   interface{}
+	Since        interface{}
+	Until        interface{}
+	BeforeID     interface{}
+	RowLimit     int64
+}
+
+type SearchAuditRow struct {
+	ID           int64
+	Ts           string
+	UserID       sql.NullInt64
+	TokenID      sql.NullInt64
+	Action       string
+	ResourceType sql.NullString
+	ResourceID   sql.NullString
+	Ip           sql.NullString
+	Detail       sql.NullString
+	UserEmail    string
+	TokenName    string
+}
+
+// Newest first. Every filter is optional; before_id pages by keyset.
+// action_prefix matches a family such as "project.".
+func (q *Queries) SearchAudit(ctx context.Context, arg SearchAuditParams) ([]SearchAuditRow, error) {
+	rows, err := q.db.QueryContext(ctx, searchAudit,
+		arg.Action,
+		arg.ActionPrefix,
+		arg.UserID,
+		arg.ResourceType,
+		arg.ResourceID,
+		arg.Since,
+		arg.Until,
+		arg.BeforeID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchAuditRow
+	for rows.Next() {
+		var i SearchAuditRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Ts,
+			&i.UserID,
+			&i.TokenID,
+			&i.Action,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.Ip,
+			&i.Detail,
+			&i.UserEmail,
+			&i.TokenName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
