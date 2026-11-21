@@ -151,3 +151,34 @@ export function withStagingNested(projects: Project[]): Project[] {
   }
   return projects.flatMap((p) => (p.staging_of && names.has(p.staging_of) ? [] : [p, ...(byLive.get(p.name) ?? [])]));
 }
+
+export interface ServiceDrift {
+  service: string;
+  container?: string;
+  config_changed: boolean;
+  image_changed: boolean;
+  missing?: boolean;
+  orphan?: boolean;
+}
+
+export interface ProjectDrift {
+  project: string;
+  checked_at: string;
+  drifted: boolean;
+  extra_files?: string[];
+  services: ServiceDrift[];
+}
+
+/**
+ * Which containers no longer match the project's files or local images.
+ * Each read runs two Compose commands on the server, so it polls slowly.
+ */
+export function useProjectDrift(name: string) {
+  return useQuery<ProjectDrift>({
+    queryKey: ["projects", name, "drift"],
+    queryFn: () => api<ProjectDrift>(`/projects/${name}/drift`),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+    retry: false,
+  });
+}

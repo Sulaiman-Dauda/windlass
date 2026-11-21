@@ -15,6 +15,7 @@ const kindIcon: Record<string, IconName> = {
   update: "download",
   caddy_resume: "server",
   binary_owner: "server",
+  drift: "layers",
 };
 
 const toneClass: Record<AttentionItem["tone"], string> = {
