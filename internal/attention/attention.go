@@ -31,6 +31,7 @@ const (
 	KindNoBackup     = "no_backup"
 	KindProxy        = "proxy"
 	KindUpdate       = "update"
+	KindCaddyResume  = "caddy_resume"
 )
 
 // Tones, most urgent first. The list is sorted by them.
@@ -59,6 +60,8 @@ type Item struct {
 	Detail  string `json:"detail,omitempty"`
 	Link    string `json:"link,omitempty"`
 	Action  string `json:"action,omitempty"`
+	// Command is a shell command that fixes the item, run on the server.
+	Command string `json:"command,omitempty"`
 }
 
 // List is the result of one check.
@@ -174,7 +177,10 @@ func (s *Service) build(ctx context.Context) (List, error) {
 	} else {
 		s.logger.Debug("attention: list containers", "error", err)
 	}
-	if item, ok := s.proxyItem(ctx, len(domains) > 0); ok {
+	haveDomains := s.haveDomains(ctx, len(domains) > 0)
+	if item, ok := s.proxyItem(ctx, haveDomains); ok {
+		list.Items = append(list.Items, item)
+	} else if item, ok := s.resumeItem(ctx, haveDomains); ok {
 		list.Items = append(list.Items, item)
 	}
 	if item, ok := s.updateItem(); ok {
@@ -302,14 +308,18 @@ func backupItems(projects []db.Project, schedules []db.ListDueSchedulesRow, cont
 	return items
 }
 
-// proxyItem reports Caddy not answering, but only when something depends on
-// it: a project domain or the panel's own.
-func (s *Service) proxyItem(ctx context.Context, haveDomains bool) (Item, bool) {
-	if !haveDomains && s.panel != nil {
-		if host, err := s.panel.PanelDomain(ctx); err == nil && host != "" {
-			haveDomains = true
-		}
+// haveDomains reports whether anything depends on Caddy: a project domain
+// or the panel's own.
+func (s *Service) haveDomains(ctx context.Context, projectDomains bool) bool {
+	if projectDomains || s.panel == nil {
+		return projectDomains
 	}
+	host, err := s.panel.PanelDomain(ctx)
+	return err == nil && host != ""
+}
+
+// proxyItem reports Caddy not answering when something depends on it.
+func (s *Service) proxyItem(ctx context.Context, haveDomains bool) (Item, bool) {
 	if !haveDomains {
 		return Item{}, false
 	}
@@ -321,6 +331,28 @@ func (s *Service) proxyItem(ctx context.Context, haveDomains bool) (Item, bool) 
 		Detail: "Windlass cannot reach the Caddy admin API, so domain and HTTPS changes are not applied. " +
 			"Check that the caddy service is running.",
 		Link: "/settings/general", Action: "Panel settings"}, true
+}
+
+// ResumeCommand reruns the installer for its Caddy step only.
+const ResumeCommand = "curl -fsSL https://get.windlass.run | sudo sh -s -- --caddy-resume"
+
+// resumeItem reports a Caddy the installer set up that still starts from
+// its admin-only Caddyfile, so every domain goes offline on a Caddy restart
+// until Windlass puts the routes back. Servers that update themselves never
+// rerun the installer, so they need the command once.
+func (s *Service) resumeItem(ctx context.Context, haveDomains bool) (Item, bool) {
+	if !haveDomains {
+		return Item{}, false
+	}
+	state, err := s.agent.Proxy().ResumeState(ctx)
+	if err != nil || state != agent.ResumeOff {
+		return Item{}, false
+	}
+	return Item{Kind: KindCaddyResume, Tone: ToneWarn,
+		Title: "A Caddy restart takes your domains offline",
+		Detail: "Caddy starts from its own config file, so after a restart every domain stops answering " +
+			"until Windlass puts the routes back. Run this on the server once and Caddy keeps them.",
+		Command: ResumeCommand}, true
 }
 
 // updateItem reads the cached update check and starts a new one in the

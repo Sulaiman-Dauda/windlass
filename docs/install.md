@@ -16,7 +16,9 @@ The installer:
 3. installs Caddy, from Caddy's own repository on apt and dnf or Alpine's on apk, unless `--no-caddy` is supplied or
    Caddy is already there. On a fresh Caddy install it replaces the packaged welcome
    Caddyfile with one that only enables the admin API on `127.0.0.1:2019`, keeping the
-   original as `/etc/caddy/Caddyfile.default.bak`. An existing Caddy is left as it is;
+   original as `/etc/caddy/Caddyfile.default.bak`, and makes Caddy resume its routes after
+   a restart (see [Caddy restarts and reboots](#caddy-restarts-and-reboots)). An existing
+   Caddy with its own Caddyfile is left as it is;
 4. downloads the Windlass binary, checks it against the release's `checksums.txt`, and
    installs it;
 5. creates the `windlass` system user and `/var/lib/windlass/{projects,data,backups}`;
@@ -32,8 +34,9 @@ up front when piping:
 curl -fsSL https://get.windlass.run | sudo sh -s -- --yes
 ```
 
-Supported flags are `--yes`, `--version v0.61` (any release tag), `--no-caddy`, `--no-docker`, and
-`--binary PATH` (local/CI installation).
+Supported flags are `--yes`, `--version v0.61` (any release tag), `--no-caddy`, `--no-docker`,
+`--binary PATH` (local/CI installation), and `--caddy-resume`, which does only the Caddy resume
+step and exits.
 
 ## Verifying what you are about to run
 
@@ -94,6 +97,35 @@ Windlass creates the targeted Caddy object `windlass_panel_route` and adds the h
 Caddy certificate automation. It does not modify the Caddyfile or unrelated routes. Removing
 the setting deletes only that route. DNS must already resolve to the server and ports 80/443
 must reach Caddy.
+
+### Caddy restarts and reboots
+
+Windlass adds its routes through the Caddy admin API. Caddy saves every change to its autosave
+file, but by default it starts from `/etc/caddy/Caddyfile`, so a Caddy restart drops every
+route until Windlass puts them back. When the Caddyfile is the admin-only one the installer
+wrote, the installer adds a systemd drop-in, `/etc/systemd/system/caddy.service.d/windlass-resume.conf`,
+that starts Caddy with `--resume` and makes `systemctl reload caddy` do nothing.
+
+- **Caddy restarts on its own:** every domain keeps serving, with or without Windlass running.
+- **The server reboots:** Caddy starts from the routes it had, but Docker can give containers
+  new addresses, so a domain can fail or answer from the wrong container until Windlass starts
+  and syncs its routes, normally within seconds of boot.
+
+Servers installed before v0.63 that update from the panel never rerun the installer. Needs you
+shows "A Caddy restart takes your domains offline" with the command to run once:
+
+```sh
+curl -fsSL https://get.windlass.run | sudo sh -s -- --caddy-resume
+```
+
+A Caddy with its own Caddyfile is left alone, because resuming would ignore later edits to that
+file. Windlass still puts its routes back as soon as it sees them gone. To undo the drop-in:
+
+```sh
+sudo rm /etc/systemd/system/caddy.service.d/windlass-resume.conf
+sudo systemctl daemon-reload
+sudo systemctl restart caddy
+```
 
 ### Firewalls
 
@@ -216,7 +248,10 @@ sudo rm /usr/local/bin/windlass
 ```
 
 Do not delete `/var/lib/windlass/projects` if you want to retain stack files. Existing Docker
-containers keep running. Caddy's in-memory routes continue until Caddy reloads/restarts; make
-any route needed permanently without Windlass part of the administrator-owned Caddyfile.
+containers keep running. Caddy keeps serving the last routes Windlass applied; with the resume
+drop-in it keeps them across restarts too, but nothing updates them, so after a reboot a
+domain can point at an old container address. Make any route needed permanently without
+Windlass part of the administrator-owned Caddyfile, and remove the drop-in as shown in
+[Caddy restarts and reboots](#caddy-restarts-and-reboots).
 
 See [Life without the panel](life-without-the-panel.md).

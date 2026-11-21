@@ -9,6 +9,8 @@
 #   --no-caddy       skip Caddy installation (no automatic HTTPS)
 #   --no-docker      skip Docker installation
 #   --binary PATH    install a local binary instead of downloading (CI/testing)
+#   --caddy-resume   only make the Caddy this script installed resume its last
+#                    config after a restart, then exit
 set -eu
 
 REPO="Sulaiman-Dauda/windlass"
@@ -19,6 +21,7 @@ VERSION="latest"
 WANT_CADDY=1
 WANT_DOCKER=1
 LOCAL_BINARY=""
+ONLY_CADDY_RESUME=0
 
 log()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 ok()   { printf '\033[1;32m ✓ \033[0m%s\n' "$*"; }
@@ -32,6 +35,7 @@ while [ $# -gt 0 ]; do
     --no-caddy) WANT_CADDY=0 ;;
     --no-docker) WANT_DOCKER=0 ;;
     --binary) LOCAL_BINARY="$2"; shift ;;
+    --caddy-resume) ONLY_CADDY_RESUME=1 ;;
     *) fail "unknown flag: $1" ;;
   esac
   shift
@@ -39,6 +43,55 @@ done
 
 [ "$(id -u)" = "0" ] || fail "run as root (sudo sh install.sh)"
 [ "$(uname -s)" = "Linux" ] || fail "Windlass servers run on Linux"
+
+# --- Caddy resume ---------------------------------------------------------------
+# Windlass adds its routes through the Caddy admin API. Caddy saves each
+# change to its autosave file but by default starts from the Caddyfile, so a
+# Caddy restart drops every route until Windlass is running again to put them
+# back. This drop-in makes Caddy start from the config Windlass last applied
+# (--resume falls back to the Caddyfile when there is none) and makes a reload
+# a no-op, since the only thing a reload could load is the admin-only file.
+#
+# Only done when the Caddyfile is still the admin-only one this script writes:
+# on a Caddy someone configured, resuming would ignore their Caddyfile edits.
+# After a reboot containers can come back on new IPs, so the resumed routes can
+# point at the wrong address until Windlass starts and syncs them.
+CADDY_DROPIN=/etc/systemd/system/caddy.service.d/windlass-resume.conf
+caddyfile_is_ours() {
+  [ -f /etc/caddy/Caddyfile ] || return 1
+  [ "$(tr -d ' \t\n' </etc/caddy/Caddyfile)" = "{admin127.0.0.1:2019}" ]
+}
+caddy_resume() {
+  if ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
+    warn "Caddy resume needs systemd; routes return when Windlass starts"
+    return 0
+  fi
+  if ! caddyfile_is_ours; then
+    log "Caddy has its own Caddyfile; leaving its restart behaviour alone"
+    return 0
+  fi
+  CADDY_BIN=$(command -v caddy) || { warn "caddy not found"; return 0; }
+  mkdir -p "$(dirname "$CADDY_DROPIN")"
+  cat > "$CADDY_DROPIN" <<DROPIN
+# Written by the Windlass installer. Caddy starts from the config Windlass last
+# applied, so domains keep serving across a Caddy restart. A reload is a no-op.
+# Undo: rm $CADDY_DROPIN && systemctl daemon-reload && systemctl restart caddy
+[Service]
+ExecStart=
+ExecStart=$CADDY_BIN run --environ --resume --config /etc/caddy/Caddyfile
+ExecReload=
+ExecReload=/bin/true
+DROPIN
+  systemctl daemon-reload
+  # A restart now resumes the running config, so no route is lost.
+  systemctl restart caddy 2>/dev/null || warn "restart caddy by hand: systemctl restart caddy"
+  ok "Caddy resumes its routes after a restart"
+}
+
+if [ "$ONLY_CADDY_RESUME" = "1" ]; then
+  caddy_resume
+  exit 0
+fi
 
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -132,6 +185,7 @@ CADDYFILE
       || rc-service caddy restart 2>/dev/null \
       || true
   fi
+  caddy_resume
 else
   log "skipping Caddy (domains and automatic HTTPS unavailable)"
 fi

@@ -407,10 +407,29 @@ type ProxyAgent interface {
 	// object. A Caddy reload or restart loads its own config file and drops
 	// every object added through the admin API.
 	RoutesInstalled(ctx context.Context) (bool, error)
+	// ResumeState reports whether a Caddy restart keeps the Windlass routes.
+	ResumeState(ctx context.Context) (CaddyResume, error)
 	// ApplyPanelDomain converges the separately owned panel route. An empty
 	// hostname removes that route without touching application/user routes.
 	ApplyPanelDomain(ctx context.Context, hostname string) error
 }
+
+// CaddyResume says what a Caddy restart does to the routes Windlass applied.
+type CaddyResume string
+
+const (
+	// ResumeOn: Caddy runs with the installer's --resume drop-in and starts
+	// from the config Windlass last applied.
+	ResumeOn CaddyResume = "on"
+	// ResumeOff: Caddy still has the installer's admin-only Caddyfile but no
+	// drop-in, so a restart drops every route until Windlass restores them.
+	// Rerunning the installer with --caddy-resume fixes it.
+	ResumeOff CaddyResume = "off"
+	// ResumeNotOurs: Caddy has a Caddyfile someone else wrote, is not a
+	// systemd service, or cannot be read from here (container installs).
+	// Windlass leaves its restart behaviour alone.
+	ResumeNotOurs CaddyResume = "not_ours"
+)
 
 type ProxyInfo struct {
 	Available bool   `json:"available"`
