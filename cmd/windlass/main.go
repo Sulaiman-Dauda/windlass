@@ -162,6 +162,10 @@ func run() error {
 	selfRing := selfstat.NewRing()
 	go selfRing.Run(ctx)
 
+	attentionSvc := attention.New(queries, ag, proxySvc, updateSvc, logger)
+	attentionSvc.SetDrift(deploySvc)
+	go watchDrift(ctx, bus, attentionSvc)
+
 	a := &api.API{
 		Auth:       authSvc,
 		Audit:      auditLog,
@@ -180,7 +184,7 @@ func run() error {
 		Box:        box,
 		Logger:     logger,
 		MCP:        mcpSrv,
-		Attention:  attention.New(queries, ag, proxySvc, updateSvc, logger),
+		Attention:  attentionSvc,
 		Cleanup:    cleanupSvc,
 		SelfStat:   selfRing,
 	}
@@ -225,4 +229,23 @@ func run() error {
 	// its result before the database closes.
 	cleanupSvc.Wait()
 	return err
+}
+
+// watchDrift marks the drift rows stale when a deploy finishes or a
+// project's files change, so Needs you does not show drift a deploy has
+// just fixed for the rest of DriftTTL.
+func watchDrift(ctx context.Context, bus *events.Bus, svc *attention.Service) {
+	ch, cancel := bus.Subscribe("deployment", "project")
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e := <-ch:
+			switch e.Type {
+			case "deployment.done", "project.file_changed", "project.env_changed", "project.deleted":
+				svc.DriftChanged()
+			}
+		}
+	}
 }

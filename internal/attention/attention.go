@@ -1,12 +1,14 @@
 // Package attention lists what on the server needs a person: a project whose
 // last deploy failed, a disk nearly full, a project with volumes and no
-// backup schedule, Caddy not answering, a panel update. The dashboard shows
-// the list; alerts send the same conditions when they change.
+// backup schedule, a project whose containers differ from its files, Caddy
+// not answering, a panel update. The dashboard shows the list; alerts send
+// the same conditions when they change.
 //
 // It only reads. One check costs a handful of SQLite queries, one container
 // list, one host reading and one Caddy admin call, never a Docker or Compose
 // call per project, and the result is cached so a dashboard polling it adds
-// little.
+// little. Drift needs two Compose commands per project, so it is swept in
+// the background at most every DriftTTL and the list reads the last sweep.
 package attention
 
 import (
@@ -106,6 +108,12 @@ type Service struct {
 	release   update.Release
 	upExpiry  time.Time
 	upRunning bool
+
+	driftMu      sync.Mutex
+	drift        DriftChecker
+	driftRows    []Item
+	driftExpiry  time.Time
+	driftRunning bool
 }
 
 // New returns a Service. update may be nil, which leaves the update row out.
@@ -179,6 +187,7 @@ func (s *Service) build(ctx context.Context) (List, error) {
 	}
 	if containers, err := s.agent.Docker().ListContainers(ctx, agent.ContainerFilter{}); err == nil {
 		list.Items = append(list.Items, backupItems(projects, schedules, containers)...)
+		list.Items = append(list.Items, s.driftItems(containers)...)
 	} else {
 		s.logger.Debug("attention: list containers", "error", err)
 	}

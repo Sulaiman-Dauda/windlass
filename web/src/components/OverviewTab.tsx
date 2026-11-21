@@ -23,6 +23,7 @@ import { btn } from "../ui/Button";
 import { useToast, errorText } from "../ui/Toast";
 import { repoName } from "./ProjectsTable";
 import StagingCard from "./StagingCard";
+import DriftNotice from "./DriftNotice";
 import CreateStagingDialog from "./CreateStagingDialog";
 import { Button } from "../ui/Button";
 import { Steps, summaryStates } from "./Steps";
@@ -60,6 +61,7 @@ export default function OverviewTab({ project }: { project: string }) {
           </Callout>
         )}
         <FailedDeployNotice project={project} />
+        <DriftNotice project={project} />
         <StagingCard project={project} />
         <Card>
           <CardHeader
