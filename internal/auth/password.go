@@ -9,7 +9,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/argon2"
@@ -49,7 +51,36 @@ func idKey(ctx context.Context, password, salt []byte, passes, memory uint32, th
 		return nil, ErrHashBusy
 	}
 	defer func() { <-hashSlots }()
+	defer scheduleRelease()
 	return argon2.IDKey(password, salt, passes, memory, threads, argonKeyLen), nil
+}
+
+// releaseDelay is how long after a hash its memory goes back to the OS.
+// Without it the Go runtime keeps the freed 19 MiB for about two minutes,
+// so every login showed as a 20 to 25 MiB jump in the panel's RSS. The
+// release fires that long after the first hash of a burst and is not pushed
+// back by later ones, so steady logins still release, and a flood of
+// attempts forces at most one garbage collection per delay.
+var releaseDelay = 5 * time.Second
+
+var release struct {
+	sync.Mutex
+	pending bool
+}
+
+func scheduleRelease() {
+	release.Lock()
+	defer release.Unlock()
+	if release.pending {
+		return
+	}
+	release.pending = true
+	time.AfterFunc(releaseDelay, func() {
+		release.Lock()
+		release.pending = false
+		release.Unlock()
+		debug.FreeOSMemory()
+	})
 }
 
 // dummyHash has the current parameters, so verifying against it for an
