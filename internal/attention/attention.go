@@ -248,13 +248,39 @@ func firstLine(s string) string {
 	return s
 }
 
+// MinDiskPercent and MaxDiskPercent bound the disk warning threshold.
+const (
+	MinDiskPercent = 50
+	MaxDiskPercent = 99
+)
+
+// ErrDiskPercentRange is returned by SetDiskPercent for a value outside
+// MinDiskPercent to MaxDiskPercent.
+var ErrDiskPercentRange = fmt.Errorf("disk_percent must be a whole number from %d to %d", MinDiskPercent, MaxDiskPercent)
+
+// DiskPercent returns the disk warning threshold in use.
+func (s *Service) DiskPercent(ctx context.Context) int { return s.diskPercent(ctx) }
+
+// SetDiskPercent stores the disk warning threshold and drops the cached
+// list, so the next check uses it.
+func (s *Service) SetDiskPercent(ctx context.Context, n int) error {
+	if n < MinDiskPercent || n > MaxDiskPercent {
+		return ErrDiskPercentRange
+	}
+	if err := s.q.SetSetting(ctx, db.SetSettingParams{Key: DiskPercentSetting, Value: strconv.Itoa(n)}); err != nil {
+		return err
+	}
+	s.Invalidate()
+	return nil
+}
+
 func (s *Service) diskPercent(ctx context.Context) int {
 	raw, err := s.q.GetSetting(ctx, DiskPercentSetting)
 	if err != nil {
 		return DefaultDiskPercent
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(raw))
-	if err != nil || n < 50 || n > 99 {
+	if err != nil || n < MinDiskPercent || n > MaxDiskPercent {
 		return DefaultDiskPercent
 	}
 	return n
