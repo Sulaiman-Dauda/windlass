@@ -13,6 +13,7 @@ import (
 
 func (a *API) domainRoutes(r chi.Router) {
 	r.Get("/", a.handleListDomains)
+	r.Get("/check", a.handleCheckDomains)
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("member"))
 		r.Post("/", a.handleCreateDomain)
@@ -32,6 +33,27 @@ func (a *API) handleListDomains(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// handleCheckDomains runs the domain checks for every domain of a project,
+// or for ?hostname= only. Read access is enough: it changes nothing, though
+// it does DNS lookups and TLS dials.
+func (a *API) handleCheckDomains(w http.ResponseWriter, r *http.Request) {
+	p, err := a.Projects.Get(r.Context(), chi.URLParam(r, "name"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "project not found")
+		return
+	}
+	checks, err := a.Proxy.CheckDomains(r.Context(), p.ID, p.Name, r.URL.Query().Get("hostname"))
+	if errors.Is(err, proxy.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "domain not found")
+		return
+	}
+	if err != nil {
+		a.internalError(w, "check domains", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, checks)
 }
 
 type createDomainRequest struct {

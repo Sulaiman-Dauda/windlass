@@ -1,11 +1,20 @@
 import { useId, useState } from "react";
 import { useCan } from "../api/auth";
 import { useServices } from "../api/deployments";
-import { useAddDomain, useDomains, useProxyStatus, useRemoveDomain, type Domain } from "../api/domains";
+import {
+  useAddDomain,
+  useCheckDomains,
+  useDomains,
+  useProxyStatus,
+  useRemoveDomain,
+  type CheckResult,
+  type Domain,
+  type DomainCheck,
+} from "../api/domains";
 import { Button, IconButton } from "../ui/Button";
 import { Card, CardHeader } from "../ui/Card";
 import { Input, Field } from "../ui/Field";
-import { StatusPill, type Tone } from "../ui/Badge";
+import { StatusDot, StatusPill, type Tone } from "../ui/Badge";
 import { Callout, FormError } from "../ui/Page";
 import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
@@ -18,12 +27,50 @@ const statusStyle: Record<Domain["status"], { label: string; tone: Tone }> = {
   proxy_unavailable: { label: "Proxy unavailable", tone: "err" },
 };
 
+const checkTone: Record<CheckResult, Tone> = { ok: "ok", unknown: "idle", warn: "warn", fail: "err" };
+const checkLabel: Record<CheckResult, string> = { ok: "Passed", unknown: "Cannot tell", warn: "Warning", fail: "Failed" };
+const checkName: Record<DomainCheck["checks"][number]["name"], string> = {
+  dns: "DNS",
+  ports: "Ports 80 and 443",
+  certificate: "Certificate",
+  route: "Caddy route",
+  container: "Container",
+};
+
+function CheckResults({ results }: { results: DomainCheck[] }) {
+  return (
+    <div className="divide-y divide-hairline">
+      {results.map((r) => (
+        <section key={r.hostname} className="px-5 py-4" aria-label={`Checks for ${r.hostname}`}>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <h4 className="text-sm font-semibold text-fg">{r.hostname}</h4>
+            <StatusPill tone={checkTone[r.result]}>{checkLabel[r.result]}</StatusPill>
+          </div>
+          <ul className="space-y-2">
+            {r.checks.map((c) => (
+              <li key={c.name} className="grid grid-cols-[auto_1fr] items-start gap-x-2.5 text-sm sm:grid-cols-[auto_9rem_1fr]">
+                <StatusDot tone={checkTone[c.result]} className="mt-1.5" />
+                <span className="font-medium text-fg2">{checkName[c.name]}</span>
+                <span className="col-start-2 min-w-0 break-words text-fg3 [overflow-wrap:anywhere] sm:col-start-3">
+                  <span className="sr-only">{checkLabel[c.result]}: </span>
+                  {c.detail}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 export default function DomainsTab({ project }: { project: string }) {
   const domains = useDomains(project);
   const proxy = useProxyStatus();
   const services = useServices(project);
   const add = useAddDomain(project);
   const remove = useRemoveDomain(project);
+  const check = useCheckDomains(project);
   const can = useCan();
   const confirm = useConfirm();
   const toast = useToast();
@@ -140,7 +187,17 @@ export default function DomainsTab({ project }: { project: string }) {
       )}
 
       <Card className="overflow-hidden">
-        <CardHeader title="Domains" description="Routed by Caddy to a service and port inside this project." />
+        <CardHeader
+          title="Domains"
+          description="Routed by Caddy to a service and port inside this project."
+          actions={
+            domains.data && domains.data.length > 0 ? (
+              <Button icon="shield" loading={check.isPending} onClick={() => check.mutate()}>
+                Check domains
+              </Button>
+            ) : undefined
+          }
+        />
         {domains.isLoading ? (
           <div className="p-5">
             <Skeleton className="h-5 w-1/2" />
@@ -201,6 +258,22 @@ export default function DomainsTab({ project }: { project: string }) {
           <p className="px-5 py-8 text-center text-sm text-fg3">No domains yet. The project is reachable only inside Docker's network.</p>
         )}
       </Card>
+
+      {(check.data || check.error) && (
+        <Card className="overflow-hidden">
+          <CardHeader
+            title="Domain check"
+            description="Run from this server: DNS, Caddy's listeners, the certificate it serves, the route and the container. A firewall in front of the server is not tested."
+          />
+          {check.error ? (
+            <div className="px-5 py-4">
+              <FormError error={check.error} fallback="The check did not run" />
+            </div>
+          ) : (
+            check.data && <CheckResults results={check.data} />
+          )}
+        </Card>
+      )}
     </div>
   );
 }

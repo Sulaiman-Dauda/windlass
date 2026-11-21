@@ -20,8 +20,7 @@ container restarts with a new address. The tab shows where each domain stands:
   nothing to route to. Deploy the project.
 - **Proxy unavailable**: Windlass cannot reach Caddy's admin API.
 
-Active means routed, not certified. Windlass does not check DNS or the certificate.
-Caddy requests the certificate, from Let's Encrypt by default, and it usually arrives
+Active means routed, not certified. Caddy requests the certificate, from Let's Encrypt by default, and it usually arrives
 within seconds of the route being written. Plain HTTP requests to the hostname are
 redirected to HTTPS.
 
@@ -30,6 +29,36 @@ so a hostname that does not resolve, or resolves elsewhere, cannot be issued a
 certificate. When an Active domain has no certificate, check the A record first, then
 Caddy's log, as [Troubleshooting](./troubleshooting.md#a-domain-has-no-certificate)
 describes.
+
+## Checking a domain
+
+**Check domains** on the Domains tab runs five checks for each domain and gives each a
+result of passed, warning, failed or cannot tell, with the reason:
+
+| Check | What it looks at |
+| --- | --- |
+| DNS | The A and AAAA answers, against this server's own addresses |
+| Ports 80 and 443 | Whether Caddy accepts connections on both |
+| Certificate | The certificate Caddy serves for the hostname: issuer, whether browsers trust it, expiry |
+| Caddy route | Whether Caddy holds the route |
+| Container | Whether the service has a running container |
+
+Every check runs from the server itself. It proves Caddy is listening, not that a
+firewall or cloud security group in front of the server lets visitors in, and nothing
+outside the server sees your hostnames.
+
+Two DNS answers cannot be judged from the server, so they read as cannot tell rather than
+failed. A record proxied by Cloudflare (an orange cloud) answers with Cloudflare's
+addresses, so check the record in Cloudflare. A server behind NAT, as on most clouds that
+give the machine a private address, cannot read its own public address, so check the
+record matches the one your provider shows.
+
+A certificate under 14 days from expiry is a warning: Caddy renews at 30 days left, so
+renewal is failing. Needs you on the overview also lists any project with a domain whose
+DNS has no record or points at another server, checked every 10 minutes.
+
+The same check is `GET /api/v1/projects/{name}/domains/check` and the MCP tool
+`check_domains`; a read-only token can run both.
 
 ## What Windlass touches, and what it does not
 

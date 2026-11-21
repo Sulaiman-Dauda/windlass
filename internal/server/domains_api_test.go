@@ -315,3 +315,51 @@ func TestManifestCannotTakeAnotherProjectsHostname(t *testing.T) {
 		t.Fatalf("after other gave the hostname up, routes = %q, want it on app", got)
 	}
 }
+
+// A read token can run the domain check, which answers one row per domain
+// and 404 for a hostname the project does not have.
+func TestCheckDomainsRoute(t *testing.T) {
+	e := newTestEnv(t)
+	cookie := e.login(t)
+	e.prepareDeployableProject(t, cookie, "app")
+	e.agent.Resolved["app"] = agent.ResolvedConfig{Services: map[string]agent.ResolvedService{
+		"web": {Image: "example/app", ContainerPorts: []int{3000}},
+	}}
+	e.agent.Containers = []agent.Container{{
+		ID: "c1", Name: "app-web-1", State: "running",
+		ComposeProject: "app", ComposeService: "web", IPAddress: "172.18.0.5",
+	}}
+	rec := e.do(t, http.MethodPost, "/api/v1/projects/app/domains", map[string]any{
+		"hostname": "app.example.com", "service": "web", "container_port": 3000,
+	}, cookie)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create domain = %d: %s", rec.Code, rec.Body.String())
+	}
+	e.agent.Probes = map[string]agent.DomainProbe{"app.example.com": {NotFound: true, Outbound: "203.0.113.10"}}
+
+	read := e.createToken(t, cookie, map[string]any{"name": "check", "scope": "read"})
+	rec = e.doBearer(t, http.MethodGet, "/api/v1/projects/app/domains/check", read.Token, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("check = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got []struct {
+		Hostname string `json:"hostname"`
+		Result   string `json:"result"`
+		Checks   []struct {
+			Name   string `json:"name"`
+			Result string `json:"result"`
+		} `json:"checks"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Hostname != "app.example.com" || got[0].Result != "fail" ||
+		got[0].Checks[0].Name != "dns" || got[0].Checks[0].Result != "fail" {
+		t.Errorf("check = %+v", got)
+	}
+
+	rec = e.doBearer(t, http.MethodGet, "/api/v1/projects/app/domains/check?hostname=nope.example.com", read.Token, nil)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown hostname = %d", rec.Code)
+	}
+}

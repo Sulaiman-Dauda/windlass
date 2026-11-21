@@ -582,6 +582,44 @@ type HostAgent interface {
 	// GitRemoteHead reads the commit a branch points at on the remote,
 	// without touching any checkout.
 	GitRemoteHead(ctx context.Context, req GitRemoteHeadReq) (string, error)
+	// ProbeDomain looks a hostname up in DNS, says which answers are this
+	// server's own addresses, checks Caddy's listeners on 80 and 443, and
+	// reads the certificate Caddy serves for the hostname. Every check runs
+	// from this server: it proves the listener, not the firewall.
+	ProbeDomain(ctx context.Context, hostname string) (DomainProbe, error)
+}
+
+// DomainProbe is what ProbeDomain found. A failed step leaves its error
+// text and does not stop the others.
+type DomainProbe struct {
+	// Addresses are the DNS answers (A and AAAA).
+	Addresses []string `json:"addresses"`
+	// NotFound is true when DNS says the name has no records.
+	NotFound bool   `json:"not_found,omitempty"`
+	DNSError string `json:"dns_error,omitempty"`
+	// Local lists the answers this server can bind, so its own addresses.
+	Local []string `json:"local"`
+	// Outbound is the source address this server uses to reach the
+	// internet. A private one means the server sits behind NAT, and its
+	// public address cannot be read from here.
+	Outbound string `json:"outbound,omitempty"`
+	// Listen80 and Listen443 say whether Caddy accepts connections there.
+	Listen80  bool `json:"listen_80"`
+	Listen443 bool `json:"listen_443"`
+	// Cert is the certificate Caddy presents for the hostname; nil when
+	// the TLS handshake failed, with the reason in CertError.
+	Cert      *CertInfo `json:"cert,omitempty"`
+	CertError string    `json:"cert_error,omitempty"`
+}
+
+// CertInfo describes a served certificate.
+type CertInfo struct {
+	Issuer   string    `json:"issuer"`
+	NotAfter time.Time `json:"not_after"`
+	// Trusted is true when the chain verifies against the system roots for
+	// the hostname; VerifyError says why not.
+	Trusted     bool   `json:"trusted"`
+	VerifyError string `json:"verify_error,omitempty"`
 }
 
 type GitLogReq struct {

@@ -119,6 +119,25 @@ components:
           description: |
             active is routed now; pending has no running container yet;
             proxy_unavailable means Caddy is down.
+    DomainCheck:
+      type: object
+      required: [hostname, service, result, checks, addresses, checked_at]
+      properties:
+        hostname: { type: string, example: app.example.com }
+        service: { type: string, example: web }
+        result: { type: string, enum: [ok, unknown, warn, fail], description: The worst check result }
+        addresses: { type: array, items: { type: string }, description: The DNS answers }
+        cert_expiry: { type: string, format: date-time }
+        checked_at: { type: string, format: date-time }
+        checks:
+          type: array
+          items:
+            type: object
+            required: [name, result, detail]
+            properties:
+              name: { type: string, enum: [dns, ports, certificate, route, container] }
+              result: { type: string, enum: [ok, unknown, warn, fail] }
+              detail: { type: string }
     Deployment:
       type: object
       required: [id, number, status, triggered_by, created_at]
@@ -1323,6 +1342,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Domain" }
         "409": { description: "Hostname already in use, by a project or by the panel" }
+
+  /projects/{name}/domains/check:
+    get:
+      summary: Check each domain from the server (DNS, ports, certificate, route, container)
+      description: |
+        Read access is enough. Runs a DNS lookup and a TLS dial to the local Caddy per
+        domain, so it can take a few seconds. Checks run on the server: they prove the
+        listener, not an outside firewall.
+      operationId: checkDomains
+      security: [{ session: [] }, { bearerAuth: [] }]
+      parameters:
+        - { name: hostname, in: query, required: false, schema: { type: string }, description: Check only this domain }
+      responses:
+        "200":
+          description: One result per domain
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/DomainCheck" } }
+        "404": { description: Project not found, or it has no such domain }
 
   /projects/{name}/domains/{hostname}:
     delete:

@@ -45,9 +45,10 @@ container asking, where `127.0.0.1` is Windlass's own container.
 ## A domain has no certificate
 
 Nearly always DNS. Let's Encrypt validates by connecting to the hostname, so it must
-resolve to this server before a certificate can be issued. **Active** in the Domains tab
-means the route is in Caddy; Windlass does not check DNS or the certificate, so look in
-Caddy's log for the issuance error:
+resolve to this server before a certificate can be issued. Start with **Check domains** on
+the Domains tab ([Checking a domain](./domains-and-https.md#checking-a-domain)): it says
+what DNS answers, whether 80 and 443 are open and what certificate Caddy serves. Caddy's
+admin API does not give the issuance error, so for that look in Caddy's log:
 
 ```sh
 sudo journalctl -u caddy -n 100 --no-pager | grep -i -E "acme|certificate|tls"

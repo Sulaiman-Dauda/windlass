@@ -381,3 +381,20 @@ func listBackups(t *toolCtx) (any, error) {
 		"project": name, "backups": list, "total": total, "truncated": truncated, "schedule": schedule,
 	}, nil
 }
+
+func checkDomains(t *toolCtx) (any, error) {
+	name := t.str("project")
+	var q url.Values
+	if h := t.str("hostname"); h != "" {
+		q = url.Values{"hostname": {h}}
+	}
+	raw, err := t.getJSON(projectPath(name, "domains", "check"), q)
+	if err != nil {
+		return nil, err
+	}
+	list, err := decodeList(raw)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"project": name, "domains": list}, nil
+}

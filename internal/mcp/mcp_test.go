@@ -256,6 +256,9 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.mu.Unlock()
 		}
 		writeTestJSON(w, 200, list)
+	case "/projects/web/domains/check":
+		writeTestJSON(w, 200, []map[string]any{{"hostname": "web.example.com", "result": "ok",
+			"checks": []map[string]string{{"name": "dns", "result": "ok", "detail": "Points at this server."}}}})
 	case "/projects/web/backups/schedule":
 		writeTestJSON(w, 200, map[string]any{"interval": "daily", "destination": "local", "retention_count": 7, "enabled": true})
 	default:
@@ -546,7 +549,7 @@ func TestLegacyInitializeHasNoSession(t *testing.T) {
 	for _, h := range []map[string]string{nil, {"MCP-Protocol-Version": ProtocolLegacy}} {
 		rep = send(t, s, legacyBody("tools/list", nil), h)
 		var tools []Tool
-		if err := json.Unmarshal(rep.msg.Result["tools"], &tools); err != nil || len(tools) != 7 {
+		if err := json.Unmarshal(rep.msg.Result["tools"], &tools); err != nil || len(tools) != 8 {
 			t.Errorf("legacy tools/list = %d %s", rep.status, rep.body)
 		}
 	}
@@ -627,6 +630,7 @@ func TestToolArgumentErrorsAreResults(t *testing.T) {
 var readTools = map[string]bool{
 	"list_projects": true, "get_project": true, "list_deployments": true, "get_deployment": true,
 	"get_logs": true, "get_staging": true, "list_backups": true,
+	"check_domains": true,
 }
 
 // destructiveTools change what is running and need confirm.
@@ -643,6 +647,7 @@ func TestNoToolReturnsEnv(t *testing.T) {
 		"get_logs":         {"project": "web"},
 		"get_staging":      {"project": "web"},
 		"list_backups":     {"project": "web"},
+		"check_domains":    {"project": "web"},
 		"deploy":           {"project": "web", "confirm": true},
 		"restart":          {"project": "web", "confirm": true},
 		"rollback":         {"project": "web", "number": 2, "confirm": true},
@@ -819,8 +824,8 @@ func TestLimitsAreReported(t *testing.T) {
 
 func TestEveryToolHasAllAnnotations(t *testing.T) {
 	tools := Tools()
-	if len(tools) != 12 {
-		t.Fatalf("%d tools, want 12", len(tools))
+	if len(tools) != 13 {
+		t.Fatalf("%d tools, want 13", len(tools))
 	}
 	b, _ := json.Marshal(tools)
 	var raw []map[string]json.RawMessage
@@ -858,7 +863,12 @@ func TestEveryToolHasAllAnnotations(t *testing.T) {
 		}
 		switch {
 		case readTools[tool.Name]:
-			if tool.Annotations != readOnly || hasConfirm {
+			want := readOnly
+			if tool.Name == "check_domains" {
+				// DNS lookups and TLS dials reach outside hosts.
+				want = readOnlyOpenWorld
+			}
+			if tool.Annotations != want || hasConfirm {
 				t.Errorf("%s: read tool annotations %+v, confirm %v", tool.Name, tool.Annotations, hasConfirm)
 			}
 		case destructiveTools[tool.Name]:
