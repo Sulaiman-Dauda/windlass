@@ -104,6 +104,7 @@ export default function Settings() {
             <>
               <UpdateSection />
               <DockerStorageSection />
+              <DiskWarningSection />
             </>
           )}
         </div>
@@ -1488,6 +1489,77 @@ function DockerStorageSection() {
           Clean up now
         </Button>
         <Button type="submit" form="docker-cleanup" size="sm" variant="primary" loading={save.isPending} disabled={!dirty}>
+          Save
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
+// ---------- Disk warning ----------
+
+interface AttentionSettings {
+  settings: { disk_percent: number };
+  defaults: { disk_percent: number };
+  min: number;
+  max: number;
+}
+
+function DiskWarningSection() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const state = useQuery<AttentionSettings>({
+    queryKey: ["system", "attention", "settings"],
+    queryFn: () => api("/system/attention/settings"),
+    retry: false,
+  });
+  const [value, setValue] = useState("");
+  useEffect(() => {
+    if (state.data) setValue(String(state.data.settings.disk_percent));
+  }, [state.data]);
+  const save = useMutation<AttentionSettings, Error, number>({
+    mutationFn: (disk_percent) =>
+      api("/system/attention/settings", { method: "PUT", body: JSON.stringify({ disk_percent }) }),
+    onSuccess: () => toast.ok("Disk warning saved"),
+    // The prefix also refreshes the Needs you list, which the server rebuilt.
+    onSettled: () => qc.invalidateQueries({ queryKey: ["system", "attention"] }),
+  });
+
+  if (state.isError || !state.data) return null;
+  const { min, max, defaults, settings } = state.data;
+  const dirty = value !== String(settings.disk_percent);
+
+  return (
+    <Card>
+      <CardHeader
+        title="Disk warning"
+        description="Needs you shows a row when the projects volume is fuller than this."
+      />
+      <form
+        id="disk-warning"
+        className="space-y-4 px-5 py-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate(Number(value));
+        }}
+      >
+        <Field label="Warn when the disk is" hint={`% full, from ${min} to ${max}`} className="w-48">
+          <Input
+            type="number"
+            min={min}
+            max={max}
+            step={1}
+            required
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </Field>
+        <div className="empty:hidden">
+          <FormError error={save.error} fallback="Could not save the disk warning" />
+        </div>
+      </form>
+      <CardFooter note={`The default is ${defaults.disk_percent}%.`}>
+        <Button type="submit" form="disk-warning" size="sm" variant="primary" loading={save.isPending} disabled={!dirty}>
           Save
         </Button>
       </CardFooter>
