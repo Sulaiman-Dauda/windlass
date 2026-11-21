@@ -217,8 +217,17 @@ else
 fi
 
 # --- Windlass binary ----------------------------------------------------------
+# A rerun on a server where Windlass already runs is an upgrade: the service
+# restarts on the new binary below. Deployed containers keep running.
+UPGRADE=0
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet windlass 2>/dev/null; then
+  UPGRADE=1
+  warn "Windlass is already running here, so this rerun upgrades it."
+  echo "    The panel restarts on the new binary; deployed apps keep running."
+fi
+
 if [ -n "$LOCAL_BINARY" ]; then
-  install -m 0755 "$LOCAL_BINARY" "$BIN"
+  install -m 0755 "$LOCAL_BINARY" "$BIN.new" && mv -f "$BIN.new" "$BIN"
   ok "installed local binary"
 else
   if [ "$VERSION" = "latest" ]; then
@@ -235,7 +244,7 @@ else
     "https://github.com/$REPO/releases/download/$VERSION/checksums.txt"
   (cd "$TMP" && grep "windlass-linux-$ARCH\$" checksums.txt | sed "s/windlass-linux-$ARCH/windlass/" | sha256sum -c -) \
     || fail "checksum verification failed"
-  install -m 0755 "$TMP/windlass" "$BIN"
+  install -m 0755 "$TMP/windlass" "$BIN.new" && mv -f "$BIN.new" "$BIN"
   ok "windlass $VERSION installed"
 fi
 
@@ -324,7 +333,12 @@ UNIT
   systemctl daemon-reload
   systemctl enable --now windlass-docker-proxy
   systemctl enable --now windlass
-  ok "systemd service started"
+  if [ "$UPGRADE" = "1" ]; then
+    systemctl restart windlass
+    ok "systemd service restarted on the new binary"
+  else
+    ok "systemd service started"
+  fi
 else
   log "systemd not found — start manually: WINDLASS_DATA=$DATA_DIR windlass"
 fi
@@ -373,9 +387,26 @@ if port_closed 8080; then
 else
   echo "  Open:        http://$IP:8080"
 fi
-echo "  Setup token: journalctl -u windlass | grep setup_token"
-echo
-echo "  The one-time setup token in the server log claims this instance."
+# The server logs a setup token only while no user exists, so only point at
+# it when the panel says it still needs setup. If the panel does not answer
+# in time, print the hint: it is harmless on a claimed instance.
+NEEDS_SETUP=1
+tries=0
+while [ "$tries" -lt 30 ]; do
+  STATUS=$(curl -fsS --max-time 2 http://127.0.0.1:8080/api/v1/auth/status 2>/dev/null) && {
+    case "$STATUS" in *'"needs_setup":false'*) NEEDS_SETUP=0 ;; esac
+    break
+  }
+  tries=$((tries + 1))
+  sleep 1
+done
+if [ "$NEEDS_SETUP" = "1" ]; then
+  echo "  Setup token: journalctl -u windlass | grep setup_token"
+  echo
+  echo "  The one-time setup token in the server log claims this instance."
+else
+  echo "  This instance is already claimed: sign in with your existing account."
+fi
 
 CLOSED=""
 port_closed 80 http && CLOSED="80"
