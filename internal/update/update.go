@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -112,11 +113,58 @@ func (s *Service) Check(ctx context.Context) (Release, error) {
 			rel.checksumURL = u
 		}
 	}
-	rel.UpdateReady = rel.Version != "" &&
-		rel.Version != version.Version &&
-		"v"+strings.TrimPrefix(version.Version, "v") != rel.Version &&
-		rel.assetURL != ""
+	rel.UpdateReady = Newer(rel.Version, version.Version) && rel.assetURL != ""
 	return rel, nil
+}
+
+// Newer reports whether release tag latest is a later version than current.
+// Parts compare as numbers, so v0.100 is newer than v0.99. A current version
+// that does not parse ("dev", a local build) is never offered an update, and
+// neither is a tag that does not parse.
+func Newer(latest, current string) bool {
+	l, ok := parseVersion(latest)
+	if !ok {
+		return false
+	}
+	c, ok := parseVersion(current)
+	if !ok {
+		return false
+	}
+	for i := 0; i < max(len(l), len(c)); i++ {
+		var a, b int
+		if i < len(l) {
+			a = l[i]
+		}
+		if i < len(c) {
+			b = c[i]
+		}
+		if a != b {
+			return a > b
+		}
+	}
+	return false
+}
+
+// parseVersion reads "v0.62" or "0.62.1". Anything after a "-" or "+"
+// (a pre-release or build suffix) is dropped.
+func parseVersion(v string) ([]int, bool) {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	if v == "" {
+		return nil, false
+	}
+	parts := strings.Split(v, ".")
+	out := make([]int, 0, len(parts))
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 0 {
+			return nil, false
+		}
+		out = append(out, n)
+	}
+	return out, true
 }
 
 var ErrNotSupported = errors.New("self-update is only supported for the Linux binary install")

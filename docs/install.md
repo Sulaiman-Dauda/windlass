@@ -234,6 +234,34 @@ update unless the SHA-256 matches, and restarts. The hardened systemd unit canno
 hook swaps it in, keeping the old one as `/usr/local/bin/windlass.previous`. Application
 containers are not restarted.
 
+The panel offers only a newer release: versions compare part by part as numbers, so v0.100
+follows v0.99, and a build without a release version (`dev`) is never offered one. The hook
+installs the new binary owned by root and removes the staged file, so the `windlass` user
+cannot rewrite the program it runs. The hook in installs before v0.63 moved the staged file
+as it was, which left the binary owned by `windlass`. Needs you shows that from the file's
+owner, with the command that fixes it: rerunning the installer
+(`curl -fsSL https://get.windlass.run | sudo sh`) reinstalls the latest release owned by root,
+writes the new hook, and removes the older `windlass.service.d/self-update.conf` drop-in if
+the server has one. It also makes an older `windlass.previous` root-owned, so a rollback
+never puts back a file the `windlass` user could have changed. Deployed apps keep running.
+
+The hook reads the staged file as the `windlass` user, so a link placed there cannot make
+root copy a file that user may not read. If the swap fails, for example on a full disk, the
+panel starts on its current binary and tries the swap again on the next start.
+
+A bare process that can write its own binary's directory replaces the file directly, so the
+binary stays owned by that user; Needs you reports it only for `/usr/local/bin/windlass`.
+
+To go back to the hook before v0.63, edit the `ExecStartPre=+` line in
+`/etc/systemd/system/windlass.service` to the earlier form and reload:
+
+```sh
+sudo systemctl daemon-reload && sudo systemctl restart windlass
+```
+
+The earlier line was
+`if [ -x /var/lib/windlass/data/update/windlass.next ]; then cp -a /usr/local/bin/windlass /usr/local/bin/windlass.previous 2>/dev/null || true; mv -f /var/lib/windlass/data/update/windlass.next /usr/local/bin/windlass; fi`.
+
 Manual rollback:
 
 ```sh

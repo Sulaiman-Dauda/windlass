@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/windlass-dev/windlass/internal/version"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -33,8 +35,18 @@ func stubReleases(t *testing.T) {
 	t.Cleanup(func() { http.DefaultClient.Transport = prev })
 }
 
+// asRelease makes this test binary report a released version, since "dev"
+// is never offered an update.
+func asRelease(t *testing.T, v string) {
+	t.Helper()
+	prev := version.Version
+	version.Version = v
+	t.Cleanup(func() { version.Version = prev })
+}
+
 func checkJSON(t *testing.T) map[string]any {
 	t.Helper()
+	asRelease(t, "v0.62")
 	rel, err := New(slog.New(slog.DiscardHandler), t.TempDir(), func() {}).Check(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -78,5 +90,57 @@ func TestApplyRefusesWhenSelfUpdateDisabled(t *testing.T) {
 	err := New(slog.New(slog.DiscardHandler), t.TempDir(), func() { t.Error("restart called") }).Apply(context.Background())
 	if !errors.Is(err, ErrNotSupported) {
 		t.Fatalf("Apply = %v, want ErrNotSupported", err)
+	}
+}
+
+func TestNewer(t *testing.T) {
+	cases := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"v0.63", "v0.62", true},
+		{"v0.63", "0.62", true},
+		{"v0.100", "v0.99", true},
+		{"v0.99", "v0.100", false},
+		{"v0.62", "v0.62", false},
+		{"v0.62", "0.62", false},
+		{"v0.61", "v0.62", false},
+		{"v0.62.1", "v0.62", true},
+		{"v0.62", "v0.62.0", false},
+		{"v1.0", "v0.99", true},
+		{"v0.63", "dev", false},
+		{"v0.63", "", false},
+		{"", "v0.62", false},
+		{"nightly", "v0.62", false},
+		{"v0.63-rc1", "v0.62", true},
+	}
+	for _, c := range cases {
+		if got := Newer(c.latest, c.current); got != c.want {
+			t.Errorf("Newer(%q, %q) = %v, want %v", c.latest, c.current, got, c.want)
+		}
+	}
+}
+
+func TestDevBuildIsNeverOfferedAnUpdate(t *testing.T) {
+	stubReleases(t)
+	asRelease(t, "dev")
+	rel, err := New(slog.New(slog.DiscardHandler), t.TempDir(), func() {}).Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel.UpdateReady {
+		t.Fatal("dev build offered an update")
+	}
+}
+
+func TestOlderReleaseIsNotOffered(t *testing.T) {
+	stubReleases(t) // serves v9999.0
+	asRelease(t, "v10000.0")
+	rel, err := New(slog.New(slog.DiscardHandler), t.TempDir(), func() {}).Check(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rel.UpdateReady {
+		t.Fatal("older release offered as an update")
 	}
 }

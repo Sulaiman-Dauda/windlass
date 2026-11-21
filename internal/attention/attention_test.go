@@ -59,6 +59,9 @@ func newEnv(t *testing.T) *env {
 	up := &updateStub{}
 	svc := New(q, ag, panel, up, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	svc.TTL = 0
+	// go test runs a binary the test user owns; only the binary owner
+	// tests turn this on.
+	svc.ServiceOwnsBinary = func() bool { return false }
 	return &env{q: q, agent: ag, panel: panel, up: up, svc: svc}
 }
 
@@ -373,5 +376,17 @@ func TestCaddyResumeRow(t *testing.T) {
 		if items := e.list(t); len(items) != 0 {
 			t.Fatalf("%s: %+v", state, items)
 		}
+	}
+}
+
+func TestBinaryOwnerItem(t *testing.T) {
+	e := newEnv(t)
+	if items := e.list(t); len(items) != 0 {
+		t.Fatalf("root-owned binary listed %+v", items)
+	}
+	e.svc.ServiceOwnsBinary = func() bool { return true }
+	items := e.list(t)
+	if len(items) != 1 || items[0].Kind != KindBinaryOwner || items[0].Command != BinaryOwnerCommand {
+		t.Fatalf("items = %+v", items)
 	}
 }

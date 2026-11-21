@@ -227,7 +227,7 @@ if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet windlass 
 fi
 
 if [ -n "$LOCAL_BINARY" ]; then
-  install -m 0755 "$LOCAL_BINARY" "$BIN.new" && mv -f "$BIN.new" "$BIN"
+  install -o root -g root -m 0755 "$LOCAL_BINARY" "$BIN.new" && mv -f "$BIN.new" "$BIN"
   ok "installed local binary"
 else
   if [ "$VERSION" = "latest" ]; then
@@ -244,7 +244,7 @@ else
     "https://github.com/$REPO/releases/download/$VERSION/checksums.txt"
   (cd "$TMP" && grep "windlass-linux-$ARCH\$" checksums.txt | sed "s/windlass-linux-$ARCH/windlass/" | sha256sum -c -) \
     || fail "checksum verification failed"
-  install -m 0755 "$TMP/windlass" "$BIN.new" && mv -f "$BIN.new" "$BIN"
+  install -o root -g root -m 0755 "$TMP/windlass" "$BIN.new" && mv -f "$BIN.new" "$BIN"
   ok "windlass $VERSION installed"
 fi
 
@@ -299,8 +299,12 @@ Requires=docker.service windlass-docker-proxy.service
 Type=notify
 # Self-update: the panel stages a verified binary in its data dir (it cannot
 # write /usr/local/bin under ProtectSystem=); this privileged hook swaps it
-# in before every start, keeping the old binary as windlass.previous.
-ExecStartPre=+/bin/sh -c "if [ -x /var/lib/windlass/data/update/windlass.next ]; then cp -a /usr/local/bin/windlass /usr/local/bin/windlass.previous 2>/dev/null || true; mv -f /var/lib/windlass/data/update/windlass.next /usr/local/bin/windlass; fi"
+# in before every start, keeping the old binary as windlass.previous. The
+# staged file is read as the windlass user, so a symlink planted there cannot
+# make root copy a file windlass may not read; root writes a root-owned copy
+# so the service user can never rewrite the binary it runs. A failed swap
+# leaves the staged file for the next start and starts the current binary.
+ExecStartPre=+/bin/sh -c "if [ -x /var/lib/windlass/data/update/windlass.next ]; then install -o root -g root -m 0755 /usr/local/bin/windlass /usr/local/bin/windlass.previous 2>/dev/null || true; if runuser -u windlass -- cat /var/lib/windlass/data/update/windlass.next > /usr/local/bin/windlass.new && chown root:root /usr/local/bin/windlass.new && chmod 0755 /usr/local/bin/windlass.new && mv -f /usr/local/bin/windlass.new /usr/local/bin/windlass; then rm -f /var/lib/windlass/data/update/windlass.next; else rm -f /usr/local/bin/windlass.new; echo windlass: update swap failed, starting the current binary >&2; fi; fi"
 ExecStart=/usr/local/bin/windlass
 User=windlass
 Group=windlass
@@ -330,6 +334,19 @@ ProtectHome=yes
 [Install]
 WantedBy=multi-user.target
 UNIT
+  # Installs before v0.3 carried the swap hook in a drop-in that moved the
+  # service user's file into place. The unit above has the root-owned hook,
+  # so the old drop-in goes: if it reset ExecStartPre= it would drop the new
+  # hook, and its mv is never wanted again.
+  OLD_HOOK=/etc/systemd/system/windlass.service.d/self-update.conf
+  if [ -f "$OLD_HOOK" ] && grep -q 'windlass.next' "$OLD_HOOK"; then
+    rm -f "$OLD_HOOK"
+    ok "removed the old self-update drop-in"
+  fi
+  # The binary installed above is the one to run: drop any update the panel
+  # staged earlier, and make an older windlass.previous root-owned too.
+  rm -f "$DATA_DIR/data/update/windlass.next"
+  if [ -f "$BIN.previous" ]; then chown root:root "$BIN.previous" && chmod 0755 "$BIN.previous"; fi
   systemctl daemon-reload
   systemctl enable --now windlass-docker-proxy
   systemctl enable --now windlass

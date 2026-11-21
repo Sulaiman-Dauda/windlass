@@ -271,12 +271,13 @@ func (readyUpdate) Check(context.Context) (update.Release, error) {
 	return update.Release{Version: "v9.9", CurrentVer: "v0.62", UpdateReady: true}, nil
 }
 
-// The update row is for admins, as /system/update is: a viewer cannot apply
-// one, and the rest of the list is the same for both.
+// The update and binary owner rows are for admins, as /system/update is: a
+// viewer cannot act on them, and the rest of the list is the same for both.
 func TestAttentionUpdateRowIsAdminOnly(t *testing.T) {
 	e := newTestEnv(t)
 	admin := e.login(t)
 	svc := attention.New(e.queries, e.agent, noPanel{}, readyUpdate{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc.ServiceOwnsBinary = func() bool { return true }
 	e.api.Attention = svc
 	e.agent.Metrics = agent.HostMetrics{DiskUsed: 99, DiskTotal: 100}
 
@@ -295,7 +296,7 @@ func TestAttentionUpdateRowIsAdminOnly(t *testing.T) {
 	}
 	// The first list starts the update check in the background.
 	deadline := time.Now().Add(5 * time.Second)
-	for kinds(admin) != "disk update" {
+	for kinds(admin) != "disk binary_owner update" {
 		if time.Now().After(deadline) {
 			t.Fatalf("admin = %q", kinds(admin))
 		}

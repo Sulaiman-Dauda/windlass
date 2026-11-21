@@ -24,7 +24,7 @@ open a public issue for one.
 | `install.sh` | root | Installs Docker, Git and Caddy if missing, the binary and two systemd units, and creates the `windlass` user |
 | Docker | root | Docker's own daemon, unchanged |
 | `windlass-docker-proxy.service` | root, to run `docker run` | Starts the socket proxy container with every capability dropped and `no-new-privileges` |
-| The update hook in `windlass.service` | root | Before each start, moves a binary the panel staged in `/var/lib/windlass/data/update/` into `/usr/local/bin`, keeping the old one as `windlass.previous`. Nothing else |
+| The update hook in `windlass.service` | root | Before each start, installs a binary the panel staged in `/var/lib/windlass/data/update/` into `/usr/local/bin` owned by root, keeping the old one as `windlass.previous`, and removes the staged file. Nothing else |
 | `windlass` | the `windlass` system user | The panel. No login shell, no capabilities, and a systemd sandbox that lets it write only `/var/lib/windlass` |
 | Caddy | its package's own user, normally `caddy` | Serves your domains and the panel's |
 | Your containers | whatever their image and Compose file say | Your applications |
