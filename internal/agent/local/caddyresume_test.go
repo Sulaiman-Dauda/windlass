@@ -12,10 +12,10 @@ func TestCaddyResumeState(t *testing.T) {
 	write := func(root, rel, body string) {
 		t.Helper()
 		p := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -40,7 +40,7 @@ func TestCaddyResumeState(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			root := t.TempDir()
 			if c.systemd {
-				if err := os.MkdirAll(filepath.Join(root, systemdRunDir), 0o755); err != nil {
+				if err := os.MkdirAll(filepath.Join(root, systemdRunDir), 0o750); err != nil {
 					t.Fatal(err)
 				}
 			}

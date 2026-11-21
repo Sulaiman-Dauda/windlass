@@ -35,9 +35,9 @@ func caddyResumeState(root string) agent.CaddyResume {
 	if fi, err := os.Stat(filepath.Join(root, systemdRunDir)); err != nil || !fi.IsDir() {
 		return agent.ResumeNotOurs
 	}
-	dropIn, err := os.ReadFile(filepath.Join(root, caddyDropInPath))
+	dropIn, err := os.ReadFile(filepath.Join(root, caddyDropInPath)) //nolint:gosec // G304: fixed host path under a root only tests change
 	resuming := err == nil && strings.Contains(string(dropIn), "--resume")
-	raw, err := os.ReadFile(filepath.Join(root, caddyfilePath))
+	raw, err := os.ReadFile(filepath.Join(root, caddyfilePath)) //nolint:gosec // G304: fixed host path under a root only tests change
 	ours := err == nil && squeeze(string(raw)) == adminOnlyCaddyfile
 	switch {
 	case resuming && ours:
