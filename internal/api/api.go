@@ -146,6 +146,10 @@ func (a *API) Routes(r chi.Router) {
 				r.Put("/system/docker/cleanup", a.handleSetCleanup)
 				r.Post("/system/docker/cleanup/run", a.handleRunCleanup)
 			}
+			if a.Attention != nil {
+				r.Get("/system/attention/settings", a.handleGetAttentionSettings)
+				r.Put("/system/attention/settings", a.handleSetAttentionSettings)
+			}
 			r.Get("/system/panel-domain", a.handleGetPanelDomain)
 			r.Get("/system/github-app", a.handleGitHubAppStatus)
 			// Browser-only. Each of these can move the panel, replace the

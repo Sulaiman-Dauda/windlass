@@ -49,7 +49,7 @@ and every service's logs in one stream. Everything here only reads.
   admins only, as `/system/update` does. `/system/disk` gives counts and bytes, no names.
 - The list is built at most every 30 seconds and shared, apart from the request that asked,
   with a 20 second limit. A row can outlive its fix by 30 seconds.
-- Disk threshold: settings key `attention_disk_percent`, default 85, 50 to 99. No screen yet.
+- Disk threshold: settings key `attention_disk_percent`, default 85, 50 to 99. Set on Settings > System (v0.63).
 - No backup row for staging projects, or for anonymous volumes (a 64 hex name).
 - The Caddy row only when a project or the panel has a domain.
 - Drift under a live rollback hashes with `compose.rollback.yaml` and skips the image check,

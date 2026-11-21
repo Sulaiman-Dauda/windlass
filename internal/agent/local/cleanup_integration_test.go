@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moby/moby/client"
+
 	"github.com/windlass-dev/windlass/internal/agent"
 )
 
@@ -122,6 +124,13 @@ func TestCleanupRealDocker(t *testing.T) {
 		t.Error("the image a running container uses was touched")
 	}
 
+	// Other packages build on the same daemon while this test runs, so
+	// daemon-wide totals can grow during the trim. Behind the installer's
+	// proxy the cache lives in a running buildx container's state volume,
+	// which only the total counts, so that part is the total less the
+	// daemon builder's records.
+	proxied := runningBuilder(ctx, t)
+	recordsBefore := cacheRecords(ctx, t, l)
 	cache, err := l.Docker().PruneBuildCache(ctx, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -133,9 +142,27 @@ func TestCleanupRealDocker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("build cache %d -> %d bytes, buildx reported %d freed", before.BuildCache.Bytes, after.BuildCache.Bytes, cache.ReclaimedBytes)
-	if after.BuildCache.Bytes >= before.BuildCache.Bytes {
-		t.Errorf("build cache did not shrink: %d -> %d", before.BuildCache.Bytes, after.BuildCache.Bytes)
+	t.Logf("build cache %d -> %d bytes daemon-wide, %d reported freed", before.BuildCache.Bytes, after.BuildCache.Bytes, cache.ReclaimedBytes)
+	recordsAfter := cacheRecords(ctx, t, l)
+	if proxied {
+		was := before.BuildCache.Bytes - sumSizes(recordsBefore)
+		kept := after.BuildCache.Bytes - sumSizes(recordsAfter)
+		t.Logf("buildx builder state: %d -> %d bytes", was, kept)
+		if kept >= was {
+			t.Errorf("the buildx builder's cache did not shrink: %d -> %d bytes", was, kept)
+		}
+	} else {
+		// By ID, not bytes: another build's record can grow meanwhile.
+		removed := 0
+		for id := range recordsBefore {
+			if _, ok := recordsAfter[id]; !ok {
+				removed++
+			}
+		}
+		t.Logf("%d of %d build cache records present before the trim removed", removed, len(recordsBefore))
+		if removed == 0 {
+			t.Errorf("no build cache record present before the trim was removed (%d records)", len(recordsBefore))
+		}
 	}
 
 	// Behind the proxy: a stopped builder keeps its cache, and the run
@@ -155,4 +182,41 @@ func TestCleanupRealDocker(t *testing.T) {
 	if len(stopped.Errors) != 1 || !strings.Contains(stopped.Errors[0], builder+" is stopped") {
 		t.Fatalf("stopped builder: %+v, want it named", stopped)
 	}
+}
+
+// cacheRecords returns the daemon builder's cache records, ID to size.
+func cacheRecords(ctx context.Context, t *testing.T, l *Local) map[string]int64 {
+	t.Helper()
+	cli, err := l.docker()
+	if err != nil {
+		t.Fatal(err)
+	}
+	du, err := cli.DiskUsage(ctx, client.DiskUsageOptions{BuildCache: true, Verbose: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := make(map[string]int64, len(du.BuildCache.Items))
+	for _, r := range du.BuildCache.Items {
+		records[r.ID] = r.Size
+	}
+	return records
+}
+
+func sumSizes(records map[string]int64) int64 {
+	var n int64
+	for _, size := range records {
+		n += size
+	}
+	return n
+}
+
+// runningBuilder reports whether a buildx docker-container builder is up,
+// which is where builds go behind the installer's socket proxy.
+func runningBuilder(ctx context.Context, t *testing.T) bool {
+	t.Helper()
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-q", "--filter", "name=^"+builderPrefix).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out)) != ""
 }

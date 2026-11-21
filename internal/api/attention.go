@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
@@ -33,6 +34,58 @@ func (a *API) handleAttention(w http.ResponseWriter, r *http.Request) {
 		list.Items = items
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+type attentionSettings struct {
+	DiskPercent int `json:"disk_percent"`
+}
+
+type attentionSettingsResponse struct {
+	Settings attentionSettings `json:"settings"`
+	Defaults attentionSettings `json:"defaults"`
+	Min      int               `json:"min"`
+	Max      int               `json:"max"`
+}
+
+// handleGetAttentionSettings serves the Needs you thresholds.
+func (a *API) handleGetAttentionSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, attentionSettingsResponse{
+		Settings: attentionSettings{DiskPercent: a.Attention.DiskPercent(r.Context())},
+		Defaults: attentionSettings{DiskPercent: attention.DefaultDiskPercent},
+		Min:      attention.MinDiskPercent,
+		Max:      attention.MaxDiskPercent,
+	})
+}
+
+// handleSetAttentionSettings saves the disk warning threshold. The field is
+// required, so a missing one is refused rather than read as zero.
+func (a *API) handleSetAttentionSettings(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		DiskPercent *int `json:"disk_percent"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	if body.DiskPercent == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "disk_percent is required")
+		return
+	}
+	err := a.Attention.SetDiskPercent(r.Context(), *body.DiskPercent)
+	if errors.Is(err, attention.ErrDiskPercentRange) {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	if err != nil {
+		a.internalError(w, "save attention settings", err)
+		return
+	}
+	user, _ := auth.UserFrom(r.Context())
+	a.Audit.Write(r.Context(), user.ID, "system.attention_settings", "system", "attention", remoteIP(r),
+		attentionSettings{DiskPercent: *body.DiskPercent})
+	a.handleGetAttentionSettings(w, r)
 }
 
 // diskTTL is how long Docker's disk figures are reused. Counting volume
