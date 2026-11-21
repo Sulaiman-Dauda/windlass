@@ -225,6 +225,7 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	err = srv.Shutdown(shutdownCtx)
+	deploySvc.DropWaiting("Windlass stopped; waiting deploys are kept in memory only")
 	// ctx has ended, so an automatic clean-up stops; wait for it to record
 	// its result before the database closes.
 	cleanupSvc.Wait()

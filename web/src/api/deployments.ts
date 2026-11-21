@@ -100,12 +100,53 @@ export function useRollback(project: string) {
   });
 }
 
+/** A deploy asked for while another ran. It has no number until it starts,
+ * and a restart of Windlass drops it. */
+export interface WaitingDeploy {
+  project: string;
+  trigger: string;
+  queued_at: string;
+  /** Deploy requests folded into this one. */
+  requests: number;
+  position: number;
+}
+
+/** POST /deployments answers 201 with the deployment, or 202 with
+ * {waiting} when one is already running. */
+export type DeployResult = Deployment | { waiting: WaitingDeploy };
+
+export function isWaiting(r: DeployResult): r is { waiting: WaitingDeploy } {
+  return "waiting" in r;
+}
+
 export function useCreateDeployment(project: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      api<Deployment>(`/projects/${project}/deployments`, { method: "POST" }),
+      api<DeployResult>(`/projects/${project}/deployments`, { method: "POST" }),
     onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["projects", project, "deployments"] }),
+  });
+}
+
+/** Polls while a deployment is active, because that is when a waiting
+ * deploy can start, and while one waits, so a deploy that could not start
+ * or was cancelled elsewhere leaves the list. */
+export function useWaitingDeploy(project: string, active: boolean) {
+  return useQuery<WaitingDeploy | null>({
+    queryKey: ["projects", project, "deployments", "waiting"],
+    queryFn: async () =>
+      (await api<{ waiting: WaitingDeploy | null }>(`/projects/${project}/deployments/waiting`)).waiting,
+    refetchInterval: (query) => (active || query.state.data ? 2000 : false),
+  });
+}
+
+export function useCancelWaiting(project: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api(`/projects/${project}/deployments/waiting`, { method: "DELETE" }),
+    onSettled: () =>
       qc.invalidateQueries({ queryKey: ["projects", project, "deployments"] }),
   });
 }

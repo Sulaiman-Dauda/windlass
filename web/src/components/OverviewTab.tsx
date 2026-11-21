@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { useProject } from "../api/projects";
 import {
   useCreateDeployment,
+  isWaiting,
   useDeployments,
   useServices,
   deploymentTone,
@@ -425,7 +426,10 @@ function FailedDeployNotice({ project }: { project: string }) {
             loading={deploy.isPending}
             onClick={() =>
               deploy.mutate(undefined, {
-                onSuccess: (n) => toast.info(`Deployment #${n.number} started`),
+                onSuccess: (n) =>
+                  isWaiting(n)
+                    ? toast.info("Deploy waiting", "It starts when the running deployment finishes.")
+                    : toast.info(`Deployment #${n.number} started`),
                 onError: (e) => toast.err("Could not start the deployment", errorText(e)),
               })
             }

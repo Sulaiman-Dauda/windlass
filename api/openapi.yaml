@@ -138,6 +138,15 @@ components:
               name: { type: string, enum: [dns, ports, certificate, route, container] }
               result: { type: string, enum: [ok, unknown, warn, fail] }
               detail: { type: string }
+    WaitingDeploy:
+      type: object
+      description: A deploy held until the running deployment finishes. It has no number until it starts.
+      properties:
+        project: { type: string }
+        trigger: { type: string, enum: [manual, webhook] }
+        queued_at: { type: string, format: date-time }
+        requests: { type: integer, description: Deploy requests folded into this one }
+        position: { type: integer, description: Place in the project's queue; always 1 }
     Deployment:
       type: object
       required: [id, number, status, triggered_by, created_at]
@@ -651,7 +660,7 @@ paths:
       summary: GitHub App push webhook, fans out to all matching projects (public, signature-verified)
       operationId: githubAppWebhook
       responses:
-        "200": { description: "{result, deployed[]}" }
+        "200": { description: "{result, deployed[], waiting[]}; waiting lists projects whose deploy waits for a running one" }
         "403": { description: Invalid signature }
 
   /webhooks/{provider}/{project}:
@@ -664,7 +673,7 @@ paths:
       responses:
         "201": { description: Deployment triggered }
         "200": { description: Ignored (branch mismatch or auto-deploy off) }
-        "202": { description: Skipped, a deployment is already running }
+        "202": { description: "{result: waiting, position}: a deployment is already running, so this one waits and starts when it finishes" }
         "403": { description: Signature verification failed }
 
   /events:
@@ -1160,7 +1169,45 @@ paths:
       security: [{ session: [] }, { bearerAuth: [] }]
       responses:
         "201": { description: Deployment queued }
-        "409": { description: "A deployment is already running (code conflict), or this is the first deploy and a stack started from this directory runs under another Compose project name, so deploying would start a second copy with empty volumes (code adoption_conflict, the message says how to fix it)" }
+        "202":
+          description: |
+            A deployment is already running, so this deploy waits and starts when it
+            finishes. It is held in memory: a restart drops it and logs that. A project
+            holds one waiting deploy; asking again while one waits adds to its requests.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  waiting: { $ref: "#/components/schemas/WaitingDeploy" }
+        "409": { description: "This is the first deploy and a stack started from this directory runs under another Compose project name, so deploying would start a second copy with empty volumes (code adoption_conflict, the message says how to fix it)" }
+
+  /projects/{name}/deployments/waiting:
+    get:
+      summary: The deploy waiting for the running deployment, if any
+      operationId: getWaitingDeploy
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200":
+          description: "{waiting: WaitingDeploy or null}"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  waiting:
+                    oneOf:
+                      - { $ref: "#/components/schemas/WaitingDeploy" }
+                      - { type: "null" }
+        "404": { description: "not_found: no such project" }
+    delete:
+      summary: Cancel the waiting deploy (member, or a deploy token)
+      description: Never cancels a deployment that is already running.
+      operationId: cancelWaitingDeploy
+      security: [{ session: [] }, { bearerAuth: [] }]
+      responses:
+        "200": { description: "{cancelled: WaitingDeploy}" }
+        "404": { description: "nothing_waiting: no deploy is waiting" }
 
   /projects/{name}/deployments/{number}:
     get:

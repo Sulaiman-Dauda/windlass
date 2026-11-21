@@ -53,6 +53,24 @@ was in. Jobs are reclaimed by their `running` status rather than being abandoned
 server reboot at the wrong moment does not leave a project half-updated with nobody
 watching.
 
+## One deployment at a time
+
+A project runs one deployment at a time. Press Deploy, or push with auto-deploy on, while one
+is running, and the new deploy waits: the Deployments tab lists it as Waiting above the
+running one, and it starts as soon as that one finishes, whether it succeeded or failed.
+
+- A project holds one waiting deploy. More requests while it waits are counted on it, not
+  added: a deploy builds whatever the branch and files hold when it starts, so a second one
+  would deploy the same thing.
+- Cancel on the Waiting row drops it. It never stops the deployment that is running.
+- The waiting deploy is kept in memory. If Windlass restarts before it starts, it is lost and
+  the log says so; deploy again.
+- A push that arrives during a rollback waits too, and then deploys the branch head, which
+  undoes the rollback. Turn auto-deploy off first if you mean the rollback to stay.
+- Rollback and Promote do not wait. They are refused while a deployment runs, because each
+  names an exact earlier state, and running it after a deploy you did not see finish could
+  undo that deploy.
+
 ## Rollback
 
 Every deployment is numbered, and any earlier deployment that succeeded can be rolled back
@@ -93,8 +111,8 @@ paste into the repository's webhook settings, once. Windlass checks every delive
 GitHub signature or the GitLab secret token, so an unsigned or wrongly signed request
 deploys nothing.
 
-A push that arrives while a deployment is already running is skipped, not queued. Deploy
-by hand, or push again, once the running one has finished.
+A push that arrives while a deployment is already running waits, and deploys once the
+running one has finished. See [One deployment at a time](#one-deployment-at-a-time).
 
 Manual is the default. A project only auto-deploys because you asked it to.
 

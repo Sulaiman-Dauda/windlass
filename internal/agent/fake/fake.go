@@ -75,6 +75,9 @@ type Fake struct {
 	DownVolumes []string
 	// UpRequests records every Compose().Up request in order.
 	UpRequests []agent.ComposeUpReq
+	// UpGate, when set, holds every Compose().Up until it is closed or
+	// receives, so a test can keep a deployment running.
+	UpGate chan struct{}
 	// CopiedVolumes records Docker().CopyVolume calls as "from>to".
 	CopiedVolumes []string
 	// Volumes is what Docker().VolumeSizes reports.
@@ -217,7 +220,15 @@ func (c composeFake) Up(ctx context.Context, req agent.ComposeUpReq, out agent.L
 	}
 	c.f.mu.Lock()
 	c.f.UpRequests = append(c.f.UpRequests, req)
+	gate := c.f.UpGate
 	c.f.mu.Unlock()
+	if gate != nil {
+		select {
+		case <-gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	c.f.emit(out, c.f.ComposeLog...)
 	return nil
 }

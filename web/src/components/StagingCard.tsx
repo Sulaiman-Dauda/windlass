@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useCan } from "../api/auth";
 import { useProject } from "../api/projects";
-import { deploymentTone, isActive, useCreateDeployment } from "../api/deployments";
+import { deploymentTone, isActive, isWaiting, useCreateDeployment } from "../api/deployments";
 import {
   shortCommit,
   useCopyToLive,
@@ -268,7 +268,8 @@ function PairCard({ st, onRecreate }: { st: StagingStatus; onRecreate?: () => vo
               loading={deploy.isPending}
               onClick={() =>
                 deploy.mutate(undefined, {
-                  onSuccess: (d) => navigate(`/projects/${st.staging}/deployments?d=${d.number}`),
+                  onSuccess: (d) =>
+                    navigate(`/projects/${st.staging}/deployments${isWaiting(d) ? "" : `?d=${d.number}`}`),
                   onError: (e) => toast.err("Could not deploy staging", errorText(e)),
                 })
               }

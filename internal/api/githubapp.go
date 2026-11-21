@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/windlass-dev/windlass/internal/auth"
-	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/git"
 )
 
@@ -244,7 +243,7 @@ func (a *API) handleAppWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deployed := []string{}
+	deployed, queued := []string{}, []string{}
 	for _, p := range projects {
 		if p.AutoDeploy == 0 || !p.GitRepo.Valid {
 			continue
@@ -262,17 +261,20 @@ func (a *API) handleAppWebhook(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		d, err := a.Deploy.Deploy(r.Context(), p.Name, "webhook")
-		if errors.Is(err, deploy.ErrDeployInProgress) {
-			continue
-		}
+		d, waiting, err := a.Deploy.DeployOrQueue(r.Context(), p.Name, "webhook")
 		if err != nil {
 			a.Logger.Warn("app webhook deploy", "project", p.Name, "error", err)
+			continue
+		}
+		if waiting != nil {
+			a.Audit.Write(r.Context(), 0, "webhook.queue", "project", p.Name, remoteIP(r),
+				map[string]any{"provider": "github-app", "requests": waiting.Requests})
+			queued = append(queued, p.Name)
 			continue
 		}
 		a.Audit.Write(r.Context(), 0, "webhook.deploy", "project", p.Name, remoteIP(r),
 			map[string]any{"provider": "github-app", "deployment": d.Number})
 		deployed = append(deployed, p.Name)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"result": "ok", "deployed": deployed})
+	writeJSON(w, http.StatusOK, map[string]any{"result": "ok", "deployed": deployed, "waiting": queued})
 }
