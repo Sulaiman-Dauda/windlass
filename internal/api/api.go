@@ -150,6 +150,9 @@ func (a *API) Routes(r chi.Router) {
 				r.Get("/system/attention/settings", a.handleGetAttentionSettings)
 				r.Put("/system/attention/settings", a.handleSetAttentionSettings)
 			}
+			r.Get("/system/audit", a.handleListAudit)
+			r.Get("/system/audit/actions", a.handleListAuditActions)
+			r.Get("/system/audit/export", a.handleExportAudit)
 			r.Get("/system/deploy/settings", a.handleGetDeploySettings)
 			r.Put("/system/deploy/settings", a.handleSetDeploySettings)
 			r.Get("/system/panel-domain", a.handleGetPanelDomain)
