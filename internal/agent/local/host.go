@@ -116,7 +116,7 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 	}
 
 	run := func(args ...string) error {
-		cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // G204: git subcommands built in this function
+		cmd := checkoutGit(ctx, args...)
 		cmd.Dir = target
 		cmd.Env = env
 		return streamCmd(cmd, out)
@@ -309,7 +309,7 @@ func (h hostLocal) GitSync(ctx context.Context, req agent.GitSyncReq, out agent.
 	} else {
 		// "--" keeps a URL from a hand-edited .windlass.json from being read as
 		// an option such as --upload-pack.
-		cmd := exec.CommandContext(ctx, "git", "clone", "--branch", req.Branch, "--single-branch", "--", req.URL, target) //nolint:gosec // G204: see above
+		cmd := checkoutGit(ctx, "clone", "--branch", req.Branch, "--single-branch", "--", req.URL, target)
 		cmd.Dir = dir
 		cmd.Env = env
 		if err := streamCmd(cmd, out); err != nil {
@@ -339,6 +339,16 @@ func logLine(out agent.LogSink, text string) {
 	if out != nil {
 		out(agent.LogLine{Stream: "stdout", Text: text, Time: time.Now().UTC()})
 	}
+}
+
+// checkoutGit is git for the commands that write the working tree, run under
+// umask 022. The windlass unit's UMask=0077 would make the checkout
+// owner-only, and a build's COPY keeps those modes: an image that switches to
+// a non-root user then cannot read its own files, entrypoint included. The
+// project directory above stays 0750, so this exposes nothing on the host.
+// A shell sets the mask because Go's umask is process-wide.
+func checkoutGit(ctx context.Context, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, "/bin/sh", append([]string{"-c", `umask 022 && exec git "$@"`, "git"}, args...)...) //nolint:gosec // G204: args reach git as "$@", never as shell text
 }
 
 // gitConfigEnv adds key=value to env as if passed with git -c. It uses
