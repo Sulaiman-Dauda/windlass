@@ -21,6 +21,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/deploy"
 	"github.com/windlass-dev/windlass/internal/events"
 	"github.com/windlass-dev/windlass/internal/git"
+	"github.com/windlass-dev/windlass/internal/notify"
 	"github.com/windlass-dev/windlass/internal/plugins"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
@@ -60,6 +61,8 @@ type API struct {
 	// SelfStat holds the panel's memory over the last hour; nil leaves the
 	// history out of /system/metrics.
 	SelfStat *selfstat.Ring
+	// Notify holds alert channels and the outbox; nil turns its routes off.
+	Notify *notify.Service
 
 	authLimiter *authRateLimiter
 	// preflightLimiter is separate so checks never lock an IP out of sign-in.
@@ -132,6 +135,9 @@ func (a *API) Routes(r chi.Router) {
 		r.Route("/projects", a.projectRoutes)
 		r.Route("/git", a.gitRoutes)
 		r.Route("/registries", a.registryRoutes)
+		if a.Notify != nil {
+			r.Route("/notifications", a.notificationRoutes)
+		}
 		r.Route("/templates", a.templateRoutes)
 		r.Route("/plugins", a.pluginRoutes)
 		r.Route("/users", a.userRoutes)

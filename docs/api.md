@@ -33,7 +33,7 @@ A token acts as the person who made it, limited to the access chosen when it was
 | Read only | `viewer` | Read projects, deployments, logs and metrics |
 | Deploy only | `viewer`, plus five routes | Also deploy, roll back, promote staging, restart and back up. Nothing else that writes: no compose, env, files, Git settings, domains, start, stop or restore |
 | Deploy and edit | `member` | Also create projects, edit compose and env, deploy, roll back, manage domains and backups |
-| Admin | `admin` | Also registries, Git connections, plugins, reading the S3 settings and panel domain, checking for updates, and image pruning |
+| Admin | `admin` | Also registries, reading alert channels and deliveries, Git connections, plugins, reading the S3 settings and panel domain, checking for updates, and image pruning |
 
 The limit is worked out on every request against the owner's current role, so demoting the
 owner reduces what their tokens can do at once, and deleting the owner deletes their

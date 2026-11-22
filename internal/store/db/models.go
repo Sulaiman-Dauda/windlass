@@ -133,6 +133,32 @@ type Job struct {
 	UpdatedAt string
 }
 
+type Notification struct {
+	ID            int64
+	ChannelID     int64
+	Event         string
+	Project       sql.NullString
+	Payload       string
+	Status        string
+	Attempts      int64
+	NextAttemptAt string
+	LastError     sql.NullString
+	CreatedAt     string
+	SentAt        sql.NullString
+}
+
+type NotificationChannel struct {
+	ID        int64
+	Name      string
+	Kind      string
+	ConfigEnc []byte
+	Enabled   int64
+	Events    string
+	Project   sql.NullString
+	CreatedAt string
+	UpdatedAt string
+}
+
 type Plugin struct {
 	Name      string
 	Enabled   int64
