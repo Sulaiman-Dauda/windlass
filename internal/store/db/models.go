@@ -8,6 +8,17 @@ import (
 	"database/sql"
 )
 
+type AlertIncident struct {
+	Key         string
+	Kind        string
+	Project     string
+	Title       string
+	Message     string
+	FirstSeenAt string
+	SeenAt      string
+	AlertedAt   sql.NullString
+}
+
 type ApiToken struct {
 	ID             int64
 	PublicID       string
@@ -129,6 +140,32 @@ type Job struct {
 	Attempts  int64
 	RunAfter  string
 	LockedAt  sql.NullString
+	CreatedAt string
+	UpdatedAt string
+}
+
+type Notification struct {
+	ID            int64
+	ChannelID     int64
+	Event         string
+	Project       sql.NullString
+	Payload       string
+	Status        string
+	Attempts      int64
+	NextAttemptAt string
+	LastError     sql.NullString
+	CreatedAt     string
+	SentAt        sql.NullString
+}
+
+type NotificationChannel struct {
+	ID        int64
+	Name      string
+	Kind      string
+	ConfigEnc []byte
+	Enabled   int64
+	Events    string
+	Project   sql.NullString
 	CreatedAt string
 	UpdatedAt string
 }

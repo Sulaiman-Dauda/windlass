@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -34,11 +35,36 @@ func (h hostLocal) HTTPCheck(ctx context.Context, req agent.HTTPCheckReq) (agent
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodGet, req.URL, nil)
+	target := req.URL
+	if req.Dial != "" {
+		host, _, err := net.SplitHostPort(req.Dial)
+		if err != nil || net.ParseIP(host) == nil {
+			return agent.HTTPCheckResult{}, fmt.Errorf("invalid health-check dial address %q", req.Dial)
+		}
+		direct := *parsed
+		direct.Scheme, direct.Host, direct.User = "http", req.Dial, nil
+		target = direct.String()
+	}
+	httpReq, err := http.NewRequestWithContext(requestCtx, http.MethodGet, target, nil)
 	if err != nil {
 		return agent.HTTPCheckResult{}, err
 	}
+	if req.Dial != "" {
+		httpReq.Host = parsed.Host
+		httpReq.Header.Set("X-Forwarded-Proto", parsed.Scheme)
+		httpReq.Header.Set("X-Forwarded-Host", parsed.Host)
+	}
 	response, err := http.DefaultClient.Do(httpReq)
+	viaURL := false
+	if err != nil && req.Dial != "" && dialFailed(err) {
+		// No route to the container from here; go through Caddy instead.
+		viaURL = true
+		httpReq, err = http.NewRequestWithContext(requestCtx, http.MethodGet, req.URL, nil)
+		if err != nil {
+			return agent.HTTPCheckResult{}, err
+		}
+		response, err = http.DefaultClient.Do(httpReq)
+	}
 	if err != nil {
 		return agent.HTTPCheckResult{}, err
 	}
@@ -47,7 +73,19 @@ func (h hostLocal) HTTPCheck(ctx context.Context, req agent.HTTPCheckReq) (agent
 	if err != nil {
 		return agent.HTTPCheckResult{}, err
 	}
-	return agent.HTTPCheckResult{StatusCode: response.StatusCode, Body: string(body)}, nil
+	return agent.HTTPCheckResult{
+		StatusCode: response.StatusCode,
+		Body:       string(body),
+		BehindPassword: viaURL && response.StatusCode == http.StatusUnauthorized &&
+			strings.Contains(response.Header.Get("WWW-Authenticate"), `realm="Staging"`),
+	}, nil
+}
+
+// dialFailed reports whether err is a failure to connect, as opposed to a
+// connection that was made and then failed.
+func dialFailed(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial"
 }
 
 // GitSync clones or updates a repository inside the project directory.

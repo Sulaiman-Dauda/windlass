@@ -34,6 +34,8 @@ confirm, and the dialog shows everything it is about to do:
   says so. The dialog shows the size and the free disk, and refuses a copy that would leave
   less than 1 GiB free.
 - **Promote automatically.** Off by default. See [Promoting](#promoting).
+- **Password.** On by default, because staging can hold a copy of live's data. See
+  [Password](#password).
 
 Staging then deploys for the first time and its log opens.
 
@@ -122,6 +124,34 @@ promoting it would roll live back too. Roll live back from its own Deployments t
 skips staging. Pushes to live's branch are ignored while the staging exists: they deploy to
 staging instead.
 
+## Password
+
+A new staging's domains ask for a user name and password (HTTP basic auth) before anything
+reaches the application. The user name is `staging`. Windlass makes a random 20-character
+password, or uses one of at least 12 characters you type, and shows it once when staging is
+created, with **Copy**. Windlass keeps only a bcrypt hash of it, in staging's
+`.windlass.json`, so it cannot show the password again. Caddy checks the password itself,
+so staging stays protected while Windlass is stopped.
+
+The staging card says whether the password is on. **New password** replaces it and shows
+the new one once; **Turn off** opens staging's domains to anyone. Accounts and API tokens
+without the secrets flag see the hash in `.windlass.json` as `********`. Setting the
+password is for a person at the panel, so API tokens cannot do it, either through the
+password endpoint or by writing a `.windlass.json` with a different `protect` entry.
+
+Things to know:
+
+- A `windlass.health.url` on a staging domain is checked against the container directly,
+  with the domain as the `Host` header and `X-Forwarded-Proto` set, so health checks pass
+  without the password. An application that redirects that request to HTTPS fails the check.
+  When Windlass runs in a container (the Docker Compose install) it cannot reach the app's
+  network, so the check goes through the domain, stops at the password, and only proves the
+  route is up. The deployment log says so.
+- Outside services that call staging, such as payment webhooks in test mode, get a 401.
+  Turn the password off while you test them.
+- A Windlass older than v0.63 ignores the password: after a downgrade, staging's domains
+  are open. Stop staging before downgrading.
+
 ## Compose files that differ
 
 Live and staging keep separate compose files, so a change made on staging (a new service, a
@@ -139,6 +169,7 @@ Guaranteed:
 - staging's containers, networks and volumes are its own Compose project, and the isolation
   check above runs before every staging deployment
 - staging's domains send `X-Robots-Tag: noindex`, so search engines do not index them
+- a staging with its password on answers 401 to anyone without it, Windlass running or not
 - staging's `.env` sets `WINDLASS_ENVIRONMENT=staging`
 - promotion deploys staging's commit and image digests, and nothing from staging's files
 
@@ -176,12 +207,16 @@ volume, even if it is live's. Remove `name:` and delete again.
 
 ## Where the link lives
 
-Staging's `.windlass.json` names its live project, its hostname rewrites and whether it
-promotes automatically:
+Staging's `.windlass.json` names its live project, its hostname rewrites, whether it
+promotes automatically and the hash of its password:
 
 ```json
-{ "staging": { "of": "shop", "auto_promote": false } }
+{ "staging": { "of": "shop", "auto_promote": false,
+  "protect": { "user": "staging", "hash": "$2a$12$..." } } }
 ```
+
+Deleting `protect` and saving the file turns the password off. A `hash` that is not a
+bcrypt hash keeps staging's domains off the proxy, rather than serving them open.
 
 The database keeps an index of the link that a fresh database rebuilds from that file, so
 the pair survives a lost or replaced SQLite file like everything else.

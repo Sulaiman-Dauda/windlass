@@ -21,6 +21,8 @@ A Compose control plane that does not own your containers.
   a staging copy does and does not keep away from live
 - [Backups and restore](./backups-and-restore.md), archives, database dumps, S3 and what a
   restore does not do
+- [Alerts](./alerts.md), webhook, ntfy, Discord, Slack and email channels, retries, and the
+  addresses Windlass will not send to
 - [Users and access](./users-and-access.md), roles, TOTP, OAuth sign-in and the privilege
   boundary
 
