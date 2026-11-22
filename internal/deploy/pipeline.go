@@ -383,10 +383,12 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 	start := 0
 	if resumeStep != "" {
 		for i, st := range steps {
-			// Sync runs again when resuming at Prepare: a job checkpointed
-			// there by a binary from before Sync moved first has not synced.
-			// Sync is safe to repeat, since a resumed deployment's commit is
-			// pinned.
+			// Sync runs again whenever a job resumes at Prepare, because a
+			// job checkpointed there by a binary from before Sync moved
+			// first has not synced. Repeating it is safe. This binary pinned
+			// the commit when Sync finished, so the same commit checks out
+			// again; an older binary's job syncs the branch tip, as that
+			// binary would have.
 			if st == resumeStep && st != stepPreparing {
 				start = i
 				break

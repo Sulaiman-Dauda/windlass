@@ -345,7 +345,7 @@ func logLine(out agent.LogSink, text string) {
 // umask 022. The windlass unit's UMask=0077 would make the checkout
 // owner-only, and a build's COPY keeps those modes: an image that switches to
 // a non-root user then cannot read its own files, entrypoint included. The
-// project directory above stays 0750, so this exposes nothing on the host.
+// project directory above stays 0700, so this exposes nothing on the host.
 // A shell sets the mask because Go's umask is process-wide.
 func checkoutGit(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, "/bin/sh", append([]string{"-c", `umask 022 && exec git "$@"`, "git"}, args...)...) //nolint:gosec // G204: args reach git as "$@", never as shell text

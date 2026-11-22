@@ -349,3 +349,30 @@ func TestValuesOutsideEnv(t *testing.T) {
 		t.Fatalf("issues = %+v", got)
 	}
 }
+
+// A Git staging's compose file can include files from src/, which only its
+// first deployment clones, so creating it must not resolve that file. The
+// fake resolves app-staging to no services, as compose would fail to.
+func TestCreateCopiesDomainsBeforeFirstClone(t *testing.T) {
+	e := newRecreateFixture(t)
+	ctx := context.Background()
+	e.svc.projects.DiscardStaging(ctx, e.old.Name)
+	delete(e.agent.Resolved, "app-staging")
+	calls := len(e.agent.Calls)
+
+	res, err := e.svc.Create(ctx, "app", Request{
+		Domains:      []DomainMap{{Live: "app.example.com", Staging: "stg.example.com"}},
+		Acknowledged: true, NoPassword: true,
+	}, "http://panel.invalid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(e.agent.Calls[calls:], "compose.config(app-staging)") {
+		t.Errorf("create resolved staging's compose file: %v", e.agent.Calls[calls:])
+	}
+	domains, err := e.svc.projects.Domains(ctx, res.Project.Name)
+	if err != nil || len(domains) != 1 || domains[0].Hostname != "stg.example.com" ||
+		domains[0].Service != "web" || domains[0].ContainerPort != 80 {
+		t.Errorf("staging domains = %+v, %v", domains, err)
+	}
+}
