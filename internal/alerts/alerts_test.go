@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -109,14 +110,8 @@ func kinds(evs []notify.Event) []string {
 
 func want(t *testing.T, got []notify.Event, kinds_ ...string) {
 	t.Helper()
-	g := kinds(got)
-	if len(g) != len(kinds_) {
+	if g := kinds(got); !slices.Equal(g, kinds_) {
 		t.Fatalf("sent %v, want %v", g, kinds_)
-	}
-	for i := range g {
-		if g[i] != kinds_[i] {
-			t.Fatalf("sent %v, want %v", g, kinds_)
-		}
 	}
 }
 

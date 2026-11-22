@@ -21,6 +21,17 @@ containers and certificates under 14 days.
   the fake can emit events.
 - Panel: Settings, Alerts, When to alert. Docs: `docs/alerts.md`.
 
+## Touches
+
+- `internal/alerts/`, `migrations/0014_alert_incidents.sql`,
+  `internal/store/queries/alert_incidents.sql`, `internal/store/db/`, `internal/agent/`
+  (event fields, fake emitter), `internal/api/notifications.go`, `cmd/windlass/main.go`,
+  `api/openapi.yaml`, `scaffold.json`, `docs/alerts.md`, `web/src/components/AlertChannels.tsx`
+
+## Leaves alone
+
+`internal/mcp`, the deploy pipeline, Caddy, the notify senders.
+
 ## Rules
 
 - Restart loops count die events, because the container list has no restart count and an
