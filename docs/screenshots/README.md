@@ -17,11 +17,13 @@ view is shot in both themes so pages can pair them to the reader's preference.
 
 These are real deployments, not mockups: five Compose projects running nginx, PostgreSQL,
 Uptime Kuma, linkding and n8n, with Caddy in front and three domains routed.
-The AI agents shot is the one exception: cropped to the page, with the panel domain answer
-stubbed to `windlass.example.com` so it shows the HTTPS state.
+Two answers are stubbed in the browser: the host name reads `demo-server`, and containers
+on the capture machine that are not part of the dataset are left out of the sidebar count.
+The AI agents shot is also cropped to the page, with its endpoint answer stubbed to
+`https://windlass.example.com/api/v1/mcp` so it shows the HTTPS state.
 
-The set was last reshot for v0.62, on 13/11/2026. The dashboard shows the Needs you list with
-two real rows: two of the five projects have volumes and no backup schedule.
+The set was last reshot for v0.63, on 22/11/2026. The dashboard shows the Needs you list with
+four real rows: four of the five projects have volumes and no backup schedule.
 
 ## Recordings
 
@@ -29,7 +31,7 @@ two real rows: two of the five projects have volumes and no backup schedule.
 | --- | --- |
 | Creating a project, saving its Compose file, deploying it and watching the log until nginx reports healthy | `deploy.gif` |
 
-Recorded on a local instance at 1280x900 and scaled to 960 px wide. The script asserts the deploy
+Recorded on a local instance (v0.63, 22/11/2026) at 1280x900 and scaled to 960 px wide. The script asserts the deploy
 log reports success, the service shows running and healthy, and the container answers HTTP 200
 before the recording is kept.
 
