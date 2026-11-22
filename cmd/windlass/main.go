@@ -25,6 +25,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/jobs"
 	"github.com/windlass-dev/windlass/internal/mcp"
+	"github.com/windlass-dev/windlass/internal/notify"
 	"github.com/windlass-dev/windlass/internal/plugins"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
@@ -159,6 +160,9 @@ func run() error {
 		Audit:     api.MCPAudit(auditLog),
 	})
 
+	notifySvc := notify.New(queries, box, logger)
+	go notifySvc.Run(ctx)
+
 	selfRing := selfstat.NewRing()
 	go selfRing.Run(ctx)
 
@@ -187,6 +191,7 @@ func run() error {
 		Attention:  attentionSvc,
 		Cleanup:    cleanupSvc,
 		SelfStat:   selfRing,
+		Notify:     notifySvc,
 	}
 
 	handler, err := server.New(cfg, logger, a)
