@@ -402,6 +402,12 @@ type DockerEvent struct {
 	ID     string    `json:"id"`
 	Name   string    `json:"name"`
 	Time   time.Time `json:"time"`
+	// Project and Service are the container's Compose labels, empty for a
+	// container Compose did not create.
+	Project string `json:"project,omitempty"`
+	Service string `json:"service,omitempty"`
+	// ExitCode is set on "die" events.
+	ExitCode string `json:"exit_code,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

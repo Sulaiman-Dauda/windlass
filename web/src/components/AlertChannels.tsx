@@ -245,6 +245,8 @@ export function AlertChannels() {
         )}
       </Card>
 
+      <AlertThresholds />
+
       {deliveries.data && deliveries.data.length > 0 && (
         <Card>
           <CardHeader
@@ -303,6 +305,145 @@ export function AlertChannels() {
         />
       )}
     </div>
+  );
+}
+
+interface Thresholds {
+  debounce_seconds: number;
+  realert_hours: number;
+  restart_count: number;
+  restart_minutes: number;
+  cert_days: number;
+  disk_percent: number;
+}
+
+const THRESHOLDS: {
+  key: keyof Thresholds;
+  label: string;
+  min: number;
+  max: number;
+  hint: string;
+}[] = [
+  {
+    key: "debounce_seconds",
+    label: "Wait before alerting (seconds)",
+    min: 0,
+    max: 3600,
+    hint: "A problem must last this long. Failed deploys and updates alert at once.",
+  },
+  {
+    key: "realert_hours",
+    label: "Repeat while open (hours)",
+    min: 1,
+    max: 168,
+    hint: "Errors and warnings that stay open are sent again this often.",
+  },
+  {
+    key: "restart_count",
+    label: "Restart loop: exits",
+    min: 2,
+    max: 50,
+    hint: "This many crashes of one service...",
+  },
+  {
+    key: "restart_minutes",
+    label: "Restart loop: within (minutes)",
+    min: 1,
+    max: 240,
+    hint: "...inside this many minutes is a restart loop.",
+  },
+  {
+    key: "cert_days",
+    label: "Certificate expiry (days)",
+    min: 1,
+    max: 29,
+    hint: "Caddy renews at 30 days left, so fewer than this means renewal is failing.",
+  },
+  {
+    key: "disk_percent",
+    label: "Disk full (%)",
+    min: 50,
+    max: 99,
+    hint: "Also the Needs you threshold on the overview.",
+  },
+];
+
+function AlertThresholds() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const current = useQuery<Thresholds>({
+    queryKey: ["notifications", "settings"],
+    queryFn: () => api("/notifications/settings"),
+  });
+  const [draft, setDraft] = useState<Record<string, string> | null>(null);
+  const values: Record<string, string> =
+    draft ??
+    Object.fromEntries(
+      THRESHOLDS.map((t) => [t.key, String(current.data?.[t.key] ?? "")]),
+    );
+  const save = useMutation({
+    mutationFn: () =>
+      api<Thresholds>("/notifications/settings", {
+        method: "PUT",
+        body: JSON.stringify(
+          Object.fromEntries(
+            THRESHOLDS.map((t) => [t.key, Number(values[t.key])]),
+          ),
+        ),
+      }),
+    onSuccess: (data) => {
+      qc.setQueryData(["notifications", "settings"], data);
+      setDraft(null);
+      toast.ok("Alert thresholds saved");
+    },
+  });
+  if (!current.data) return null;
+  return (
+    <Card>
+      <CardHeader
+        title="When to alert"
+        description="Each problem alerts once, sends one message when it clears, and repeats while open no more often than set here."
+      />
+      <form
+        className="grid gap-4 border-t border-hairline px-5 py-4 sm:grid-cols-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
+        {THRESHOLDS.map((t) => (
+          <Field key={t.key} label={t.label} hint={t.hint}>
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={t.min}
+              max={t.max}
+              required
+              value={values[t.key]}
+              onChange={(e) => setDraft({ ...values, [t.key]: e.target.value })}
+            />
+          </Field>
+        ))}
+        <div className="flex items-center gap-3 sm:col-span-2">
+          <Button
+            type="submit"
+            variant="primary"
+            loading={save.isPending}
+            disabled={!draft}
+          >
+            Save thresholds
+          </Button>
+          {draft && (
+            <Button type="button" onClick={() => setDraft(null)}>
+              Undo changes
+            </Button>
+          )}
+        </div>
+        <div className="sm:col-span-2">
+          <FormError error={save.error} />
+        </div>
+      </form>
+    </Card>
   );
 }
 

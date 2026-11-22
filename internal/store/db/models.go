@@ -8,6 +8,17 @@ import (
 	"database/sql"
 )
 
+type AlertIncident struct {
+	Key         string
+	Kind        string
+	Project     string
+	Title       string
+	Message     string
+	FirstSeenAt string
+	SeenAt      string
+	AlertedAt   sql.NullString
+}
+
 type ApiToken struct {
 	ID             int64
 	PublicID       string

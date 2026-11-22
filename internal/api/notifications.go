@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/windlass-dev/windlass/internal/alerts"
 	"github.com/windlass-dev/windlass/internal/auth"
 	"github.com/windlass-dev/windlass/internal/notify"
 )
@@ -21,12 +22,14 @@ func (a *API) notificationRoutes(r chi.Router) {
 	r.Get("/kinds", handleNotificationKinds)
 	r.Get("/channels", a.handleListChannels)
 	r.Get("/deliveries", a.handleListDeliveries)
+	r.Get("/settings", a.handleGetAlertSettings)
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RejectToken)
 		r.Post("/channels", a.handleCreateChannel)
 		r.Put("/channels/{id}", a.handleUpdateChannel)
 		r.Delete("/channels/{id}", a.handleDeleteChannel)
 		r.Post("/channels/{id}/test", a.handleTestChannel)
+		r.Put("/settings", a.handlePutAlertSettings)
 	})
 }
 
@@ -147,4 +150,24 @@ func (a *API) handleTestChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *API) handleGetAlertSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, alerts.LoadSettingsJSON(r.Context(), a.Queries))
+}
+
+func (a *API) handlePutAlertSettings(w http.ResponseWriter, r *http.Request) {
+	user, _ := auth.UserFrom(r.Context())
+	var in alerts.SettingsJSON
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid JSON body")
+		return
+	}
+	if err := alerts.SaveSettings(r.Context(), a.Queries, in); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	a.Attention.Invalidate()
+	a.Audit.Write(r.Context(), user.ID, "notification.settings_update", "settings", "alerts", remoteIP(r), in)
+	writeJSON(w, http.StatusOK, alerts.LoadSettingsJSON(r.Context(), a.Queries))
 }

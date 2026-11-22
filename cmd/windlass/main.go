@@ -14,6 +14,7 @@ import (
 
 	"github.com/windlass-dev/windlass/internal/agent/local"
 	"github.com/windlass-dev/windlass/internal/api"
+	"github.com/windlass-dev/windlass/internal/alerts"
 	"github.com/windlass-dev/windlass/internal/attention"
 	"github.com/windlass-dev/windlass/internal/audit"
 	"github.com/windlass-dev/windlass/internal/auth"
@@ -169,6 +170,7 @@ func run() error {
 	attentionSvc := attention.New(queries, ag, proxySvc, updateSvc, logger)
 	attentionSvc.SetDrift(deploySvc)
 	go watchDrift(ctx, bus, attentionSvc)
+	go alerts.New(queries, ag, attentionSvc, notifySvc, bus, logger).Run(ctx)
 
 	a := &api.API{
 		Auth:       authSvc,

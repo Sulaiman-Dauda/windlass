@@ -27,6 +27,36 @@ stored value. Changing where a secret is sent (the ntfy server, or the SMTP serv
 security or username) clears the stored token or password, so enter it again: an edit must
 not send an old secret to a new server.
 
+## Events
+
+| Event | When it is sent |
+| --- | --- |
+| `deploy_failed` | A project's latest deploy failed. Sent at once. |
+| `deploy_succeeded` | A deploy finished. Only to channels that pick it. |
+| `container_died` | A container exited with a non-zero code, was not stopped on purpose, and its service has no running container. |
+| `restart_loop` | One service crashed 3 times inside 10 minutes. |
+| `unhealthy` | A container fails its health check. |
+| `cert_expiring` | A domain's certificate expires in under 14 days, or has expired. Windlass dials each domain once a day. Caddy renews at 30 days left, so this means renewal is failing. |
+| `disk`, `no_backup`, `proxy`, `update`, `drift`, `dns`, `caddy_resume`, `binary_owner` | The matching row appears under Needs you on the overview. |
+
+Windlass checks once a minute. Each problem is one incident:
+
+- It alerts once the problem has lasted 2 minutes, so a blip sends nothing. A failed deploy
+  and an available update alert at once.
+- It sends one message saying it cleared, once the problem has been gone for two checks in a
+  row.
+- An error or warning that stays open is sent again once a day. An available update or
+  changed files are sent once.
+- A crash loop is one `restart_loop` alert, not one per crash and not a `container_died` as
+  well.
+
+Open incidents are kept in the database, so restarting Windlass does not repeat an alert or
+lose a recovery. Every number above is a setting under **When to alert** on the same page:
+the wait before alerting, how often an open problem repeats, the restart loop's crashes and
+minutes, the certificate days and the disk percentage (shared with Needs you).
+
+A backup that failed is not an event yet; it comes with the backup work in v0.64.
+
 ## Delivery
 
 Alerts go through an outbox in the database, so an alert raised while a channel is down is
@@ -102,5 +132,6 @@ The body:
 The routes are under `/api/v1/notifications` and are admin only. Reading channels and
 deliveries works with an admin API token. Adding, changing, deleting and testing a channel
 needs a browser session, like the S3 destination: a leaked token must not be able to send
-your events somewhere else. Every change and test is in the audit log. There is no MCP
+your events somewhere else. The same goes for `PUT /notifications/settings`, which sets the
+thresholds above. Every change and test is in the audit log. There is no MCP
 tool for channels. See [API](./api.md).

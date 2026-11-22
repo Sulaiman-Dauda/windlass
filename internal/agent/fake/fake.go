@@ -26,6 +26,7 @@ type Fake struct {
 	// RegistryLogins records host -> username for each docker login performed.
 	RegistryLogins map[string]string
 	mu             sync.Mutex
+	eventSubs      []chan agent.DockerEvent
 
 	Node agent.NodeInfo
 
@@ -449,8 +450,39 @@ func (d dockerFake) Events(ctx context.Context, out func(agent.DockerEvent)) err
 	if err := d.f.record("docker.events", nil); err != nil {
 		return err
 	}
-	<-ctx.Done()
-	return ctx.Err()
+	ch := make(chan agent.DockerEvent, 16)
+	d.f.mu.Lock()
+	d.f.eventSubs = append(d.f.eventSubs, ch)
+	d.f.mu.Unlock()
+	defer func() {
+		d.f.mu.Lock()
+		for i, c := range d.f.eventSubs {
+			if c == ch {
+				d.f.eventSubs = append(d.f.eventSubs[:i], d.f.eventSubs[i+1:]...)
+				break
+			}
+		}
+		d.f.mu.Unlock()
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ev := <-ch:
+			out(ev)
+		}
+	}
+}
+
+// EmitDockerEvent sends ev to every running Docker().Events call. It
+// returns how many received it.
+func (f *Fake) EmitDockerEvent(ev agent.DockerEvent) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, ch := range f.eventSubs {
+		ch <- ev
+	}
+	return len(f.eventSubs)
 }
 
 // ---------------------------------------------------------------------------
