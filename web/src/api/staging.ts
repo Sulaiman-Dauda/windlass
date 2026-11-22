@@ -35,6 +35,10 @@ export interface StagingRequest {
   copy_data?: boolean;
   auto_promote?: boolean;
   acknowledged?: boolean;
+  /** Leave staging's domains open; by default they ask for a password. */
+  no_password?: boolean;
+  /** 12 to 72 characters; empty generates one. */
+  password?: string;
 }
 
 export interface Preflight {
@@ -61,6 +65,9 @@ export interface CreateResult {
     skipped: string[];
     webhook_secret?: string;
     webhook_registered: boolean;
+    /** Shown once; Windlass keeps only its hash. */
+    password?: string;
+    password_user?: string;
   };
 }
 
@@ -74,6 +81,8 @@ export interface StagingStatus {
   live: string;
   staging: string;
   auto_promote: boolean;
+  password_protected: boolean;
+  password_user?: string;
   branch?: string;
   live_branch?: string;
   live_current: DeploymentRef | null;
@@ -163,6 +172,22 @@ export function useSetAutoPromote(staging: string) {
   return useMutation({
     mutationFn: (auto_promote: boolean) =>
       api(`/projects/${staging}/staging`, { method: "PUT", body: JSON.stringify({ auto_promote }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["staging"] }),
+  });
+}
+
+export interface PasswordResult {
+  password_protected: boolean;
+  password_user?: string;
+  password?: string;
+}
+
+/** Sets a new password (the one given, or a generated one) or, with enabled false, turns it off. */
+export function useSetStagingPassword(staging: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { enabled: boolean; password?: string }) =>
+      api<PasswordResult>(`/projects/${staging}/staging/password`, { method: "PUT", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["staging"] }),
   });
 }

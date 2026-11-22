@@ -22,8 +22,12 @@ func TestRecreateInterruptedStaging(t *testing.T) {
 	cookie := e.login(t)
 	e.prepareDeployableProject(t, cookie, "app")
 	ctx := context.Background()
+	protect, err := projects.NewStagingProtect("the old staging password")
+	if err != nil {
+		t.Fatal(err)
+	}
 	old, err := e.api.Projects.CreateStagingCopy(ctx, projects.CopyReq{
-		Live: "app", Env: map[string]string{"VALUE": "keep-staging"}, AutoPromote: true,
+		Live: "app", Env: map[string]string{"VALUE": "keep-staging"}, AutoPromote: true, Protect: protect,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,6 +86,13 @@ func TestRecreateInterruptedStaging(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "keep-staging") {
 		t.Fatal("recreate response exposed an environment value")
+	}
+	// The password is kept, not replaced by one nobody was shown.
+	if strings.Contains(rec.Body.String(), `"password"`) {
+		t.Errorf("recreate returned a password: %s", rec.Body.String())
+	}
+	if kept, err := e.api.Projects.StagingProtection(ctx, "app-staging"); err != nil || kept == nil || kept.Hash != protect.Hash {
+		t.Errorf("recreated protection = %+v, %v", kept, err)
 	}
 	var count int
 	if err := e.sqlDB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'project.staging_recreate' AND resource_id = 'app-staging'`).Scan(&count); err != nil {

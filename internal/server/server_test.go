@@ -26,6 +26,7 @@ import (
 	"github.com/windlass-dev/windlass/internal/events"
 	"github.com/windlass-dev/windlass/internal/git"
 	"github.com/windlass-dev/windlass/internal/jobs"
+	"github.com/windlass-dev/windlass/internal/notify"
 	"github.com/windlass-dev/windlass/internal/plugins"
 	"github.com/windlass-dev/windlass/internal/projects"
 	"github.com/windlass-dev/windlass/internal/proxy"
@@ -124,6 +125,7 @@ func newTestEnv(t *testing.T) *testEnv {
 		MCP:       http.NotFoundHandler(),
 		Attention: attention.New(queries, ag, proxySvc, nil, logger),
 		Cleanup:   cleanup.New(runnerCtx, queries, ag.Docker(), logger, nil),
+		Notify:    notify.New(queries, box, logger),
 	}
 	h, err := New(config.Config{Addr: ":0", DataDir: dir}, logger, a)
 	if err != nil {

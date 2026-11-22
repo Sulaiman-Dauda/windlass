@@ -81,12 +81,17 @@ sites and routes you add to Caddy yourself are not touched. See
 - Sessions last seven days and are rows on the server, so signing out or deleting a user ends
   them at once.
 - Requests that change state are refused when a browser marks them as cross-origin.
-- Stored credentials (S3 keys, Git, GitHub App and registry credentials, OAuth secrets,
+- Stored credentials (S3 keys, Git, GitHub App and registry credentials, alert channel
+  secrets, OAuth secrets,
   TOTP secrets and the copy of each project's env values in SQLite) are encrypted with
   `data/secret.key`. The key sits beside the database, so a copy of the data directory
   is a copy of every one of them. Registry credentials are also stored by `docker login`
   itself, unencrypted as Docker always keeps them, in
   `/var/lib/windlass/.docker/config.json`.
+
+- Alert webhooks are never sent to loopback, private or link-local addresses, checked after
+  DNS on the address being connected to, so an alert cannot be aimed at the socket proxy or
+  the Caddy admin API. Email may use a relay on the same host. See [Alerts](./alerts.md).
 
 Roles and what each can do are in [Users and access](./users-and-access.md).
 

@@ -402,6 +402,12 @@ type DockerEvent struct {
 	ID     string    `json:"id"`
 	Name   string    `json:"name"`
 	Time   time.Time `json:"time"`
+	// Project and Service are the container's Compose labels, empty for a
+	// container Compose did not create.
+	Project string `json:"project,omitempty"`
+	Service string `json:"service,omitempty"`
+	// ExitCode is set on "die" events.
+	ExitCode string `json:"exit_code,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -463,6 +469,16 @@ type Route struct {
 	// NoIndex adds "X-Robots-Tag: noindex" to every response, so search
 	// engines leave a staging site out.
 	NoIndex bool `json:"no_index,omitempty"`
+	// BasicAuth asks every visitor for this account before anything else
+	// runs. Nil leaves the route open.
+	BasicAuth *RouteAuth `json:"basic_auth,omitempty"`
+}
+
+// RouteAuth is one HTTP basic auth account. Hash is bcrypt, never the
+// password.
+type RouteAuth struct {
+	User string `json:"user"`
+	Hash string `json:"hash"`
 }
 
 // ---------------------------------------------------------------------------
@@ -663,11 +679,20 @@ var ErrBranchNotFound = errors.New("branch not found at the remote")
 type HTTPCheckReq struct {
 	URL     string `json:"url"`
 	Timeout int    `json:"timeout_seconds"`
+	// Dial, an IP and port, sends the request there over plain HTTP instead,
+	// with the URL's host as the Host header, the way Caddy proxies it. A
+	// staging's checks use it to get past the password on its domain.
+	Dial string `json:"dial,omitempty"`
 }
 
 type HTTPCheckResult struct {
 	StatusCode int    `json:"status_code"`
 	Body       string `json:"body"`
+	// BehindPassword is set when Dial could not connect (Windlass in a
+	// container cannot reach app networks), the check went through the URL
+	// instead, and the staging password answered it: the route is up, but
+	// the app behind it was not checked.
+	BehindPassword bool `json:"behind_password,omitempty"`
 }
 
 type HostMetrics struct {

@@ -3,6 +3,7 @@ package local
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +57,54 @@ type caddyHandle struct {
 	StatusCode int                 `json:"status_code,omitempty"` // static_response
 	Headers    map[string][]string `json:"headers,omitempty"`     // static_response
 	Response   *caddyHeaderOps     `json:"response,omitempty"`    // headers
+	Providers  *caddyAuthProviders `json:"providers,omitempty"`   // authentication
+}
+
+type caddyAuthProviders struct {
+	HTTPBasic *caddyHTTPBasic `json:"http_basic,omitempty"`
+}
+
+type caddyHTTPBasic struct {
+	Hash     caddyHashAlgo      `json:"hash"`
+	Accounts []caddyAuthAccount `json:"accounts"`
+	Realm    string             `json:"realm,omitempty"`
+	// HashCache keeps checked passwords in memory, so bcrypt runs once per
+	// visitor and not on every request. Present and empty turns it on.
+	HashCache *struct{} `json:"hash_cache,omitempty"`
+}
+
+type caddyHashAlgo struct {
+	Algorithm string `json:"algorithm"`
+}
+
+type caddyAuthAccount struct {
+	Username string `json:"username"`
+	// Password is the bcrypt hash, base64-encoded as Caddy's JSON wants it.
+	Password string `json:"password"`
+}
+
+// authHandle renders a basic auth handler for one account.
+func authHandle(a agent.RouteAuth) caddyHandle {
+	return caddyHandle{Handler: "authentication", Providers: &caddyAuthProviders{HTTPBasic: &caddyHTTPBasic{
+		Hash:      caddyHashAlgo{Algorithm: "bcrypt"},
+		Accounts:  []caddyAuthAccount{{Username: a.User, Password: base64.StdEncoding.EncodeToString([]byte(a.Hash))}},
+		Realm:     "Staging",
+		HashCache: &struct{}{},
+	}}}
+}
+
+// readAuth is authHandle's inverse, for CurrentRoutes.
+func readAuth(h caddyHandle) *agent.RouteAuth {
+	if h.Handler != "authentication" || h.Providers == nil || h.Providers.HTTPBasic == nil ||
+		len(h.Providers.HTTPBasic.Accounts) == 0 {
+		return nil
+	}
+	acct := h.Providers.HTTPBasic.Accounts[0]
+	hash, err := base64.StdEncoding.DecodeString(acct.Password)
+	if err != nil {
+		hash = []byte(acct.Password)
+	}
+	return &agent.RouteAuth{User: acct.Username, Hash: string(hash)}
 }
 
 type caddyHeaderOps struct {
@@ -103,6 +152,10 @@ func buildRoutesObject(routes []agent.Route) caddyRoute {
 
 	for _, r := range routes {
 		var handle []caddyHandle
+		if r.BasicAuth != nil {
+			// First, so nothing reaches the application without the password.
+			handle = append(handle, authHandle(*r.BasicAuth))
+		}
 		if r.NoIndex {
 			// The headers handler sets the header before proxying, so it is on
 			// every response, the application's errors included.
@@ -571,6 +624,9 @@ func (p proxyLocal) CurrentRoutes(ctx context.Context) ([]agent.Route, error) {
 				}
 				if ih.Handler == "headers" && ih.Response != nil && len(ih.Response.Set["X-Robots-Tag"]) > 0 {
 					route.NoIndex = true
+				}
+				if a := readAuth(ih); a != nil {
+					route.BasicAuth = a
 				}
 			}
 			out = append(out, route)

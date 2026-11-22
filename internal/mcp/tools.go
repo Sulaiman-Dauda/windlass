@@ -213,7 +213,8 @@ func catalogue() []toolDef {
 				Name:  "get_staging",
 				Title: "Get staging status",
 				Description: "Compare a project's staging with live: which deployment each is on, whether staging is " +
-					"ahead and can be promoted (and why not), auto-promote, branches, and which Compose files " +
+					"ahead and can be promoted (and why not), auto-promote, whether its domains ask for a password " +
+					"(password_protected; the password is never returned), branches, and which Compose files " +
 					"differ once staging's own hostnames are allowed for. Works from either the live project or " +
 					"its staging. It does not compare env keys or values.",
 				Annotations: readOnly,

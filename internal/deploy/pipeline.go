@@ -14,7 +14,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,7 +46,12 @@ const (
 )
 
 // stepOrder drives resume: a reclaimed job re-executes from its checkpoint.
-var stepOrder = []string{stepPreparing, stepSyncing, stepPulling, stepBuilding, stepApplying, stepVerifying}
+//
+// Sync comes before Prepare because a Git project's compose file can name
+// files in the checkout (include: src/compose.yaml, build: ./src). Validated
+// first, a new project's compose fails on a src/ that has never been cloned,
+// and an existing one is checked against the previous commit's files.
+var stepOrder = []string{stepSyncing, stepPreparing, stepPulling, stepBuilding, stepApplying, stepVerifying}
 
 // rollbackSteps skip sync/pull/build: pulled images are pinned to recorded
 // digests, which compose up fetches again if they were pruned.
@@ -53,7 +61,7 @@ var rollbackSteps = []string{stepPreparing, stepApplying, stepVerifying}
 // service built on the server has no digest a registry can return, and its
 // old image is usually gone once a newer build replaced the tag, so building
 // the old commit is the only way to get its earlier code back.
-var rollbackGitSteps = []string{stepPreparing, stepSyncing, stepBuilding, stepApplying, stepVerifying}
+var rollbackGitSteps = []string{stepSyncing, stepPreparing, stepBuilding, stepApplying, stepVerifying}
 
 const rollbackFile = "compose.rollback.yaml"
 
@@ -375,7 +383,11 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 	start := 0
 	if resumeStep != "" {
 		for i, st := range steps {
-			if st == resumeStep {
+			// Sync runs again when resuming at Prepare: a job checkpointed
+			// there by a binary from before Sync moved first has not synced.
+			// Sync is safe to repeat, since a resumed deployment's commit is
+			// pinned.
+			if st == resumeStep && st != stepPreparing {
 				start = i
 				break
 			}
@@ -616,6 +628,46 @@ func (s *Service) runStep(ctx context.Context, step string, d db.Deployment, pl 
 	return fmt.Errorf("unknown step %q", step)
 }
 
+// protectedHosts maps each of a password-protected staging's hostnames to
+// its domain, so its health checks can go to the container and not meet
+// the password on the way. Empty for any other project.
+func (s *Service) protectedHosts(ctx context.Context, project string) map[string]projects.DomainConfig {
+	protect, err := s.projects.StagingProtection(ctx, project)
+	if err != nil || protect == nil {
+		return nil
+	}
+	domains, err := s.projects.Domains(ctx, project)
+	if err != nil {
+		s.logger.Warn("staging health checks: domains unreadable", "project", project, "error", err)
+		return nil
+	}
+	out := make(map[string]projects.DomainConfig, len(domains))
+	for _, d := range domains {
+		out[strings.ToLower(d.Hostname)] = d
+	}
+	return out
+}
+
+func urlHostname(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// containerDial is the address Caddy would proxy d to. Empty when the
+// service has no running container yet, which sends the check through
+// Caddy, where it fails with a 401 until the container is up.
+func containerDial(containers []agent.Container, d projects.DomainConfig) string {
+	for _, c := range containers {
+		if c.ComposeService == d.Service && c.State == "running" && c.IPAddress != "" {
+			return net.JoinHostPort(c.IPAddress, strconv.FormatInt(d.ContainerPort, 10))
+		}
+	}
+	return ""
+}
+
 // verify polls compose ps until everything is running/healthy or the
 // timeout expires.
 func (s *Service) verify(ctx context.Context, deploymentID int64, project string) error {
@@ -625,7 +677,9 @@ func (s *Service) verify(ctx context.Context, deploymentID int64, project string
 		return err
 	}
 	stableSince := make(map[string]time.Time, len(config.HealthChecks))
+	warnedBehind := map[string]bool{}
 	lastHealthError := ""
+	protectedHosts := s.protectedHosts(ctx, project)
 	for {
 		statuses, err := s.agent.Compose().PS(ctx, project)
 		if err != nil {
@@ -652,10 +706,33 @@ func (s *Service) verify(ctx context.Context, deploymentID int64, project string
 		}
 		if allGood && len(statuses) > 0 {
 			checksGood := true
+			var containers []agent.Container
 			for _, check := range config.HealthChecks {
-				result, checkErr := s.agent.Host().HTTPCheck(ctx, agent.HTTPCheckReq{URL: check.URL, Timeout: 10})
+				req := agent.HTTPCheckReq{URL: check.URL, Timeout: 10}
+				if dc, ok := protectedHosts[urlHostname(check.URL)]; ok {
+					if containers == nil {
+						containers, _ = s.agent.Docker().ListContainers(ctx, agent.ContainerFilter{ComposeProject: project})
+					}
+					req.Dial = containerDial(containers, dc)
+				}
+				result, checkErr := s.agent.Host().HTTPCheck(ctx, req)
 				key := check.Service + "|" + check.URL
 				switch {
+				case checkErr == nil && req.Dial != "" && result.BehindPassword:
+					// Only the route could be checked; count it as up.
+					if !warnedBehind[key] {
+						warnedBehind[key] = true
+						s.event(ctx, deploymentID, "log", fmt.Sprintf("%s health URL: Windlass cannot reach the container directly, so the check "+
+							"stopped at the staging password and only proves the route is up", check.Service))
+					}
+					if stableSince[key].IsZero() {
+						stableSince[key] = time.Now()
+					}
+					if time.Since(stableSince[key]) < time.Duration(check.StabilitySeconds)*time.Second {
+						checksGood = false
+						lastHealthError = fmt.Sprintf("%s health check is waiting for its %ds stability window",
+							check.Service, check.StabilitySeconds)
+					}
 				case checkErr != nil:
 					lastHealthError = fmt.Sprintf("%s health URL: %v", check.Service, checkErr)
 					stableSince[key] = time.Time{}

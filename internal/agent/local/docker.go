@@ -597,6 +597,10 @@ func (d dockerLocal) Events(ctx context.Context, out func(agent.DockerEvent)) er
 				ID:     m.Actor.ID,
 				Name:   m.Actor.Attributes["name"],
 				Time:   time.Unix(m.Time, 0).UTC(),
+
+				Project:  m.Actor.Attributes["com.docker.compose.project"],
+				Service:  m.Actor.Attributes["com.docker.compose.service"],
+				ExitCode: m.Actor.Attributes["exitCode"],
 			})
 		}
 	}

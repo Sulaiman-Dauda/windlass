@@ -15,6 +15,9 @@ type retainedSettings struct {
 	env      map[string]string
 	domains  []projects.DomainConfig
 	rewrites []projects.HostnameRewrite
+	// protect keeps the staging's password, so a recreate neither drops it
+	// nor makes a new one the person was never shown. Nil keeps none.
+	protect *projects.StagingProtect
 }
 
 func recreatable(d db.Deployment) bool {
@@ -56,8 +59,8 @@ func (s *Service) Recreate(ctx context.Context, name string, acknowledged bool, 
 	if len(projects.OutsideWorldKeys(env)) > 0 && !acknowledged {
 		return Result{}, ErrNotAcknowledged
 	}
-	retained := &retainedSettings{env: env, domains: domains, rewrites: cfg.Rewrites}
-	req := Request{Branch: p.GitBranch.String, CopyData: true,
+	retained := &retainedSettings{env: env, domains: domains, rewrites: cfg.Rewrites, protect: cfg.Protect}
+	req := Request{NoPassword: cfg.Protect == nil, Branch: p.GitBranch.String, CopyData: true,
 		AutoPromote: cfg.AutoPromote, Acknowledged: acknowledged}
 	pf, err := s.preflight(ctx, live.Name, req, retained, p.ID)
 	if err != nil {

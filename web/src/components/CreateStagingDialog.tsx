@@ -34,6 +34,8 @@ export default function CreateStagingDialog({ live, onClose }: { live: string; o
   const [env, setEnv] = useState<Record<string, string>>({});
   const [copyData, setCopyData] = useState<boolean | null>(null);
   const [autoPromote, setAutoPromote] = useState(false);
+  const [protect, setProtect] = useState(true);
+  const [password, setPassword] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [created, setCreated] = useState<CreateResult | null>(null);
 
@@ -50,14 +52,18 @@ export default function CreateStagingDialog({ live, onClose }: { live: string; o
   const free = p?.projects_free_bytes ?? null;
   const flagged = p?.flagged_env ?? [];
   const edited = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== ""));
-  const ready = !!p && p.can_create && (flagged.length === 0 || acknowledged) && !pf.isFetching;
+  // The server counts bytes, as bcrypt does.
+  const bytes = new TextEncoder().encode(password).length;
+  const passwordOK = !protect || password === "" || (bytes >= 12 && bytes <= 72);
+  const ready = !!p && p.can_create && (flagged.length === 0 || acknowledged) && passwordOK && !pf.isFetching;
 
   const submit = () =>
     create.mutate(
-      { ...req, copy_data: copy, env: Object.keys(edited).length ? edited : undefined, auto_promote: autoPromote, acknowledged },
+      { ...req, copy_data: copy, env: Object.keys(edited).length ? edited : undefined, auto_promote: autoPromote, acknowledged,
+        no_password: !protect, password: protect && password ? password : undefined },
       {
         onSuccess: (res) => {
-          if (res.result.webhook_secret && !res.result.webhook_registered) {
+          if (res.result.password || (res.result.webhook_secret && !res.result.webhook_registered)) {
             setCreated(res);
             return;
           }
@@ -197,6 +203,28 @@ export default function CreateStagingDialog({ live, onClose }: { live: string; o
                   </li>
                 ))}
               </ul>
+            )}
+            <Switch
+              checked={protect}
+              onChange={setProtect}
+              label="Ask for a password"
+              description="Staging's domains ask for a user name and password before anything reaches the application, because staging can hold a copy of live's data. Outside services that call staging, such as payment webhooks, get a 401."
+            />
+            {protect && (
+              <div className="ml-12">
+                <Field
+                  label="Password"
+                  hint="Leave empty for a random one. At least 12 characters. It is shown once after staging is created."
+                  error={passwordOK ? undefined : "Use 12 to 72 characters, or leave it empty."}
+                >
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="new-password"
+                  />
+                </Field>
+              </div>
             )}
             <Switch
               checked={autoPromote}

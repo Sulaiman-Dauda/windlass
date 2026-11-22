@@ -75,7 +75,7 @@ Open the project, go to **Deployments**, press **Deploy**.
 A deployment runs a fixed sequence, and the log streams as it goes:
 
 ```
-Prepare -> Sync -> Pull -> Build -> Start -> Verify
+Sync -> Prepare -> Pull -> Build -> Start -> Verify
 ```
 
 The last step matters. Windlass waits for Docker healthchecks to report healthy, and for

@@ -232,6 +232,64 @@ func TestCaddyRoutingEndToEnd(t *testing.T) {
 		t.Errorf("live route has X-Robots-Tag %q", tag)
 	}
 
+	// A staging password: Caddy refuses the route without it, serves it
+	// with it, and live is untouched.
+	protect, err := projects.NewStagingProtect("integration password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := proj.SetStagingProtect(ctx, stg.Project.Name, protect); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Sync(ctx); err != nil {
+		t.Fatalf("sync with password: %v", err)
+	}
+	authGet := func(host, user, pass string) int {
+		t.Helper()
+		client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+			RootCAs: roots, ServerName: host, MinVersion: tls.VersionTLS12,
+		}}}
+		r, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://127.0.0.1:18443/", nil)
+		r.Host = host
+		if user != "" {
+			r.SetBasicAuth(user, pass)
+		}
+		resp, err := client.Do(r)
+		if err != nil {
+			t.Fatalf("%s: %v", host, err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := authGet("staging-it.example.com", "", ""); code != http.StatusUnauthorized {
+		t.Errorf("staging without password = %d, want 401", code)
+	}
+	if code := authGet("staging-it.example.com", "staging", "wrong password!"); code != http.StatusUnauthorized {
+		t.Errorf("staging with a wrong password = %d, want 401", code)
+	}
+	if code := authGet("staging-it.example.com", "staging", "integration password"); code != http.StatusOK {
+		t.Errorf("staging with the password = %d, want 200", code)
+	}
+	if code := authGet("it.example.com", "", ""); code != http.StatusOK {
+		t.Errorf("live with no password = %d, want 200", code)
+	}
+	if current, err := ag.Proxy().CurrentRoutes(ctx); err == nil {
+		for _, r := range current {
+			if (r.BasicAuth != nil) != (r.Hostname == "staging-it.example.com") {
+				t.Errorf("read back route %s with BasicAuth %+v", r.Hostname, r.BasicAuth)
+			}
+		}
+	}
+	if err := proj.SetStagingProtect(ctx, stg.Project.Name, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Sync(ctx); err != nil {
+		t.Fatalf("sync without password: %v", err)
+	}
+	if code := authGet("staging-it.example.com", "", ""); code != http.StatusOK {
+		t.Errorf("staging after turning the password off = %d, want 200", code)
+	}
+
 	// The Settings-managed panel hostname is a separate owned route and also
 	// receives a trusted certificate without touching application/user routes.
 	if err := svc.SetPanelDomain(ctx, "panel.example.com"); err != nil {
