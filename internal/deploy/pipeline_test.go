@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -370,6 +371,76 @@ func TestResumeAfterCrash(t *testing.T) {
 	}
 	if !strings.Contains(calls, "compose.up(app)") || !strings.Contains(calls, "compose.ps(app)") {
 		t.Errorf("resume skipped applying/verifying: %s", calls)
+	}
+}
+
+// TestGitSyncRunsBeforeValidation: a Git project's compose file can include
+// files from the checkout, so they must be there when it is validated.
+func TestGitSyncRunsBeforeValidation(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	if _, err := e.deploy.projects.Create(ctx, projects.CreateReq{
+		Name: "site", Source: "git", GitRepo: "https://example.com/site.git", Branch: "main",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.agent.Statuses["site"] = []agent.ServiceStatus{{Service: "web", Name: "site-web-1", State: "running"}}
+	e.agent.GitCommit = "1111111111111111111111111111111111111111"
+
+	d, err := e.deploy.Deploy(ctx, "site", "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final := e.runUntilFinished(t, d.ID); final.Status != "succeeded" {
+		t.Fatalf("status = %s, error = %s", final.Status, final.Error.String)
+	}
+	sync, config := slices.Index(e.agent.Calls, "host.gitsync(site)"), slices.Index(e.agent.Calls, "compose.config(site)")
+	if sync < 0 || config < 0 || sync > config {
+		t.Errorf("want gitsync before compose.config: %s", strings.Join(e.agent.Calls, " | "))
+	}
+}
+
+// TestResumeAtPrepareSyncsAgain: a job checkpointed at Prepare by a binary
+// that ran Prepare first never synced, so resuming there must sync.
+func TestResumeAtPrepareSyncsAgain(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	if _, err := e.deploy.projects.Create(ctx, projects.CreateReq{
+		Name: "site", Source: "git", GitRepo: "https://example.com/site.git", Branch: "main",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.agent.Statuses["site"] = []agent.ServiceStatus{{Service: "web", Name: "site-web-1", State: "running"}}
+	e.agent.GitCommit = "1111111111111111111111111111111111111111"
+	p, err := e.q.GetProjectByName(ctx, "site")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := e.q.CreateDeployment(ctx, db.CreateDeploymentParams{ProjectID: p.ID, ProjectID_2: p.ID, TriggeredBy: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.q.MarkDeploymentStarted(ctx, db.MarkDeploymentStartedParams{Status: stepPreparing, ID: d.ID}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := e.q.EnqueueJob(ctx, db.EnqueueJobParams{
+		Type: JobType, Payload: `{"deployment_id":` + itoa(d.ID) + `,"project":"site"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.q.ClaimNextJob(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.q.CheckpointJob(ctx, db.CheckpointJobParams{Step: stepPreparing, ID: job.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if final := e.runUntilFinished(t, d.ID); final.Status != "succeeded" {
+		t.Fatalf("status = %s, error = %s", final.Status, final.Error.String)
+	}
+	if calls := strings.Join(e.agent.Calls, " | "); !strings.Contains(calls, "host.gitsync(site)") {
+		t.Errorf("resume at preparing skipped sync: %s", calls)
 	}
 }
 

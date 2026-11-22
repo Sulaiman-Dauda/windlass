@@ -46,7 +46,12 @@ const (
 )
 
 // stepOrder drives resume: a reclaimed job re-executes from its checkpoint.
-var stepOrder = []string{stepPreparing, stepSyncing, stepPulling, stepBuilding, stepApplying, stepVerifying}
+//
+// Sync comes before Prepare because a Git project's compose file can name
+// files in the checkout (include: src/compose.yaml, build: ./src). Validated
+// first, a new project's compose fails on a src/ that has never been cloned,
+// and an existing one is checked against the previous commit's files.
+var stepOrder = []string{stepSyncing, stepPreparing, stepPulling, stepBuilding, stepApplying, stepVerifying}
 
 // rollbackSteps skip sync/pull/build: pulled images are pinned to recorded
 // digests, which compose up fetches again if they were pruned.
@@ -56,7 +61,7 @@ var rollbackSteps = []string{stepPreparing, stepApplying, stepVerifying}
 // service built on the server has no digest a registry can return, and its
 // old image is usually gone once a newer build replaced the tag, so building
 // the old commit is the only way to get its earlier code back.
-var rollbackGitSteps = []string{stepPreparing, stepSyncing, stepBuilding, stepApplying, stepVerifying}
+var rollbackGitSteps = []string{stepSyncing, stepPreparing, stepBuilding, stepApplying, stepVerifying}
 
 const rollbackFile = "compose.rollback.yaml"
 
@@ -378,7 +383,11 @@ func (s *Service) runJob(ctx context.Context, raw json.RawMessage, resumeStep st
 	start := 0
 	if resumeStep != "" {
 		for i, st := range steps {
-			if st == resumeStep {
+			// Sync runs again when resuming at Prepare: a job checkpointed
+			// there by a binary from before Sync moved first has not synced.
+			// Sync is safe to repeat, since a resumed deployment's commit is
+			// pinned.
+			if st == resumeStep && st != stepPreparing {
 				start = i
 				break
 			}

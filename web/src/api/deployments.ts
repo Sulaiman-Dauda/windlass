@@ -312,8 +312,8 @@ export function rollbackTarget(list: Deployment[] | undefined): Deployment | und
 
 /** The pipeline's stages, in order, keyed by the status a running deployment reports. */
 export const PIPELINE = [
-  { key: "preparing", label: "Prepare" },
   { key: "syncing", label: "Sync" },
+  { key: "preparing", label: "Prepare" },
   { key: "pulling", label: "Pull" },
   { key: "building", label: "Build" },
   { key: "applying", label: "Start" },

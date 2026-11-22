@@ -4,7 +4,7 @@ A deployment is a resumable state machine, not a single `docker compose up`. It 
 fixed sequence and records every step:
 
 ```text
-Prepare -> Sync -> Pull -> Build -> Start -> Verify
+Sync -> Prepare -> Pull -> Build -> Start -> Verify
 ```
 
 The log streams to the Deployments tab as it goes, and is kept afterwards, so a
@@ -14,11 +14,12 @@ deployment that failed last Tuesday still has its output.
 
 ## The steps
 
-**Prepare** reads `.env` and runs `docker compose config`, refusing to continue if the
-file is invalid, so a typo fails before anything is stopped. **Sync** fetches the Git
-revision when the project has a repository. **Pull** fetches images, and **Build** builds
-the services that have a `build:` key. **Start** hands over to `docker compose up -d
---remove-orphans`.
+**Sync** fetches the Git revision when the project has a repository. It runs first because
+a compose file can name files in the checkout, such as `include: src/compose.yaml` or
+`build: ./src`. **Prepare** reads `.env` and runs `docker compose config`, refusing to
+continue if the file is invalid, so a typo fails before anything is stopped. **Pull**
+fetches images, and **Build** builds the services that have a `build:` key. **Start**
+hands over to `docker compose up -d --remove-orphans`.
 
 **Verify** is the step that separates a deployment from a command. Windlass waits up to
 two minutes for every container to be running, for Docker healthchecks to report
