@@ -468,7 +468,7 @@ func (s *Service) create(ctx context.Context, liveName string, req Request, orig
 		domains = retained.domains
 	}
 	for _, d := range domains {
-		if _, err := s.proxy.Add(ctx, staging.ID, d.Hostname, d.Service, d.ContainerPort); err != nil {
+		if _, err := s.proxy.AddCopied(ctx, staging.ID, d.Hostname, d.Service, d.ContainerPort); err != nil {
 			return undo(fmt.Errorf("add staging domain %s: %w", d.Hostname, err))
 		}
 	}

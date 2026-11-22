@@ -163,6 +163,18 @@ func (s *Service) CheckHostnameForProject(ctx context.Context, hostname string, 
 // create response and a list item decode into one type. The route sync is
 // asynchronous, so a fresh domain normally reports "pending" here.
 func (s *Service) Add(ctx context.Context, projectID int64, hostname, service string, port int64) (Domain, error) {
+	return s.add(ctx, projectID, hostname, service, port, true)
+}
+
+// AddCopied stores a domain whose service and port were already checked
+// against another project's compose file, without resolving this project's.
+// Staging copies live's domains this way: a Git staging's compose file can
+// include files from src/, which its first deployment has not cloned yet.
+func (s *Service) AddCopied(ctx context.Context, projectID int64, hostname, service string, port int64) (Domain, error) {
+	return s.add(ctx, projectID, hostname, service, port, false)
+}
+
+func (s *Service) add(ctx context.Context, projectID int64, hostname, service string, port int64, checkCompose bool) (Domain, error) {
 	hostname = strings.ToLower(strings.TrimSpace(hostname))
 	if !validHostname(hostname) {
 		return Domain{}, fmt.Errorf("invalid hostname %q", hostname)
@@ -183,24 +195,26 @@ func (s *Service) Add(ctx context.Context, projectID int64, hostname, service st
 	if err != nil {
 		return Domain{}, err
 	}
-	config, err := s.agent.Compose().Config(ctx, project.Name)
-	if err != nil {
-		return Domain{}, err
-	}
-	resolved, ok := config.Services[service]
-	if !ok {
-		return Domain{}, fmt.Errorf("service %q is not defined in compose.yaml", service)
-	}
-	if len(resolved.ContainerPorts) > 0 {
-		declared := false
-		for _, candidate := range resolved.ContainerPorts {
-			if int64(candidate) == port {
-				declared = true
-				break
-			}
+	if checkCompose {
+		config, err := s.agent.Compose().Config(ctx, project.Name)
+		if err != nil {
+			return Domain{}, err
 		}
-		if !declared {
-			return Domain{}, fmt.Errorf("port %d is not exposed by service %q", port, service)
+		resolved, ok := config.Services[service]
+		if !ok {
+			return Domain{}, fmt.Errorf("service %q is not defined in compose.yaml", service)
+		}
+		if len(resolved.ContainerPorts) > 0 {
+			declared := false
+			for _, candidate := range resolved.ContainerPorts {
+				if int64(candidate) == port {
+					declared = true
+					break
+				}
+			}
+			if !declared {
+				return Domain{}, fmt.Errorf("port %d is not exposed by service %q", port, service)
+			}
 		}
 	}
 
