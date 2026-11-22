@@ -156,14 +156,14 @@ func TestLatestFailedDeployOnly(t *testing.T) {
 
 func TestDiskThresholdAndSetting(t *testing.T) {
 	e := newEnv(t)
-	e.agent.Metrics = agent.HostMetrics{DiskUsed: 84e9, DiskTotal: 100e9}
+	e.agent.Metrics = agent.HostMetrics{DiskUsed: 84 << 30, DiskTotal: 100 << 30}
 	if items := e.list(t); len(items) != 0 {
 		t.Fatalf("84%% is under the default 85%%: %+v", items)
 	}
-	e.agent.Metrics.DiskUsed = 85e9
+	e.agent.Metrics.DiskUsed = 85 << 30
 	items := e.list(t)
 	if len(items) != 1 || items[0].Kind != KindDisk || items[0].Title != "Disk is 85% full" ||
-		items[0].Detail != "15.0 GB free of 100.0 GB on the projects volume." {
+		items[0].Detail != "15.0 GiB free of 100.0 GiB on the projects volume." {
 		t.Fatalf("items = %+v", items)
 	}
 
