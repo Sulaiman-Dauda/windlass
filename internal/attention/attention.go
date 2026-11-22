@@ -311,12 +311,14 @@ func diskItem(m agent.HostMetrics, percent int) (Item, bool) {
 	}
 	return Item{Kind: KindDisk, Tone: ToneWarn,
 		Title:  fmt.Sprintf("Disk is %d%% full", used),
-		Detail: fmt.Sprintf("%s free of %s on the projects volume.", gb(m.DiskTotal-m.DiskUsed), gb(m.DiskTotal)),
+		Detail: fmt.Sprintf("%s free of %s on the projects volume.", gib(m.DiskTotal-m.DiskUsed), gib(m.DiskTotal)),
 		Link:   "/settings/system", Action: "Disk use"}, true
 }
 
-func gb(b uint64) string {
-	return fmt.Sprintf("%.1f GB", float64(b)/1e9)
+// gib prints binary gigabytes, the unit the dashboard's disk tile and the
+// install checks use, so the same free space reads the same everywhere.
+func gib(b uint64) string {
+	return fmt.Sprintf("%.1f GiB", float64(b)/(1<<30))
 }
 
 // backupItems names each project, staging copies aside, that has containers
