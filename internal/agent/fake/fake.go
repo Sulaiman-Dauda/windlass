@@ -914,7 +914,11 @@ func (h hostFake) Metrics(ctx context.Context) (agent.HostMetrics, error) {
 }
 
 func (h hostFake) HTTPCheck(ctx context.Context, req agent.HTTPCheckReq) (agent.HTTPCheckResult, error) {
-	if err := h.f.record("host.httpcheck("+req.URL+")", nil); err != nil {
+	call := "host.httpcheck(" + req.URL + ")"
+	if req.Dial != "" {
+		call = "host.httpcheck(" + req.URL + " via " + req.Dial + ")"
+	}
+	if err := h.f.record(call, nil); err != nil {
 		return agent.HTTPCheckResult{}, err
 	}
 	response, ok := h.f.HTTPResponses[req.URL]

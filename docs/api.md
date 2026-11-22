@@ -58,6 +58,7 @@ panel, and the API answers `403 session_required`:
 - connect GitHub, or create or install the GitHub App
 - open a terminal
 - delete a project, restore a backup over it, or recreate its staging
+- set or turn off a staging's password
 
 Env values come back masked (`********`) unless the token was created with **Can read env
 values**. Leave it off unless the job has to read secrets. A token without it can still

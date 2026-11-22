@@ -2,11 +2,15 @@ package projects
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/big"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/windlass-dev/windlass/internal/agent"
 	"github.com/windlass-dev/windlass/internal/events"
@@ -23,7 +27,61 @@ type StagingConfig struct {
 	// compose file can be compared with live's, and copied back, without
 	// the domains showing as a difference.
 	Rewrites []HostnameRewrite `json:"rewrites,omitempty"`
+	// Protect puts a password on staging's domains. Only the bcrypt hash is
+	// kept, here in the project's files, so Caddy keeps asking for it if
+	// Windlass stops.
+	Protect *StagingProtect `json:"protect,omitempty"`
 }
+
+// StagingProtect is the HTTP basic auth account on a staging's domains.
+type StagingProtect struct {
+	User string `json:"user"`
+	Hash string `json:"hash"` // bcrypt
+}
+
+// StagingUser is the user name a staging password goes with.
+const StagingUser = "staging"
+
+// stagingHashCost is the bcrypt cost of a staging password. Caddy checks
+// the hash on a visitor's first request and caches the result, so the cost
+// is paid once per visitor, not per request.
+const stagingHashCost = 12
+
+// MinStagingPassword is the shortest password a person may choose.
+const MinStagingPassword = 12
+
+// GenerateStagingPassword returns a random password of 20 letters and
+// digits, about 119 bits.
+func GenerateStagingPassword() (string, error) {
+	const alphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	b := make([]byte, 20)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+		if err != nil {
+			return "", err
+		}
+		b[i] = alphabet[n.Int64()]
+	}
+	return string(b), nil
+}
+
+// NewStagingProtect hashes password for a staging's domains.
+func NewStagingProtect(password string) (*StagingProtect, error) {
+	if len(password) < MinStagingPassword {
+		return nil, fmt.Errorf("%w: the password needs at least %d characters", ErrWeakPassword, MinStagingPassword)
+	}
+	if len(password) > 72 {
+		return nil, fmt.Errorf("%w: the password can have at most 72 characters", ErrWeakPassword)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), stagingHashCost)
+	if err != nil {
+		return nil, err
+	}
+	return &StagingProtect{User: StagingUser, Hash: string(hash)}, nil
+}
+
+// ErrWeakPassword refuses a staging password that is too short or long.
+var ErrWeakPassword = errors.New("invalid staging password")
 
 // StagingSuffix names a project's staging: "app" has "app-staging".
 const StagingSuffix = "-staging"
@@ -124,6 +182,39 @@ func (s *Service) SetAutoPromote(ctx context.Context, staging string, on bool) e
 	return nil
 }
 
+// SetStagingProtect sets or, with nil, removes the password on a staging's
+// domains. The proxy re-syncs on the event.
+func (s *Service) SetStagingProtect(ctx context.Context, staging string, p *StagingProtect) error {
+	m, ok, err := s.stagingManifest(ctx, staging)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrNotStaging
+	}
+	m.Staging.Protect = p
+	if err := s.writeManifest(ctx, staging, m); err != nil {
+		return err
+	}
+	s.bus.Publish(events.Event{Topic: "project", Type: "project.staging_changed", Resource: staging})
+	return nil
+}
+
+// StagingProtection returns the password account on a staging's domains,
+// nil when it has none. A project that is not a staging has none.
+func (s *Service) StagingProtection(ctx context.Context, name string) (*StagingProtect, error) {
+	// Any protect in the manifest counts, even when the directory name and
+	// staging.of disagree, so a renamed copy is never served open.
+	m, err := s.readManifest(ctx, name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil || m.Staging == nil {
+		return nil, err
+	}
+	return m.Staging.Protect, nil
+}
+
 // Domains returns the domains the project's manifest routes.
 func (s *Service) Domains(ctx context.Context, project string) ([]DomainConfig, error) {
 	m, err := s.readManifest(ctx, project)
@@ -151,6 +242,8 @@ type CopyReq struct {
 	// Env is the staging environment, already reviewed.
 	Env         map[string]string
 	AutoPromote bool
+	// Protect is the password on staging's domains, nil for none.
+	Protect *StagingProtect
 }
 
 // CopyResult reports what the copy changed, for the person to check.
@@ -266,7 +359,8 @@ func (s *Service) fillStagingCopy(ctx context.Context, name string, live db.Proj
 		branch = liveManifest.GitBranch
 	}
 	m := Manifest{Source: liveManifest.Source, GitRepo: liveManifest.GitRepo, AutoDeploy: liveManifest.AutoDeploy,
-		Domains: req.Domains, Staging: &StagingConfig{Of: req.Live, AutoPromote: req.AutoPromote, Rewrites: req.Rewrites}}
+		Domains: req.Domains, Staging: &StagingConfig{Of: req.Live, AutoPromote: req.AutoPromote, Rewrites: req.Rewrites,
+			Protect: req.Protect}}
 	if m.GitRepo != "" {
 		m.GitBranch = branch
 	}

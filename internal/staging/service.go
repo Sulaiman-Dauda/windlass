@@ -93,6 +93,11 @@ type Request struct {
 	// Acknowledged confirms the flagged values were checked. It is required
 	// only when there are flagged values.
 	Acknowledged bool `json:"acknowledged"`
+	// NoPassword leaves staging's domains open. By default they ask for a
+	// password, because staging can hold a copy of live's data.
+	NoPassword bool `json:"no_password"`
+	// Password is the person's own choice; empty generates one.
+	Password string `json:"password,omitempty"`
 }
 
 // FlaggedEnv is an environment value that probably reaches real people or
@@ -374,6 +379,34 @@ type Result struct {
 	// the person, so they can add it by hand.
 	WebhookSecret     string `json:"webhook_secret,omitempty"`
 	WebhookRegistered bool   `json:"webhook_registered"`
+	// Password is the generated or chosen password on staging's domains,
+	// returned this once and never stored. User goes with it.
+	Password     string `json:"password,omitempty"`
+	PasswordUser string `json:"password_user,omitempty"`
+}
+
+// stagingProtect is the password a new staging's domains get, with the
+// password to show when one was made or chosen now. A recreate keeps the
+// old staging's hash and shows nothing.
+func stagingProtect(req Request, retained *retainedSettings) (*projects.StagingProtect, string, error) {
+	if retained != nil {
+		return retained.protect, "", nil
+	}
+	if req.NoPassword {
+		return nil, "", nil
+	}
+	password := req.Password
+	if password == "" {
+		var err error
+		if password, err = projects.GenerateStagingPassword(); err != nil {
+			return nil, "", err
+		}
+	}
+	protect, err := projects.NewStagingProtect(password)
+	if err != nil {
+		return nil, "", err
+	}
+	return protect, password, nil
 }
 
 // Create makes live's staging and queues its first deployment. origin is
@@ -404,8 +437,13 @@ func (s *Service) create(ctx context.Context, liveName string, req Request, orig
 		return Result{}, err
 	}
 
+	protect, password, err := stagingProtect(req, retained)
+	if err != nil {
+		return Result{}, err
+	}
 	copied, err := s.projects.CreateStagingCopy(ctx, projects.CopyReq{
 		Live: live.Name, Branch: pf.Branch, Rewrites: pf.Rewrites, Env: env, AutoPromote: req.AutoPromote,
+		Protect: protect,
 	})
 	if err != nil {
 		return Result{}, err
@@ -435,7 +473,10 @@ func (s *Service) create(ctx context.Context, liveName string, req Request, orig
 		}
 	}
 
-	result := Result{Project: staging, Rewritten: copied.Rewritten, Skipped: copied.Skipped}
+	result := Result{Project: staging, Rewritten: copied.Rewritten, Skipped: copied.Skipped, Password: password}
+	if password != "" {
+		result.PasswordUser = protect.User
+	}
 	if result.Skipped == nil {
 		result.Skipped = []string{}
 	}
@@ -657,15 +698,19 @@ type DriftFile struct {
 
 // Status compares a live project with its staging.
 type Status struct {
-	Live        string         `json:"live"`
-	Staging     string         `json:"staging"`
-	AutoPromote bool           `json:"auto_promote"`
-	Branch      string         `json:"branch,omitempty"`
-	LiveBranch  string         `json:"live_branch,omitempty"`
-	LiveCurrent *DeploymentRef `json:"live_current"`
-	LiveLatest  *DeploymentRef `json:"live_latest"`
-	Latest      *DeploymentRef `json:"staging_latest"`
-	Promotable  *DeploymentRef `json:"promotable"`
+	Live        string `json:"live"`
+	Staging     string `json:"staging"`
+	AutoPromote bool   `json:"auto_promote"`
+	// PasswordProtected says staging's domains ask for a password. The
+	// hash is never returned.
+	PasswordProtected bool           `json:"password_protected"`
+	PasswordUser      string         `json:"password_user,omitempty"`
+	Branch            string         `json:"branch,omitempty"`
+	LiveBranch        string         `json:"live_branch,omitempty"`
+	LiveCurrent       *DeploymentRef `json:"live_current"`
+	LiveLatest        *DeploymentRef `json:"live_latest"`
+	Latest            *DeploymentRef `json:"staging_latest"`
+	Promotable        *DeploymentRef `json:"promotable"`
 	// PromoteBlocked says why Promote is unavailable; empty when it is.
 	PromoteBlocked string `json:"promote_blocked,omitempty"`
 	CanRecreate    bool   `json:"can_recreate"`
@@ -704,8 +749,12 @@ func (s *Service) Status(ctx context.Context, name string) (Status, error) {
 		return Status{}, err
 	}
 	st := Status{Live: live.Name, Staging: staging.Name, AutoPromote: cfg.AutoPromote,
-		Branch: staging.GitBranch.String, LiveBranch: live.GitBranch.String,
+		PasswordProtected: cfg.Protect != nil,
+		Branch:            staging.GitBranch.String, LiveBranch: live.GitBranch.String,
 		Rewrites: cfg.Rewrites, Drift: []DriftFile{}}
+	if cfg.Protect != nil {
+		st.PasswordUser = cfg.Protect.User
+	}
 	if st.Rewrites == nil {
 		st.Rewrites = []projects.HostnameRewrite{}
 	}

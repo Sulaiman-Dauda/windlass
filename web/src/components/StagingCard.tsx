@@ -8,6 +8,8 @@ import {
   useCopyToLive,
   usePromote,
   useSetAutoPromote,
+  useSetStagingPassword,
+  type PasswordResult,
   useStagingDiff,
   useStagingStatus,
   type DeploymentRef,
@@ -17,7 +19,8 @@ import {
 import { Card, CardHeader, CardFooter } from "../ui/Card";
 import { StatusDot, Tag } from "../ui/Badge";
 import { Button } from "../ui/Button";
-import { Switch } from "../ui/Field";
+import { Field, Switch } from "../ui/Field";
+import { CopyField } from "../ui/Copy";
 import { Modal, useConfirm } from "../ui/Modal";
 import { Skeleton } from "../ui/Skeleton";
 import { useToast, errorText } from "../ui/Toast";
@@ -319,6 +322,8 @@ function PairCard({ st, onRecreate }: { st: StagingStatus; onRecreate?: () => vo
         </div>
       )}
 
+      <PasswordRow st={st} member={member} />
+
       <CardFooter
         note={
           member ? (
@@ -437,5 +442,88 @@ function DiffDialog({
         </div>
       )}
     </Modal>
+  );
+}
+
+/** The password on staging's domains: whether it is on, and a new one or off for members. */
+function PasswordRow({ st, member }: { st: StagingStatus; member: boolean }) {
+  const confirm = useConfirm();
+  const toast = useToast();
+  const set = useSetStagingPassword(st.staging);
+  const [shown, setShown] = useState<PasswordResult | null>(null);
+
+  const newPassword = async () => {
+    if (st.password_protected) {
+      const ok = await confirm({
+        title: `Replace the password on ${st.staging}?`,
+        body: "The current password stops working at once, for everyone using it.",
+        confirmLabel: "Replace",
+        tone: "primary",
+      });
+      if (!ok) return;
+    }
+    set.mutate({ enabled: true }, {
+      onSuccess: (res) => setShown(res),
+      onError: (e) => toast.err("Could not set the password", errorText(e)),
+    });
+  };
+  const turnOff = async () => {
+    const ok = await confirm({
+      title: `Turn off the password on ${st.staging}?`,
+      body: "Anyone with the address can then open staging, and with it any copy of live's data it holds.",
+      confirmLabel: "Turn off",
+    });
+    if (!ok) return;
+    set.mutate({ enabled: false }, {
+      onSuccess: () => toast.ok("The password is off"),
+      onError: (e) => toast.err("Could not turn off the password", errorText(e)),
+    });
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 border-t border-hairline px-5 py-3">
+      <div className="min-w-[14rem] flex-1">
+        <div className="text-xs font-semibold text-fg2">Password</div>
+        <p className="mt-0.5 text-xs text-fg3">
+          {st.password_protected ? (
+            <>
+              Staging's domains ask for user <span className="font-mono text-fg2">{st.password_user ?? "staging"}</span> and its password.
+            </>
+          ) : (
+            "Off. Anyone with the address can open staging."
+          )}
+        </p>
+      </div>
+      {member && (
+        <div className="flex gap-2">
+          {st.password_protected && (
+            <Button size="xs" variant="ghost" onClick={turnOff} disabled={set.isPending}>
+              Turn off
+            </Button>
+          )}
+          <Button size="xs" variant="secondary" onClick={newPassword} loading={set.isPending}>
+            {st.password_protected ? "New password" : "Turn on"}
+          </Button>
+        </div>
+      )}
+      {shown?.password && (
+        <Modal
+          onClose={() => setShown(null)}
+          width={480}
+          title="New staging password"
+          description="The old one stops working now. This one is shown once; Windlass keeps only a hash of it."
+          footer={<Button variant="primary" onClick={() => setShown(null)}>Done</Button>}
+        >
+          <div className="flex flex-col gap-3.5">
+            <Field as="div" label="User name">
+              <CopyField value={shown.password_user ?? "staging"} />
+            </Field>
+            <Field as="div" label="Password">
+              <CopyField value={shown.password} />
+            </Field>
+          </div>
+        </Modal>
+      )}
+    </div>
   );
 }
