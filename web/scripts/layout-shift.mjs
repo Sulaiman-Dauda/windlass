@@ -164,13 +164,18 @@ async function run(cfg, browser, projects) {
   const page = await context.newPage();
   const widths = new Map();
 
-  const visit = async (path, view) => {
-    await page.goto(path);
-    await settle(page);
+  // After a view settles: its shifts, its main column width, its screenshot.
+  const record = async (view) => {
     reportShifts(cfg, view, await takeShifts(page));
     const w = await mainWidth(page);
     if (w) widths.set(view, w);
     await shoot(page, cfg, view);
+  };
+
+  const visit = async (path, view) => {
+    await page.goto(path);
+    await settle(page);
+    await record(view);
   };
 
   // A click is a soft navigation inside the same document: the shift
@@ -183,10 +188,7 @@ async function run(cfg, browser, projects) {
     await settle(page);
     const after = navLabel ? await boxes(page, navLabel) : null;
     compareBoxes(cfg, view, before, after);
-    reportShifts(cfg, view, await takeShifts(page));
-    const w = await mainWidth(page);
-    if (w) widths.set(view, w);
-    await shoot(page, cfg, view);
+    await record(view);
   };
 
   // Every top-level route, loaded cold.
