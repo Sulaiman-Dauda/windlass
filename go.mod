@@ -5,8 +5,8 @@ go 1.26.0
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/go-chi/chi/v5 v5.5.0
-	github.com/moby/moby/api v1.56.1
-	github.com/moby/moby/client v0.6.2
+	github.com/moby/moby/api v1.57.0
+	github.com/moby/moby/client v0.6.3
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/crypto v0.59.0
 	golang.org/x/sys v0.50.0
