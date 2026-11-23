@@ -1,14 +1,16 @@
 import { Fragment, useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { Link, NavLink, Navigate, useLocation, useParams, useSearchParams } from "react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { useMe, useCan } from "../api/auth";
-import { useUpdateCheck } from "../api/system";
+import { meQuery, useMe, useCan } from "../api/auth";
+import { updateCheckQuery, useUpdateCheck } from "../api/system";
 import { AuditLogSection } from "../components/AuditLog";
 import { AlertChannels } from "../components/AlertChannels";
 import { SCOPE_LABEL, useTokens, type APIToken, type CreatedToken } from "../api/tokens";
 import { deleteUserToken, userTokensKey } from "../api/userTokens";
 import { Page, Callout, FormError } from "../ui/Page";
+import { Skeleton } from "../ui/Skeleton";
+import { StableLabel } from "../ui/Stable";
 import { Card, CardHeader, CardFooter } from "../ui/Card";
 import { Button, IconButton, btn } from "../ui/Button";
 import { Input, Select, Field, Switch } from "../ui/Field";
@@ -48,6 +50,7 @@ export default function Settings() {
   const can = useCan();
   const tabs = TABS.filter((t) => !t.admin || can("admin"));
   const current = tabs.find((t) => t.value === tab);
+  const sectionLoading = useSectionLoading(tab ?? "", can("admin"));
 
   if (!current) {
     return <Navigate to="/settings/general" replace />;
@@ -78,13 +81,16 @@ export default function Settings() {
               {({ isActive }) => (
                 <>
                   <Icon name={t.icon} size={16} className={isActive ? "text-accent" : "text-fg3"} />
-                  {t.label}
+                  <StableLabel>{t.label}</StableLabel>
                 </>
               )}
             </NavLink>
           ))}
         </nav>
 
+        {sectionLoading ? (
+          <Skeleton className="h-[420px] w-full rounded-card" />
+        ) : (
         <div className="min-w-0 space-y-6">
           {tab === "general" && (
             <>
@@ -115,9 +121,65 @@ export default function Settings() {
             </>
           )}
         </div>
+        )}
       </div>
     </Page>
   );
+}
+
+// ---------- Shared reads ----------
+// The sections own these reads; the page also starts them so a section with
+// several cards can wait for all of them before painting (see useSectionLoading).
+
+const usersQuery = (admin: boolean) =>
+  queryOptions<AdminUser[]>({ queryKey: ["users"], queryFn: () => api("/users"), retry: false, enabled: admin });
+const githubAppQuery = (admin: boolean) =>
+  queryOptions<GitHubAppStatus>({
+    queryKey: ["system", "github-app"],
+    queryFn: () => api("/system/github-app"),
+    retry: false,
+    enabled: admin,
+  });
+const oauthProvidersQuery = queryOptions<{ github: boolean; google: boolean }>({
+  queryKey: ["auth", "oauth-providers"],
+  queryFn: () => api("/auth/oauth/providers"),
+});
+const cleanupQuery = queryOptions<CleanupState>({
+  queryKey: ["system", "docker", "cleanup"],
+  queryFn: () => api("/system/docker/cleanup"),
+  retry: false,
+});
+const attentionSettingsQuery = queryOptions<AttentionSettings>({
+  queryKey: ["system", "attention", "settings"],
+  queryFn: () => api("/system/attention/settings"),
+  retry: false,
+});
+const deploySettingsQuery = queryOptions<DeploySettings>({
+  queryKey: ["system", "deploy", "settings"],
+  queryFn: () => api("/system/deploy/settings"),
+  retry: false,
+});
+
+// Reads that decide whether a card shows at all, or how tall it is. A section
+// paints once they have all answered, so a card that answers late cannot
+// push the ones below it. Slow reads (docker system df) are left out: their
+// cards keep a fixed size and fill in. A read for another tab stays disabled.
+function useSectionLoading(tab: string, admin: boolean) {
+  const auth = tab === "auth";
+  const system = tab === "system";
+  const reads = useQueries({
+    queries: [
+      { ...meQuery, enabled: auth },
+      { ...usersQuery(admin), enabled: auth && admin },
+      { ...githubAppQuery(admin), enabled: auth && admin },
+      { ...oauthProvidersQuery, enabled: auth },
+      { ...updateCheckQuery(admin), enabled: system && admin },
+      { ...cleanupQuery, enabled: system },
+      { ...attentionSettingsQuery, enabled: system },
+      { ...deploySettingsQuery, enabled: system },
+    ],
+  });
+  return reads.some((q) => q.isLoading);
 }
 
 // ---------- Layout helpers ----------
@@ -405,12 +467,7 @@ const githubAppErrors: Record<string, string> = {
 
 function GitHubAppSection() {
   const can = useCan();
-  const app = useQuery<GitHubAppStatus>({
-    queryKey: ["system", "github-app"],
-    queryFn: () => api("/system/github-app"),
-    retry: false,
-    enabled: can("admin"),
-  });
+  const app = useQuery(githubAppQuery(can("admin")));
 
   const [searchParams, setSearchParams] = useSearchParams();
   const created = searchParams.get("github_app");
@@ -475,10 +532,7 @@ function OAuthAppsSection() {
   const qc = useQueryClient();
   const can = useCan();
   const toast = useToast();
-  const providers = useQuery<{ github: boolean; google: boolean }>({
-    queryKey: ["auth", "oauth-providers"],
-    queryFn: () => api("/auth/oauth/providers"),
-  });
+  const providers = useQuery(oauthProvidersQuery);
 
   const [provider, setProvider] = useState("github");
   const [clientId, setClientId] = useState("");
@@ -1149,7 +1203,7 @@ function UsersSection() {
   const confirm = useConfirm();
   const can = useCan();
   const me = useMe();
-  const users = useQuery<AdminUser[]>({ queryKey: ["users"], queryFn: () => api("/users"), retry: false, enabled: can("admin") });
+  const users = useQuery(usersQuery(can("admin")));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("member");
@@ -1374,8 +1428,8 @@ function DockerStorageSection() {
   const confirm = useConfirm();
   const usage = useQuery<ImageDiskUsage>({ queryKey: ["system", "docker", "images"], queryFn: () => api("/system/docker/images"), retry: false });
   const disk = useQuery<SystemDisk>({ queryKey: ["system", "disk"], queryFn: () => api("/system/disk"), retry: false });
-  const state = useQuery<CleanupState>({ queryKey: ["system", "docker", "cleanup"], queryFn: () => api("/system/docker/cleanup"), retry: false });
-  const [form, setForm] = useState<CleanupSettings | null>(null);
+  const state = useQuery(cleanupQuery);
+  const [form, setForm] = useState<CleanupSettings | null>(state.data?.settings ?? null);
   useEffect(() => {
     if (state.data) setForm(state.data.settings);
   }, [state.data]);
@@ -1424,7 +1478,8 @@ function DockerStorageSection() {
           <div key={label} className="px-5 py-4">
             <div className="text-xs text-fg3">{label}</div>
             <div className="mt-1 text-xl font-semibold tabular-nums tracking-[-0.02em] text-fg">{value}</div>
-            {sub && <div className="text-xs text-fg3">{sub}</div>}
+            {/* Always one line, so the tile keeps its height while Docker answers. */}
+            <div className="text-xs text-fg3">{sub || "\u00a0"}</div>
           </div>
         ))}
       </div>
@@ -1515,12 +1570,8 @@ interface AttentionSettings {
 function DiskWarningSection() {
   const qc = useQueryClient();
   const toast = useToast();
-  const state = useQuery<AttentionSettings>({
-    queryKey: ["system", "attention", "settings"],
-    queryFn: () => api("/system/attention/settings"),
-    retry: false,
-  });
-  const [value, setValue] = useState("");
+  const state = useQuery(attentionSettingsQuery);
+  const [value, setValue] = useState(state.data ? String(state.data.settings.disk_percent) : "");
   useEffect(() => {
     if (state.data) setValue(String(state.data.settings.disk_percent));
   }, [state.data]);
@@ -1582,11 +1633,7 @@ interface DeploySettings {
 function TagSuggestionSection() {
   const qc = useQueryClient();
   const toast = useToast();
-  const state = useQuery<DeploySettings>({
-    queryKey: ["system", "deploy", "settings"],
-    queryFn: () => api("/system/deploy/settings"),
-    retry: false,
-  });
+  const state = useQuery(deploySettingsQuery);
   const save = useMutation<DeploySettings, Error, boolean>({
     mutationFn: (tag_suggestions) =>
       api("/system/deploy/settings", { method: "PUT", body: JSON.stringify({ tag_suggestions }) }),

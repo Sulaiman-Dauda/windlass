@@ -38,6 +38,9 @@ export default function Projects() {
     <Page
       title="Projects"
       description="Each project is a directory with a Compose file. The files on disk are the source of truth."
+      // The count beside the filter wraps to its own line on a phone, and an
+      // empty list swaps the table for a call to action: both wait for the list.
+      loading={projects.isPending}
       actions={
         can("member") && (
           <>

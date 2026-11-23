@@ -150,6 +150,9 @@ export default function ProjectDetail() {
     />
   );
   const st = staging.data;
+  // The header's meta row and the staging note wait for these fast reads,
+  // so the tabs and the body below them never move when they land.
+  const loading = !p || domains.isPending || deployments.isPending || (paired && staging.isPending);
 
   const runAction = async (a: "start" | "stop" | "restart") => {
     if (
@@ -188,6 +191,7 @@ export default function ProjectDetail() {
   return (
     <Page
       title={name}
+      loading={loading}
       crumbs={[
         { label: "Projects", to: "/projects" },
         { label: name, to: current ? `/projects/${name}` : undefined },
@@ -377,8 +381,6 @@ export default function ProjectDetail() {
                 `Once a deployment here succeeds, promote it from the overview to deploy it to ${st.live}.`
               )}
             </>
-          ) : staging.isLoading ? (
-            "Loading the pair."
           ) : (
             <>
               {p.staging_of} is missing, so this staging promotes nowhere. Delete it, or recreate {p.staging_of} to pair them again.

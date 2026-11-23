@@ -19,6 +19,10 @@ export default function FilesTab({ project }: { project: string }) {
   // Open compose.yaml by default, or the first file when there is none.
   const selected = list.some((f) => f.name === chosen) ? chosen : (list[0]?.name ?? null);
 
+  // On a phone the editor sits under the list, so the list's length must be
+  // known before either paints.
+  if (files.isPending) return <Skeleton className="h-[420px] w-full rounded-card" />;
+
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
       <Card className="h-fit overflow-hidden">
@@ -26,8 +30,7 @@ export default function FilesTab({ project }: { project: string }) {
           <h3 className="text-sm font-semibold text-fg">Files</h3>
           {files.data && <span className="text-xs text-fg3">{list.length}</span>}
         </div>
-        <ul className="max-h-[60vh] overflow-y-auto p-1.5">
-          {files.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="m-1.5 h-5" />)}
+        <ul className="max-h-[60vh] overflow-y-auto p-1.5 [scrollbar-gutter:stable]">
           {list.map((f) => (
             <li key={f.name}>
               <button
@@ -111,7 +114,8 @@ function Editor({ project, path }: { project: string; path: string }) {
         )}
       </div>
       {draft === null ? (
-        <div className="space-y-2 p-4">
+        // The editor's own height, so the footer stays put when the file arrives.
+        <div className="h-[min(68vh,720px)] min-h-[360px] space-y-2 p-4">
           <Skeleton className="h-4 w-2/3" />
           <Skeleton className="h-4 w-1/2" />
           <Skeleton className="h-4 w-3/5" />

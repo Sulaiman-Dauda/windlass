@@ -118,7 +118,7 @@ export const TermPane = forwardRef<
         anchor.current = firstRowInView(e.currentTarget);
       }}
       className={cn(
-        "wl-term overflow-auto bg-term px-4 py-3 font-mono text-xs leading-[1.7] text-term-fg [overflow-anchor:none]",
+        "wl-term overflow-auto bg-term [scrollbar-gutter:stable] px-4 py-3 font-mono text-xs leading-[1.7] text-term-fg [overflow-anchor:none]",
         wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre",
         className,
       )}

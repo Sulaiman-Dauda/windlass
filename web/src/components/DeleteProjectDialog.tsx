@@ -4,6 +4,7 @@ import { useMe } from "../api/auth";
 import { useDeleteProject, useProject } from "../api/projects";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
+import { ReserveWidth } from "../ui/Stable";
 import { Input, Field } from "../ui/Field";
 import { Callout, FormError } from "../ui/Page";
 
@@ -55,7 +56,7 @@ export default function DeleteProjectDialog({
             Cancel
           </Button>
           <Button type="submit" form="delete-project" variant="dangerSolid" disabled={!ready} loading={del.isPending}>
-            {del.isPending ? "Deleting…" : "Delete project"}
+            <ReserveWidth options={["Deleting…", "Delete project"]}>{del.isPending ? "Deleting…" : "Delete project"}</ReserveWidth>
           </Button>
         </>
       }

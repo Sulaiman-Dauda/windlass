@@ -14,6 +14,12 @@ export interface Crumb {
 /**
  * The frame every signed-in screen uses: a sticky bar with breadcrumbs, a
  * header with title, description and actions, optional tabs, then content.
+ *
+ * `loading` draws only the bar, the title and the description, for a screen
+ * whose header depends on data that is still on its way. Everything else
+ * appears in one go once it arrives, so nothing already on screen is pushed
+ * down by a row that arrives late. Use it for fast reads; slow ones get a
+ * skeleton of a fixed size instead.
  */
 export function Page({
   title,
@@ -23,6 +29,7 @@ export function Page({
   actions,
   crumbs,
   tabs,
+  loading,
   children,
 }: {
   title: ReactNode;
@@ -32,6 +39,7 @@ export function Page({
   actions?: ReactNode;
   crumbs?: Crumb[];
   tabs?: ReactNode;
+  loading?: boolean;
   children: ReactNode;
 }) {
   const shell = useShell();
@@ -75,21 +83,21 @@ export function Page({
       </div>
 
       <div className="mx-auto w-full max-w-[100rem]">
-        <header className={cn("px-4 pt-7 sm:px-6 lg:px-8", tabs ? "border-b border-hairline" : "pb-2")}>
+        <header className={cn("px-4 pt-7 sm:px-6 lg:px-8", tabs && !loading ? "border-b border-hairline" : "pb-2")}>
           <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
             <div className="min-w-0 flex-[1_1_16rem]">
               <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
                 <h1 className="min-w-0 truncate text-2xl font-semibold tracking-[-0.022em] text-fg">{title}</h1>
-                {titleAdornment}
+                {!loading && titleAdornment}
               </div>
               {description && <p className="mt-1 max-w-[80ch] text-sm text-fg3">{description}</p>}
-              {meta && <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-fg2">{meta}</div>}
+              {meta && !loading && <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-fg2">{meta}</div>}
             </div>
-            {actions && <div className="flex flex-none flex-wrap items-center gap-2">{actions}</div>}
+            {actions && !loading && <div className="flex flex-none flex-wrap items-center gap-2">{actions}</div>}
           </div>
-          {tabs && <div className="mt-5">{tabs}</div>}
+          {tabs && !loading && <div className="mt-5">{tabs}</div>}
         </header>
-        <div className="px-4 pb-20 pt-6 sm:px-6 lg:px-8">{children}</div>
+        {!loading && <div className="px-4 pb-20 pt-6 sm:px-6 lg:px-8">{children}</div>}
       </div>
     </>
   );

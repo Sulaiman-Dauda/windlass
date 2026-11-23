@@ -61,7 +61,7 @@ export default function Layout({ user }: { user: User }) {
         <main className="min-w-0 flex-1 lg:py-2 lg:pr-2">
           <div
             ref={scroller}
-            className="h-full overflow-y-auto bg-panel lg:rounded-xl2 lg:border lg:border-hairline lg:shadow-[var(--shadow-sm)]"
+            className="h-full overflow-y-auto bg-panel [scrollbar-gutter:stable] lg:rounded-xl2 lg:border lg:border-hairline lg:shadow-[var(--shadow-sm)]"
           >
             <Outlet />
           </div>
@@ -176,7 +176,7 @@ function Sidebar({ user, onSearch }: { user: User; onSearch: () => void }) {
           </Link>
         )}
       </div>
-      <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
+      <div className="mt-1 min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         {shown.map((p) => (
           <ProjectLink
             key={p.name}

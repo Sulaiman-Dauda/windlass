@@ -17,7 +17,17 @@ const queryClient = new QueryClient({
   },
 });
 
-createRoot(document.getElementById("root")!).render(
+// The panel's four faces are embedded in index.css, and Chrome decodes a face
+// only when text first uses it, so the first page with mono text painted it
+// in the fallback and then reflowed by a pixel. Decoding them all before the
+// first render takes a few milliseconds; the timeout means a face that never
+// loads cannot hold the panel back.
+const fontsReady = Promise.race([
+  Promise.all([...document.fonts].map((f) => f.load())),
+  new Promise((resolve) => setTimeout(resolve, 500)),
+]).catch(() => undefined);
+
+fontsReady.then(() => createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
@@ -31,4 +41,4 @@ createRoot(document.getElementById("root")!).render(
       </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>,
-);
+));

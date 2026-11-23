@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router";
 import { cn } from "./cn";
+import { StableLabel } from "./Stable";
 
 export interface TabItem {
   to: string;
@@ -28,7 +29,7 @@ export function RouteTabs({ items, label }: { items: TabItem[]; label: string })
           }
         >
           <span className="inline-flex h-8 items-center gap-1.5 rounded-sm px-2.5 transition-colors group-hover:bg-sunken">
-            {t.label}
+            <StableLabel>{t.label}</StableLabel>
             {t.badge}
           </span>
         </NavLink>

@@ -8,6 +8,7 @@ import { EmptyState } from "../ui/Page";
 import { Icon } from "../ui/Icon";
 import { Skeleton } from "../ui/Skeleton";
 import { cn } from "../ui/cn";
+import { ReserveWidth } from "../ui/Stable";
 import { TermPane } from "./TermPane";
 
 interface LogLine {
@@ -156,9 +157,11 @@ function LogStream({
           />
         </div>
         <StatusPill tone={status[conn].tone} live={conn === "live"}>
-          {status[conn].label}
+          <ReserveWidth options={Object.values(status).map((s) => s.label)}>{status[conn].label}</ReserveWidth>
         </StatusPill>
-        <span className="text-xs tabular-nums text-fg3">
+        {/* Wide enough for "2000 lines", so a growing count cannot push the
+            buttons onto a new line on a phone. */}
+        <span className="min-w-[4.5rem] text-xs tabular-nums text-fg3">
           {q ? `${shown.length} of ${lines.length} lines` : `${lines.length} lines`}
         </span>
         <div className="ml-auto flex items-center gap-0.5">

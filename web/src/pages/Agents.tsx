@@ -12,7 +12,6 @@ import { Input, Field, Select } from "../ui/Field";
 import { Tag } from "../ui/Badge";
 import { Icon } from "../ui/Icon";
 import { Segmented } from "../ui/Segmented";
-import { Skeleton } from "../ui/Skeleton";
 import { CopyBlock, CopyField } from "../ui/Copy";
 import { timeAgo, formatDate } from "../ui/format";
 import { CLIENTS, clientSetup, curlCheck, mcpEndpoint, CHECK_PROMPT, type ClientId } from "../components/agentClients";
@@ -40,10 +39,14 @@ export default function Agents() {
   const domain = useMCPEndpoint();
   const endpoint = domain.data?.url || mcpEndpoint(window.location.origin);
   const plainHTTP = endpoint.startsWith("http:");
+  // The plain-HTTP warning and the tool list both change the height of what
+  // sits above other cards, so the body waits for these two local reads.
+  const tools = useMCPTools();
 
   return (
     <Page
       title="AI agents"
+      loading={domain.isPending || tools.isPending}
       description="Connect Claude Code, Cursor, VS Code and other MCP clients to this server. An agent can see what is running, read logs and deployments, and with a Deploy only token deploy, restart, roll back, promote and back up. It cannot edit Compose files or .env."
     >
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -51,7 +54,7 @@ export default function Agents() {
           <Card>
             <CardHeader title="1. Endpoint" description="The address your agent connects to. It takes an API token, never your sign-in." />
             <div className="space-y-3 px-5 py-4">
-              {domain.isLoading ? <Skeleton className="h-9 rounded-control" /> : <CopyField value={endpoint} />}
+              <CopyField value={endpoint} />
               {plainHTTP && (
                 <Callout tone="warn" title="This address is plain HTTP">
                   The token travels in a header on every call, so anyone on the network path can read it.{" "}
@@ -283,7 +286,6 @@ function CapabilitiesCard() {
     <Card>
       <CardHeader title="What it can do" />
       <div className="space-y-4 px-5 py-4">
-        {tools.isLoading && <Skeleton className="h-40 rounded-control" />}
         {tools.isError && <FormError error={tools.error} fallback="Could not load the tool list" />}
         {tools.data && (
           <>
