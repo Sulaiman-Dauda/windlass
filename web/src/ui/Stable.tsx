@@ -3,7 +3,9 @@ import type { ReactNode } from "react";
 // Labels that change must not move what sits next to them. Both helpers
 // stack invisible copies in one grid cell, so the cell always takes the
 // width of the widest copy. The copies are hidden from assistive tech and
-// from innerText; only the visible label is read.
+// from innerText; only the visible label is read. ReserveWidth draws its
+// copies as generated content, so its other labels are not text in the
+// page at all: a find, a copy or a test looking for "Deleting…" sees one.
 
 /**
  * A label that always takes the width of its bold form, so a tab or nav item
@@ -30,9 +32,12 @@ export function ReserveWidth({ options, children }: { options: readonly string[]
   return (
     <span className="inline-grid">
       {options.map((o) => (
-        <span key={o} aria-hidden="true" className="invisible col-start-1 row-start-1">
-          {o}
-        </span>
+        <span
+          key={o}
+          aria-hidden="true"
+          data-reserve={o}
+          className="invisible col-start-1 row-start-1 before:content-[attr(data-reserve)]"
+        />
       ))}
       <span className="col-start-1 row-start-1">{children}</span>
     </span>
