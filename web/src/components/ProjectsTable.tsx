@@ -33,20 +33,16 @@ export default function ProjectsTable({
       )}
     >
       <table className="w-full min-w-[560px] table-fixed text-sm">
-        <colgroup>
-          <col />
-          <col className="w-[140px]" />
-          <col className={cn("hidden w-[24%]", embedded ? "2xl:table-column" : "md:table-column")} />
-          <col className="w-[150px]" />
-          <col className="w-10" />
-        </colgroup>
+        {/* Widths sit on the header cells, not a <colgroup>: a hidden <col>
+            still took its 24% while the loading rows showed, and the columns
+            jumped when the real rows replaced them. */}
         <thead>
           <tr className="border-b border-hairline bg-surface2 text-left text-xs text-fg3">
             <th className="h-9 px-4 font-medium">Project</th>
-            <th className="h-9 px-4 font-medium">Status</th>
-            <th className={cn("hidden h-9 px-4 font-medium", embedded ? "2xl:table-cell" : "md:table-cell")}>Domain</th>
-            <th className="h-9 px-4 font-medium">Last deploy</th>
-            <th className="h-9" aria-hidden="true" />
+            <th className="h-9 w-[140px] px-4 font-medium">Status</th>
+            <th className={cn("hidden h-9 w-[24%] px-4 font-medium", embedded ? "2xl:table-cell" : "md:table-cell")}>Domain</th>
+            <th className="h-9 w-[150px] px-4 font-medium">Last deploy</th>
+            <th className="h-9 w-10" aria-hidden="true" />
           </tr>
         </thead>
         <tbody className="divide-y divide-hairline">

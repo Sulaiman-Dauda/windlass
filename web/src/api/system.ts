@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "./client";
 
 export interface Metrics {
@@ -91,8 +91,8 @@ export interface UpdateInfo {
 }
 
 /** Release check (admin only). The sidebar and Settings share this cache entry. */
-export function useUpdateCheck(enabled = true) {
-  return useQuery<UpdateInfo>({
+export const updateCheckQuery = (enabled = true) =>
+  queryOptions<UpdateInfo>({
     queryKey: ["system", "update"],
     queryFn: () => api<UpdateInfo>("/system/update"),
     enabled,
@@ -100,4 +100,7 @@ export function useUpdateCheck(enabled = true) {
     staleTime: 60 * 60 * 1000,
     refetchInterval: 6 * 60 * 60 * 1000,
   });
+
+export function useUpdateCheck(enabled = true) {
+  return useQuery(updateCheckQuery(enabled));
 }

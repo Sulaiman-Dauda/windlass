@@ -161,7 +161,7 @@ export default function CommandPalette({ onClose }: { onClose: () => void }) {
           <Kbd>Esc</Kbd>
         </div>
 
-        <div ref={list} id="wl-palette-list" role="listbox" className="max-h-[min(60vh,420px)] overflow-y-auto p-1.5">
+        <div ref={list} id="wl-palette-list" role="listbox" className="max-h-[min(60vh,420px)] overflow-y-auto p-1.5 [scrollbar-gutter:stable]">
           {results.length === 0 && <p className="px-3 py-8 text-center text-sm text-fg3">Nothing matches “{query}”.</p>}
           {results.map((c, i) => {
             const header = c.group !== lastGroup ? c.group : null;

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useCan } from "../api/auth";
 import { Link } from "react-router";
-import { useProject } from "../api/projects";
+import { useProject, useProjectDrift } from "../api/projects";
 import {
   useCreateDeployment,
   isWaiting,
@@ -51,7 +51,14 @@ function healthTone(health: string): Tone {
 
 export default function OverviewTab({ project }: { project: string }) {
   const services = useServices(project, 5000, true);
+  const drift = useProjectDrift(project);
   const list = services.data?.services ?? [];
+
+  // The Compose note and the drift notice sit above the services table and
+  // the row count is unknown until compose ps answers, so the tab waits for
+  // both (a few hundred milliseconds) behind one block instead of growing
+  // piece by piece. The other reads are already loaded by the project page.
+  if (services.isPending || drift.isPending) return <Skeleton className="h-[420px] w-full rounded-card" />;
 
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -86,14 +93,6 @@ export default function OverviewTab({ project }: { project: string }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-hairline">
-                {services.isLoading &&
-                  [0, 1].map((i) => (
-                    <tr key={i}>
-                      <td colSpan={4} className="px-5 py-3.5">
-                        <Skeleton className="h-5 w-1/2" />
-                      </td>
-                    </tr>
-                  ))}
                 {list.map((s) => {
                   const done = isCompleted(s);
                   const st = done ? { tone: "ok" as const } : stateTone(s.state);
@@ -126,7 +125,7 @@ export default function OverviewTab({ project }: { project: string }) {
                           {s.image}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-5 py-3 text-right text-xs text-fg2">
+                      <td className="whitespace-nowrap px-5 py-3 text-right text-xs tabular-nums text-fg2">
                         <div>
                           {s.memory_bytes ? (
                             <span className="font-medium text-fg">{formatBytes(s.memory_bytes)}</span>

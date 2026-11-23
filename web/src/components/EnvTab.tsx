@@ -26,8 +26,14 @@ export default function EnvTab({ project }: { project: string }) {
   const [bulkDraft, setBulkDraft] = useState("");
   const [bulkErrors, setBulkErrors] = useState<string[]>([]);
 
+  // True once the rows are seeded from the file. The seeding runs in an
+  // effect, after the first paint with data, so the tab waits for it rather
+  // than painting an empty table and then growing it.
+  const [seeded, setSeeded] = useState(false);
+
   useEffect(() => {
     if (env.data && !dirty) {
+      setSeeded(true);
       setRows(
         Object.entries(env.data)
           .sort(([a], [b]) => a.localeCompare(b))
@@ -74,6 +80,8 @@ export default function EnvTab({ project }: { project: string }) {
     });
   };
 
+  if (!seeded && !env.isError) return <Skeleton className="h-[260px] w-full rounded-card" />;
+
   return (
     <Card>
       <CardHeader
@@ -101,12 +109,7 @@ export default function EnvTab({ project }: { project: string }) {
       />
 
       <div className="px-5 py-4">
-        {env.isLoading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-full" />
-          </div>
-        ) : mode === "bulk" ? (
+        {mode === "bulk" ? (
           <div>
             <p className="mb-2 text-xs text-fg3">
               One <code className="font-mono">KEY=value</code> per line. This always matches the table exactly: paste a
@@ -197,7 +200,7 @@ export default function EnvTab({ project }: { project: string }) {
           </div>
         )}
 
-        {editable && mode === "list" && !env.isLoading && (
+        {editable && mode === "list" && (
           <Button
             size="sm"
             icon="plus"

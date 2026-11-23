@@ -9,6 +9,10 @@ import { Card } from "../ui/Card";
 import { StatusPill, type Tone } from "../ui/Badge";
 import { EmptyState } from "../ui/Page";
 import { Skeleton } from "../ui/Skeleton";
+import { ReserveWidth } from "../ui/Stable";
+
+/** Every label the connection pill can show, so it keeps one width. */
+const TERM_STATES = ["Connecting", "Connected", "Disconnected", "Connection failed"] as const;
 
 export default function TerminalTab({ project }: { project: string }) {
   const services = useServices(project);
@@ -53,7 +57,9 @@ export default function TerminalTab({ project }: { project: string }) {
           </Select>
         </div>
         <StatusPill tone={tone[status] ?? "idle"} live={status === "connected"}>
-          {status === "failed" ? "Connection failed" : status[0].toUpperCase() + status.slice(1)}
+          <ReserveWidth options={TERM_STATES}>
+            {status === "failed" ? "Connection failed" : status[0].toUpperCase() + status.slice(1)}
+          </ReserveWidth>
         </StatusPill>
         <span className="hidden text-xs text-fg3 sm:inline">Runs the container's shell as its default user.</span>
         <Button

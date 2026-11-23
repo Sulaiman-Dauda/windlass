@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 
 export interface User {
@@ -89,6 +89,8 @@ export interface Me {
   has_password: boolean;
 }
 
+export const meQuery = queryOptions<Me>({ queryKey: ["auth", "me"], queryFn: () => api<Me>("/auth/me") });
+
 export function useMe() {
-  return useQuery<Me>({ queryKey: ["auth", "me"], queryFn: () => api<Me>("/auth/me") });
+  return useQuery(meQuery);
 }

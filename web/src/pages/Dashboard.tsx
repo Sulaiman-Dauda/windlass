@@ -2,14 +2,14 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { useCan } from "../api/auth";
 import { useProjects } from "../api/projects";
-import { PANEL_RSS_BUDGET_BYTES, useMetrics, useSystemDisk, useUpdateCheck, type SystemDisk } from "../api/system";
+import { PANEL_RSS_BUDGET_BYTES, useAttention, useMetrics, useSystemDisk, useUpdateCheck, type SystemDisk } from "../api/system";
 import { Page, EmptyState, MetaItem } from "../ui/Page";
 import { Card } from "../ui/Card";
 import { btn } from "../ui/Button";
 import { StatusDot } from "../ui/Badge";
 import { Icon, type IconName } from "../ui/Icon";
 import { Meter, StackedMeter, usageTone, type MeterPart, type MeterTone } from "../ui/Meter";
-import { Skeleton } from "../ui/Skeleton";
+import { Skeleton, skeletonClass } from "../ui/Skeleton";
 import { formatBytes, formatStamp, formatUptime, plural } from "../ui/format";
 import ProjectsTable from "../components/ProjectsTable";
 import NeedsYou from "../components/NeedsYou";
@@ -36,10 +36,18 @@ function Tile({
         {label}
       </div>
       {value === undefined ? (
+        // Each placeholder sits on a line of the real text size (the zero-width
+        // space is a strut), so the tile is exactly as tall before and after.
         <>
-          <Skeleton className="mt-2.5 h-8 w-20" />
+          <div className="mt-2.5 flex items-center text-3xl">
+            {"\u200b"}
+            <Skeleton className="h-8 w-20" />
+          </div>
           <Skeleton className="mt-3 h-[11px] w-full" />
-          <Skeleton className="mt-2 h-4 w-28" />
+          <div className="mt-2 flex items-center text-xs">
+            {"\u200b"}
+            <Skeleton className="h-3 w-28" />
+          </div>
         </>
       ) : (
         <>
@@ -127,6 +135,10 @@ export default function Dashboard() {
   const projects = useProjects();
   const can = useCan();
   const update = useUpdateCheck(can("admin"));
+  // Needs you sits above everything and its length is unknown until it
+  // answers, so the body waits for it and for the project list (both fast
+  // reads). Slower figures fill fixed-size skeletons instead.
+  const attention = useAttention();
 
   const m = metrics.data;
   const memPct = m && m.host.memory_total > 0 ? (m.host.memory_used / m.host.memory_total) * 100 : null;
@@ -140,13 +152,16 @@ export default function Dashboard() {
     <Page
       title="Overview"
       crumbs={[{ label: "Overview" }]}
+      loading={attention.isPending || projects.isPending}
       meta={
-        m && (
+        m ? (
           <>
             <MetaItem icon="server">{m.node.hostname}</MetaItem>
             {m.host.uptime_seconds > 0 && <MetaItem icon="clock">Up {formatUptime(m.host.uptime_seconds)}</MetaItem>}
             <MetaItem icon="activity">Load {m.host.load1.toFixed(2)}</MetaItem>
           </>
+        ) : (
+          !metrics.isError && <Skeleton className="h-5 w-64 max-w-full" />
         )
       }
       actions={
@@ -264,18 +279,14 @@ export default function Dashboard() {
           </section>
 
           <div className="min-w-0 space-y-5">
-            <SideCard title="Disk" note="Docker's share" link={{ to: "/settings/system", label: "Details" }}>
-              <DiskRows disk={disk.data} loading={disk.isLoading} />
-            </SideCard>
-
             <SideCard
               title="Server"
               link={can("admin") ? { to: "/settings/system", label: "Settings" } : undefined}
               footer="Containers belong to Docker, not Windlass. Stop the panel and every project keeps running."
             >
               <dl className="border-t border-hairline">
-                <Row label="Docker">{m?.node.docker_version || "–"}</Row>
-                <Row label="Compose">{m?.node.compose_version || "–"}</Row>
+                <Row label="Docker">{m ? m.node.docker_version || "–" : <Pending failed={metrics.isError} />}</Row>
+                <Row label="Compose">{m ? m.node.compose_version || "–" : <Pending failed={metrics.isError} />}</Row>
                 <Row label="Caddy">
                   {m ? (
                     <span className="inline-flex items-center gap-2">
@@ -283,16 +294,30 @@ export default function Dashboard() {
                       {m.node.caddy_version || "Unavailable"}
                     </span>
                   ) : (
-                    "–"
+                    <Pending failed={metrics.isError} />
                   )}
                 </Row>
-                {update.data && (
+                {/* The update check asks GitHub and can take a second: hold the
+                    row's place so the card does not grow when it answers. */}
+                {can("admin") && (
                   <Row label="Windlass">
-                    {update.data.current_version}
-                    {update.data.update_available ? `, ${update.data.version} available` : ", latest"}
+                    {update.data ? (
+                      <>
+                        {update.data.current_version}
+                        {update.data.update_available ? `, ${update.data.version} available` : ", latest"}
+                      </>
+                    ) : (
+                      <Pending failed={update.isError} />
+                    )}
                   </Row>
                 )}
               </dl>
+            </SideCard>
+
+            {/* Last in its column: docker system df can take seconds on a big
+                host, and its rows would push anything below them. */}
+            <SideCard title="Disk" note="Docker's share" link={{ to: "/settings/system", label: "Details" }}>
+              <DiskRows disk={disk.data} loading={disk.isLoading} />
             </SideCard>
           </div>
         </div>
@@ -301,11 +326,22 @@ export default function Dashboard() {
   );
 }
 
+/**
+ * A value still on its way: a bar, not a dash, because the value is new text
+ * and a dash that turns into a version would slide left in a right-aligned
+ * cell. A failed read shows the dash for good.
+ */
+function Pending({ failed }: { failed: boolean }) {
+  if (failed) return "–";
+  return <span aria-hidden="true" className={skeletonClass("inline-block h-3.5 w-12 align-middle")} />;
+}
+
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-hairline px-[18px] py-2.5 text-sm last:border-b-0">
       <dt className="text-fg3">{label}</dt>
-      <dd className="min-w-0 truncate text-right font-medium text-fg">{children}</dd>
+      {/* flex-1: the cell keeps its box while the value fills in. */}
+      <dd className="min-w-0 flex-1 truncate text-right font-medium text-fg">{children}</dd>
     </div>
   );
 }

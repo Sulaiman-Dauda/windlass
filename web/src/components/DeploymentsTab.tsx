@@ -65,7 +65,7 @@ export default function DeploymentsTab({ project }: { project: string }) {
         <div className="border-b border-hairline px-4 py-3">
           <h3 className="text-sm font-semibold text-fg">History</h3>
         </div>
-        <ul className="max-h-[70vh] divide-y divide-hairline overflow-y-auto">
+        <ul className="max-h-[70vh] divide-y divide-hairline overflow-y-auto [scrollbar-gutter:stable]">
           {waiting && <WaitingRow project={project} w={waiting} after={list[0]?.number} />}
           {list.map((d) => (
             <li key={d.id}>

@@ -92,7 +92,7 @@ export function Modal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-overlay p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-overlay [scrollbar-gutter:stable_both-edges] p-4 backdrop-blur-[2px]"
       style={{ animation: "wl-fade 0.16s var(--ease)" }}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();

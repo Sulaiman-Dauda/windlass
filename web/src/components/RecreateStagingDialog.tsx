@@ -5,6 +5,7 @@ import { useProject } from "../api/projects";
 import { useRecreateStaging, type CreateResult, type StagingStatus } from "../api/staging";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
+import { ReserveWidth } from "../ui/Stable";
 import { Field, Input, Switch } from "../ui/Field";
 import { Callout, FormError } from "../ui/Page";
 import { useToast } from "../ui/Toast";
@@ -42,7 +43,9 @@ export default function RecreateStagingDialog({ st, onClose }: { st: StagingStat
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button type="submit" form="recreate-staging" variant="dangerSolid" disabled={!ready} loading={recreate.isPending}>
-            {recreate.isPending ? "Recreating…" : "Recreate staging"}
+            <ReserveWidth options={["Recreating…", "Recreate staging"]}>
+              {recreate.isPending ? "Recreating…" : "Recreate staging"}
+            </ReserveWidth>
           </Button>
         </>
       }
