@@ -59,6 +59,25 @@ test("a staging behind its branch offers a deploy", async ({ page }) => {
   await expect.poll(fixture.deployed).toBe(true);
 });
 
+test("a button with an icon keeps its width while pending", async ({ page }) => {
+  await panel(page, { behind: true });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  // Holds the deploy open, then hands it to the fixture's handler.
+  await page.route("**/api/v1/projects/app-staging/deployments", async (route) => {
+    if (route.request().method() === "POST") await held;
+    await route.fallback();
+  });
+  await page.goto("/projects/app-staging");
+  const button = page.getByRole("button", { name: "Deploy staging", exact: true });
+  await expect(button).toBeVisible();
+  const idle = (await button.boundingBox())!.width;
+  await button.click();
+  await expect(button).toHaveAttribute("aria-busy", "true");
+  expect((await button.boundingBox())!.width).toBe(idle);
+  release();
+});
+
 test("a viewer sees the notice without the button", async ({ page }) => {
   await panel(page, { role: "viewer", behind: true });
   await page.goto("/projects/app");
