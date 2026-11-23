@@ -258,7 +258,13 @@ fi
 gpasswd -d windlass docker >/dev/null 2>&1 || true
 
 mkdir -p "$DATA_DIR/projects" "$DATA_DIR/data" "$DATA_DIR/backups"
-chown -R windlass:windlass "$DATA_DIR"
+# Everything except the inside of projects/, where bind mounts hold app data
+# owned by the app's own user (Postgres runs as 999): taking that over on
+# every rerun breaks the app, and Windlass creates what it needs there as
+# itself. Like the old chown -R, nothing here follows a symlink.
+chown -h windlass:windlass "$DATA_DIR"
+find "$DATA_DIR" -mindepth 1 -maxdepth 1 -name projects -exec chown -h windlass:windlass {} +
+find "$DATA_DIR" -mindepth 1 -maxdepth 1 ! -name projects -exec chown -R windlass:windlass {} +
 chmod 750 "$DATA_DIR"
 chmod 700 "$DATA_DIR/data"
 chmod 750 "$DATA_DIR/projects" "$DATA_DIR/backups"

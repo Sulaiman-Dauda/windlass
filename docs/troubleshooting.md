@@ -97,8 +97,11 @@ from the filesystem, and the filesystem is authoritative.
 ## Restoring after losing the database
 
 Containers keep running throughout. Put the project directories back under the projects
-directory, start Windlass, and scan. Accounts, audit and deployment history come from a
-platform backup, not from the project directories. See
+directory, start Windlass, and scan. On a systemd install the panel runs as `windlass`, so
+the compose file, `.env` and the Git checkout must be owned by it. Leave a container's data
+directory, such as a Postgres one, owned by the container's user: the installer does not
+take over ownership inside the projects directory. Accounts, audit and
+deployment history come from a platform backup, not from the project directories. See
 [Backups and restore](./backups-and-restore.md).
 
 ## Reporting a bug
