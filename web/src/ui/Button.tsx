@@ -44,7 +44,11 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: Size;
   block?: boolean;
   icon?: IconName;
-  /** Shows a spinner in place of the icon and blocks further clicks. */
+  /**
+   * Shows a spinner and blocks further clicks, without changing the button's
+   * width: the spinner takes the icon's slot, or on a button with no icon it
+   * sits over the label, which is hidden but still names the button.
+   */
   loading?: boolean;
   children?: ReactNode;
 }
@@ -53,6 +57,7 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
   { variant = "secondary", size = "md", block, icon, loading, className, children, disabled, type, ...rest },
   ref,
 ) {
+  const slot = iconSizes[size];
   return (
     <button
       ref={ref}
@@ -62,12 +67,25 @@ export const Button = forwardRef<HTMLButtonElement, Props>(function Button(
       aria-busy={loading || undefined}
       {...rest}
     >
-      {loading ? (
-        <Spinner size={iconSizes[size] - 2} />
+      {icon &&
+        (loading ? (
+          <span className="inline-flex flex-none items-center justify-center" style={{ width: slot, height: slot }}>
+            <Spinner size={slot - 2} />
+          </span>
+        ) : (
+          <Icon name={icon} size={slot} />
+        ))}
+      {loading && !icon ? (
+        <>
+          {/* gap-[inherit] keeps the gaps between several children (a label and a Kbd). */}
+          <span className="inline-flex items-center gap-[inherit] opacity-0">{children}</span>
+          <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center">
+            <Spinner size={slot - 2} />
+          </span>
+        </>
       ) : (
-        icon && <Icon name={icon} size={iconSizes[size]} />
+        children
       )}
-      {children}
     </button>
   );
 });

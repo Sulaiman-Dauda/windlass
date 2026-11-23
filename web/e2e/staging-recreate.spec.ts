@@ -66,12 +66,17 @@ test("recreation confirms flagged keys, survives missing status and shows the ne
   await expect(submit).toBeDisabled();
   await dialog.getByRole("switch", { name: "Reuse staging's current environment values" }).click();
   await expect(submit).toBeEnabled();
+  const idleWidth = (await submit.boundingBox())!.width;
   await submit.click();
   await expect.poll(() => submitted).toEqual({ password: "memberpassword123", acknowledged: true });
   await page.clock.fastForward(16_000);
   await expect.poll(() => fixture.gapReads()).toBeGreaterThan(0);
   await expect(page.getByText("No succeeded deployment yet")).toHaveCount(0);
-  await expect(dialog.getByText("Recreating…")).toBeVisible();
+  // The spinner covers the label, which still names the button, and the
+  // button keeps its width so Cancel does not move (ui/Button.tsx).
+  const pending = dialog.getByRole("button", { name: "Recreating…", exact: true });
+  await expect(pending).toHaveAttribute("aria-busy", "true");
+  expect((await pending.boundingBox())!.width).toBe(idleWidth);
   finish();
   await expect(dialog.getByText("Created app-staging", { exact: true })).toBeVisible();
   await expect(dialog.getByText("fresh-webhook-secret", { exact: true })).toBeVisible();
