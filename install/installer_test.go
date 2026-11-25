@@ -80,20 +80,20 @@ func TestUserSetupOnBusybox(t *testing.T) {
 	bin := filepath.Join(root, "bin")
 	state := filepath.Join(root, "state")
 	for _, dir := range []string{bin, filepath.Join(state, "users"), filepath.Join(state, "groups")} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for name, body := range busyboxStubs {
 		script := "#!/bin/sh\n" + body + "\n"
-		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil { // #nosec G306 -- stubs must be executable to be found on PATH; they live in t.TempDir
 			t.Fatal(err)
 		}
 	}
 
 	script := "set -eu\nDATA_DIR=" + filepath.Join(root, "data") + "\n" + strings.Join(block, "\n") + "\n"
 	runWith := func(extra ...string) ([]byte, error) {
-		cmd := exec.Command("sh", "-c", script)
+		cmd := exec.Command("sh", "-c", script) // #nosec G204 -- fixed interpreter; script is the installer block under test
 		// /usr/sbin is left out so the real useradd is absent, as on Alpine.
 		cmd.Env = append([]string{"PATH=" + bin + ":/usr/bin:/bin", "WL_STATE=" + state}, extra...)
 		return cmd.CombinedOutput()
@@ -108,7 +108,7 @@ func TestUserSetupOnBusybox(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(state, "groups", "windlass")); err != nil {
 		t.Fatalf("windlass group was not created: %v", err)
 	}
-	group, err := os.ReadFile(filepath.Join(state, "users", "windlass"))
+	group, err := os.ReadFile(filepath.Join(state, "users", "windlass")) // #nosec G304 -- path is inside the test's t.TempDir
 	if err != nil {
 		t.Fatalf("windlass user was not created: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestUserSetupOnBusybox(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(state, "groups")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(filepath.Join(state, "groups"), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(state, "groups"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(state, "users", "windlass")); err != nil {
