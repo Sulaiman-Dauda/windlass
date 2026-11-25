@@ -250,8 +250,10 @@ fi
 
 # --- User, directories, service ----------------------------------------------
 if ! id windlass >/dev/null 2>&1; then
+  # busybox adduser -S never creates a group, so make one first. Only skip
+  # addgroup when the group already exists; any other failure stops here.
   useradd --system --home-dir "$DATA_DIR" --shell /usr/sbin/nologin windlass 2>/dev/null \
-    || adduser -S -h "$DATA_DIR" -s /sbin/nologin windlass
+    || { getent group windlass >/dev/null 2>&1 || addgroup -S windlass; adduser -S -G windlass -h "$DATA_DIR" -s /sbin/nologin windlass; }
 fi
 # Direct Docker socket access is root-equivalent. Windlass uses the restricted
 # loopback proxy installed below instead of membership in the docker group.
